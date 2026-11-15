@@ -1,0 +1,57 @@
+# Environment & Secrets
+.env
+.env*.local
+.env.*
+!.env.example
+
+# Local configuration overrides
+config.local.*
+local_settings.*
+
+# Database files
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+*.sqlite-journal
+
+# Python bytecode & cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyd
+
+# Virtual Environments
+.venv/
+venv/
+ENV/
+env/
+env.bak/
+venv.bak/
+
+# Distribution & Build
+dist/
+build/
+*.egg-info/
+*.egg
+*.spec
+
+# IDE & Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs & Runtime Caches
+*.log
+logs/
+audio_cache/
+*.wav
+*.mp3
+*.pcm
+recordings/
+
+# Floorplan & temporary artifacts
+floorplan/
+.claude/
