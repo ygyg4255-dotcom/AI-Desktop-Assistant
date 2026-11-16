@@ -666,7 +666,7 @@ class ChatWindow(QWidget):
         header_layout.addWidget(self._ai_icon)
 
         # Compact label (visible when collapsed or expanded)
-        self._compact_label = QLabel("AI Assistant")
+        self._compact_label = QLabel("Altron")
         self._compact_label.setFont(QFont("Segoe UI", 9, QFont.Bold))
         self._compact_label.setStyleSheet("color: #F8FAFC; border: none; background: transparent;")
         header_layout.addWidget(self._compact_label)
@@ -910,13 +910,13 @@ class ChatWindow(QWidget):
         """Return to wake-word standby mode when 8-second window expires."""
         self._wake_active_until = 0.0
         if self._status_state == "listening" and self._executor.state == AgentState.IDLE:
-            self._set_notch_status("AI Assistant")
+            self._set_notch_status("Altron")
             self._status_label.setText("Standby (say 'Altron')")
             self.update()
 
     def _on_voice_started(self):
         self._status_state = "listening"
-        self._set_notch_status("AI Assistant")
+        self._set_notch_status("Altron")
         self._status_label.setText("Standby (say 'Altron')")
         self.update()
 
@@ -983,7 +983,7 @@ class ChatWindow(QWidget):
             self._voice_worker.resume()
         self._status_state = "listening"
         if self._executor.state == AgentState.IDLE:
-            self._set_notch_status("AI Assistant")
+            self._set_notch_status("Altron")
             self._status_label.setText("Standby (say 'Altron')")
         self.update()
 
@@ -1097,7 +1097,7 @@ class ChatWindow(QWidget):
         self._executor.cancel()
         self._tts_manager.stop()
         self._status_state = "listening"
-        self._set_notch_status("AI Assistant")
+        self._set_notch_status("Altron")
         self._status_label.setText("Cancelled by user")
         self._is_remote_executing = False
         self._current_command_source = "text"
@@ -1147,6 +1147,7 @@ class ChatWindow(QWidget):
             if response.content:
                 self._add_message_bubble("assistant", response.content)
                 send_telegram_message_async(response.content)
+                print(f"[ChatWindow] Dispatched final response ({len(response.content)} chars) to Telegram.")
 
                 is_voice_source = (getattr(self, "_current_command_source", "text") == "voice")
                 if is_voice_source and self._tts_manager.is_enabled and not self._tts_manager.is_muted:
@@ -1157,15 +1158,15 @@ class ChatWindow(QWidget):
                         self._tts_manager.speak(response.content)
                     except Exception:
                         self._status_state = "listening"
-                        self._set_notch_status("AI Assistant")
+                        self._set_notch_status("Altron")
                         self._status_label.setText("Standby (say 'Altron')")
                 else:
                     self._status_state = "listening"
-                    self._set_notch_status("AI Assistant")
+                    self._set_notch_status("Altron")
                     self._status_label.setText("Standby (say 'Altron')")
             else:
                 self._status_state = "listening"
-                self._set_notch_status("AI Assistant")
+                self._set_notch_status("Altron")
                 self._status_label.setText("Standby (say 'Altron')")
         finally:
             self._is_remote_executing = False
@@ -1179,7 +1180,7 @@ class ChatWindow(QWidget):
             self._set_processing_state(False)
             self._active_permission_request = None
             self._status_state = "listening"
-            self._set_notch_status("AI Assistant")
+            self._set_notch_status("Altron")
             self._status_label.setText("Error occurred")
             err_msg = f"⚠️ Error: {error_str}"
             self._add_message_bubble("assistant", err_msg)

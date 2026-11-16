@@ -6,3 +6,5 @@ SpeechRecognition>=3.10.0
 PyAudio>=0.2.14
 pywin32>=306; sys_platform == 'win32'
 comtypes>=1.2.0; sys_platform == 'win32'
+yt-dlp>=2024.0.0
+youtube-transcript-api>=0.6.0

@@ -29,9 +29,9 @@ def load_env_file(env_path: Path) -> dict:
 class Settings:
     """Application settings loaded from configuration."""
 
-    app_name: str = "AI Desktop Assistant"
+    app_name: str = "Altron"
     app_version: str = "0.2.0"
-    app_author: str = "AI Desktop Assistant"
+    app_author: str = "Altron"
 
     # Paths
     data_dir: Path = field(default_factory=lambda: Path.home() / ".ai-desktop-assistant")
@@ -108,3 +108,7 @@ class Settings:
             "TELEGRAM_CHAT_ID",
             os.environ.get("TELEGRAM_CHAT_ID", self.telegram_chat_id)
         )
+        if self.telegram_bot_token:
+            os.environ["TELEGRAM_BOT_TOKEN"] = self.telegram_bot_token
+        if self.telegram_chat_id:
+            os.environ["TELEGRAM_CHAT_ID"] = self.telegram_chat_id

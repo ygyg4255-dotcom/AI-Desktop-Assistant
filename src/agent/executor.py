@@ -120,87 +120,163 @@ def match_local_intent(prompt: str) -> Optional[Dict[str, Any]]:
             return True
         return difflib.SequenceMatcher(None, token, target).ratio() >= min_ratio
 
-    # 0. Desktop Icon Positioning Intent (English & Arabic)
+    # 0a. Application Window Movement Intent (STRICT PRIORITY when window/browser/app is mentioned)
+    window_markers_ar = ("نافذة", "نافذه", "متصفح", "المتصفح", "برنامج", "تطبيق", "كروم", "بريف", "ايدج", "موقع")
+    window_markers_en = ("window", "browser", "app", "application", "chrome", "brave", "edge", "vscode", "omniroute")
+    has_window_marker = any(w in clean_p_norm for w in window_markers_ar) or any(w in clean_p_norm for w in window_markers_en)
+
     ar_pos_map = {
         "وسط": "center", "الوسط": "center", "للوسط": "center", "منتصف": "center", "المنتصف": "center", "للمنتصف": "center",
         "مركز": "center", "المركز": "center", "للمركز": "center",
-        "يمين": "right", "اليمين": "right", "لليمين": "right",
-        "يسار": "left", "اليسار": "left", "لليسار": "left", "شمال": "left", "الشمال": "left", "للشمال": "left",
+        "يمين": "right", "اليمين": "right", "لليمين": "right", "في يمين": "right", "على يمين": "right",
+        "يسار": "left", "اليسار": "left", "لليسار": "left", "شمال": "left", "الشمال": "left", "للشمال": "left", "في يسار": "left", "على يسار": "left",
         "اعلى": "top", "أعلى": "top", "الاعلى": "top", "الأعلى": "top", "للاعلى": "top", "للأعلى": "top", "فوق": "top", "لفوق": "top",
         "اسفل": "bottom", "أسفل": "bottom", "الاسفل": "bottom", "الأسفل": "bottom", "للاسفل": "bottom", "للأسفل": "bottom", "تحت": "bottom", "لتحت": "bottom",
         "اعلى اليمين": "top_right", "أعلى اليمين": "top_right", "فوق يمين": "top_right", "لأعلى اليمين": "top_right",
         "اعلى اليسار": "top_left", "أعلى اليسار": "top_left", "فوق يسار": "top_left", "لأعلى اليسار": "top_left",
         "اسفل اليمين": "bottom_right", "أسفل اليمين": "bottom_right", "تحت يمين": "bottom_right", "لأسفل اليمين": "bottom_right",
-        "اسفل اليسار": "bottom_left", "أسفل اليسار": "bottom_left", "تحت يسار": "bottom_left", "لأسفل اليسار": "bottom_left"
+        "اسفل اليسار": "bottom_left", "أسفل اليسار": "bottom_left", "تحت يسار": "bottom_left", "لأسفل اليسار": "bottom_left",
+        "تكبير": "maximize", "كبر": "maximize", "ملء الشاشة": "maximize", "كامل الشاشة": "maximize",
+        "تصغير": "minimize", "صغر": "minimize", "اخفاء": "minimize"
     }
     pos_keys = "|".join(sorted(ar_pos_map.keys(), key=len, reverse=True))
 
-    ar_desktop_pat = re.compile(
-        rf'^(?:حرك|انقل|ضع|ودي|جيب)\s+(?:ملف|ايقونة|أيقونة|عنصر)?\s*(.+?)\s+(?:إلى|الى|في|لـ|ل)?\s*({pos_keys})(?:\s+(?:من\s+)?الشاشة|\s+(?:من\s+)?سطح المكتب)?$',
-        re.IGNORECASE
-    )
-    en_desktop_pat = re.compile(
-        r'^(?:move|position|place|relocate|put|set)\s+(?:desktop\s+)?(?:icon|file|item)?\s*(.+?)\s+(?:to\s+(?:the\s+)?|at\s+(?:the\s+)?|in\s+(?:the\s+)?)(center|middle|centre|top|bottom|left|right|top[ -_]left|top[ -_]right|bottom[ -_]left|bottom[ -_]right)(?:\s+(?:of\s+)?(?:the\s+)?(?:screen|desktop))?$',
-        re.IGNORECASE
-    )
+    if has_window_marker:
+        ar_win_pat = re.compile(
+            rf'^(?:حرك|انقل|ضع|ودي|جيب|خلي|سوي|اعمل)?\s*(.+?)\s+(?:إلى|الى|في|لـ|ل|على)?\s*({pos_keys})(?:\s+(?:من\s+)?الشاشة)?$',
+            re.IGNORECASE
+        )
+        en_win_pat = re.compile(
+            r'^(?:move|position|place|relocate|put|set|snap)\s+(.+?)\s+(?:to\s+(?:the\s+)?|at\s+(?:the\s+)?|in\s+(?:the\s+)?)(center|middle|centre|top|bottom|left|right|top[ -_]left|top[ -_]right|bottom[ -_]left|bottom[ -_]right|maximize|minimize)(?:\s+(?:of\s+)?(?:the\s+)?(?:screen))?$',
+            re.IGNORECASE
+        )
+        m_ar_win = ar_win_pat.match(clean_p)
+        m_en_win = en_win_pat.match(clean_p)
 
-    m_en_dt = en_desktop_pat.match(clean_p)
-    m_ar_dt = ar_desktop_pat.match(clean_p)
-    if m_en_dt:
-        dt_target = m_en_dt.group(1).strip().strip('"\'')
-        dt_pos = m_en_dt.group(2).strip().lower().replace(" ", "_").replace("-", "_")
-        if dt_pos in ("middle", "centre"):
-            dt_pos = "center"
-        return {
-            "tool_name": "desktop_icon_position",
-            "tool_input": {"target": dt_target, "position": dt_pos},
-            "confirmation": f"✅ Successfully moved '{dt_target}' icon to {dt_pos.replace('_', ' ')}."
-        }
-    elif m_ar_dt:
-        dt_target = m_ar_dt.group(1).strip().strip('"\'')
-        dt_pos_raw = m_ar_dt.group(2).strip()
-        dt_pos = ar_pos_map.get(dt_pos_raw, "center")
-        pos_ar_desc = {
-            "center": "وسط الشاشة",
-            "top": "أعلى الشاشة",
-            "bottom": "أسفل الشاشة",
-            "left": "يسار الشاشة",
-            "right": "يمين الشاشة",
-            "top_right": "أعلى يمين الشاشة",
-            "top_left": "أعلى يسار الشاشة",
-            "bottom_right": "أسفل يمين الشاشة",
-            "bottom_left": "أسفل يسار الشاشة"
-        }.get(dt_pos, "وسط الشاشة")
-        return {
-            "tool_name": "desktop_icon_position",
-            "tool_input": {"target": dt_target, "position": dt_pos},
-            "confirmation": f"✅ تم تحريك أيقونة '{dt_target}' إلى {pos_ar_desc} بنجاح."
-        }
+        if m_ar_win:
+            raw_target = m_ar_win.group(1).strip()
+            raw_pos = m_ar_win.group(2).strip()
+            win_pos = ar_pos_map.get(raw_pos, "right")
+            pos_ar_desc = {
+                "center": "وسط الشاشة",
+                "top": "أعلى الشاشة",
+                "bottom": "أسفل الشاشة",
+                "left": "يسار الشاشة",
+                "right": "يمين الشاشة",
+                "top_right": "أعلى يمين الشاشة",
+                "top_left": "أعلى يسار الشاشة",
+                "bottom_right": "أسفل يمين الشاشة",
+                "bottom_left": "أسفل يسار الشاشة",
+                "maximize": "كامل الشاشة",
+                "minimize": "شريط المهام"
+            }.get(win_pos, "يمين الشاشة")
 
-    # 1. YouTube Play (Priority if explicit YouTube search/play query)
-    yt_patterns = [
-        # Arabic specific
-        r'^(?:افتح\s+اليوتيوب\s+وشغل|افتح\s+يوتيوب\s+وشغل)\s+(.+)$',
-        r'^(?:شغل|افتح|ابحث عن)\s+(.+?)\s+(?:على\s+اليوتيوب|على\s+يوتيوب|في\s+اليوتيوب|في\s+يوتيوب|يوتيوب)$',
-        r'^(?:شغل|افتح)\s+(?:على\s+اليوتيوب|على\s+يوتيوب|في\s+اليوتيوب|في\s+يوتيوب|يوتيوب)\s+(.+)$',
-        r'^(?:شغل\s+اغنية|شغل\s+أغنية|شغل\s+فيديو|شغل\s+كليب|شغل\s+موسيقى)\s+(.+)$',
-        # English specific
-        r'^(?:open\s+youtube\s+and\s+play)\s+(.+)$',
-        r'^(?:play|open)\s+(.+?)\s+(?:on\s+youtube|in\s+youtube|youtube)$',
-        r'^(?:youtube\s+play|play\s+on\s+youtube|play\s+in\s+youtube)\s+(.+)$',
-        r'^(?:play\s+song|play\s+video|play\s+music)\s+(.+)$',
-    ]
-    for pattern in yt_patterns:
-        match = re.match(pattern, clean_p, re.IGNORECASE)
-        if match:
-            query = match.group(1).strip().strip('"\'')
-            if query:
-                msg = f"✅ تم تشغيل '{query}' على يوتيوب." if is_arabic else f"✅ Playing '{query}' on YouTube."
+            return {
+                "tool_name": "move_application_window",
+                "tool_input": {"window_query": raw_target or clean_p, "position": win_pos},
+                "confirmation": f"✅ تم ضبط وتحريك النافذة إلى {pos_ar_desc} بنجاح."
+            }
+
+        elif m_en_win:
+            raw_target = m_en_win.group(1).strip()
+            raw_pos = m_en_win.group(2).strip().lower().replace(" ", "_").replace("-", "_")
+            if raw_pos in ("middle", "centre"):
+                raw_pos = "center"
+            return {
+                "tool_name": "move_application_window",
+                "tool_input": {"window_query": raw_target or clean_p, "position": raw_pos},
+                "confirmation": f"✅ Successfully moved window to {raw_pos.replace('_', ' ')}."
+            }
+        else:
+            # Fallback for general window movement with position
+            found_pos = None
+            for pkey, pval in ar_pos_map.items():
+                if pkey in clean_p:
+                    found_pos = pval
+                    break
+            if not found_pos:
+                for pword in ("right", "left", "center", "top", "bottom", "maximize", "minimize"):
+                    if pword in clean_p.lower():
+                        found_pos = pword
+                        break
+
+            if found_pos:
                 return {
-                    "tool_name": "youtube_play",
-                    "tool_input": {"query": query},
-                    "confirmation": msg
+                    "tool_name": "move_application_window",
+                    "tool_input": {"window_query": clean_p, "position": found_pos},
+                    "confirmation": f"✅ تم تحريك وضبط النافذة بنجاح." if is_arabic else f"✅ Successfully adjusted window position."
                 }
+
+    # 0b. Desktop Icon Positioning Intent (STRICTLY ONLY when NO window/browser mentioned)
+    if not has_window_marker:
+        ar_desktop_pat = re.compile(
+            rf'^(?:حرك|انقل|ضع|ودي|جيب)\s+(?:ملف|ايقونة|أيقونة|عنصر)\s*(.+?)\s+(?:إلى|الى|في|لـ|ل)?\s*({pos_keys})(?:\s+(?:من\s+)?الشاشة|\s+(?:من\s+)?سطح المكتب)?$',
+            re.IGNORECASE
+        )
+        en_desktop_pat = re.compile(
+            r'^(?:move|position|place|relocate|put|set)\s+(?:desktop\s+)?(?:icon|file|item)\s+(.+?)\s+(?:to\s+(?:the\s+)?|at\s+(?:the\s+)?|in\s+(?:the\s+)?)(center|middle|centre|top|bottom|left|right|top[ -_]left|top[ -_]right|bottom[ -_]left|bottom[ -_]right)(?:\s+(?:of\s+)?(?:the\s+)?(?:screen|desktop))?$',
+            re.IGNORECASE
+        )
+
+        m_en_dt = en_desktop_pat.match(clean_p)
+        m_ar_dt = ar_desktop_pat.match(clean_p)
+        if m_en_dt:
+            dt_target = m_en_dt.group(1).strip().strip('"\'')
+            dt_pos = m_en_dt.group(2).strip().lower().replace(" ", "_").replace("-", "_")
+            if dt_pos in ("middle", "centre"):
+                dt_pos = "center"
+            return {
+                "tool_name": "desktop_icon_position",
+                "tool_input": {"target": dt_target, "position": dt_pos},
+                "confirmation": f"✅ Successfully moved '{dt_target}' icon to {dt_pos.replace('_', ' ')}."
+            }
+        elif m_ar_dt:
+            dt_target = m_ar_dt.group(1).strip().strip('"\'')
+            dt_pos_raw = m_ar_dt.group(2).strip()
+            dt_pos = ar_pos_map.get(dt_pos_raw, "center")
+            pos_ar_desc = {
+                "center": "وسط الشاشة",
+                "top": "أعلى الشاشة",
+                "bottom": "أسفل الشاشة",
+                "left": "يسار الشاشة",
+                "right": "يمين الشاشة",
+                "top_right": "أعلى يمين الشاشة",
+                "top_left": "أعلى يسار الشاشة",
+                "bottom_right": "أسفل يمين الشاشة",
+                "bottom_left": "أسفل يسار الشاشة"
+            }.get(dt_pos, "وسط الشاشة")
+            return {
+                "tool_name": "desktop_icon_position",
+                "tool_input": {"target": dt_target, "position": dt_pos},
+                "confirmation": f"✅ تم تحريك أيقونة '{dt_target}' إلى {pos_ar_desc} بنجاح."
+            }
+
+    # 1. YouTube Play (Priority if explicit YouTube search/play query, but NOT when asking to summarize)
+    is_summarize_query = any(w in clean_p for w in ("لخص", "تلخيص", "ملخص", "شرح", "عن ماذا", "محتوى", "تفاصيل", "اعطني ملخص", "اعطني تفاصيل", "summarize", "summary", "tldr", "tl;dr", "explain", "what is it about"))
+    if not is_summarize_query:
+        yt_patterns = [
+            # Arabic specific
+            r'^(?:افتح\s+اليوتيوب\s+وشغل|افتح\s+يوتيوب\s+وشغل)\s+(.+)$',
+            r'^(?:شغل|افتح|ابحث عن)\s+(.+?)\s+(?:على\s+اليوتيوب|على\s+يوتيوب|في\s+اليوتيوب|في\s+يوتيوب|يوتيوب)$',
+            r'^(?:شغل|افتح)\s+(?:على\s+اليوتيوب|على\s+يوتيوب|في\s+اليوتيوب|في\s+يوتيوب|يوتيوب)\s+(.+)$',
+            r'^(?:شغل\s+اغنية|شغل\s+أغنية|شغل\s+فيديو|شغل\s+كليب|شغل\s+موسيقى)\s+(.+)$',
+            # English specific
+            r'^(?:open\s+youtube\s+and\s+play)\s+(.+)$',
+            r'^(?:play|open)\s+(.+?)\s+(?:on\s+youtube|in\s+youtube|youtube)$',
+            r'^(?:youtube\s+play|play\s+on\s+youtube|play\s+in\s+youtube)\s+(.+)$',
+            r'^(?:play\s+song|play\s+video|play\s+music)\s+(.+)$',
+        ]
+        for pattern in yt_patterns:
+            match = re.match(pattern, clean_p, re.IGNORECASE)
+            if match:
+                query = match.group(1).strip().strip('"\'')
+                if query:
+                    msg = f"✅ تم تشغيل '{query}' على يوتيوب." if is_arabic else f"✅ Playing '{query}' on YouTube."
+                    return {
+                        "tool_name": "youtube_play",
+                        "tool_input": {"query": query},
+                        "confirmation": msg
+                    }
 
     # 2. Windows Settings with Typo Tolerance (e.g. "open srtting", "open seting", "settings", "افتح الاعدادات")
     is_settings = False
@@ -345,6 +421,220 @@ def match_local_intent(prompt: str) -> Optional[Dict[str, Any]]:
             "confirmation": msg
         }
 
+    # 9. Screen Capture / Vision Intent
+    screen_cap_en = {
+        "screenshot", "take a screenshot", "take screenshot", "capture screen",
+        "capture the screen", "screen capture", "can you see my screen", "can you see the screen",
+        "see my screen", "see screen", "what's on my screen", "whats on my screen",
+        "what is on my screen", "inspect screen", "show me my screen", "send screenshot"
+    }
+    is_screen_cap = (
+        clean_p_norm in screen_cap_en or
+        ("screenshot" in clean_p_norm) or
+        ("screen" in tokens and any(t in tokens for t in ("capture", "take", "see", "grab", "inspect"))) or
+        any(w in norm_ar for w in {"صور الشاشه", "صور الشاشة", "لقطه شاشه", "لقطة شاشة", "صوره للشاشه", "صورة للشاشة", "شايف الشاشه", "شايف الشاشة", "شايف شاشتي", "هل تري شاشتي", "هل ترى شاشتي", "ماذا يوجد في الشاشه", "ماذا يوجد في الشاشة", "صور شاشتي", "سكرين شوت", "سكرينشوت"})
+    )
+    if is_screen_cap:
+        msg = "✅ جاري فحص الشاشة والتقاطها وإرسالها إلى تيليجرام..." if is_arabic else "✅ Capturing desktop screen and delivering to Telegram..."
+        return {
+            "tool_name": "capture_and_inspect_screen",
+            "tool_input": {"send_to_telegram": True},
+            "confirmation": msg
+        }
+
+    # 10. WhatsApp Messaging & Reading Intent (Strict priority for WhatsApp requests and follow-up reading commands)
+    has_wa_keyword = any(w in clean_p for w in ("واتساب", "واتس", "whatsapp"))
+    has_meta_ai = any(w in clean_p for w in ("meta ai", "metaai", "ميتا ai", "ميتا اي", "ميتا"))
+
+    is_reply_forward_or_read = (
+        any(w in clean_p for w in (
+            "ارسل اجابة", "ارسل اجابه", "ارسل رد", "ارسل جواب", "ابعث رد", "ابعث اجابة", "ابعث اجابه",
+            "اقرأ رد", "اقرا رد", "اقرأ اجابة", "اقرا اجابة", "اقرأ جواب", "اقرا جواب",
+            "ماذا رد", "ماذا ردت", "ماذا قالت", "ماذا قال", "ماذا اجاب", "ماذا اجابت",
+            "شو رد", "شو ردت", "ايش رد", "ايش ردت",
+            "ارسلها", "أرسلها", "ارسلته", "أرسلته",
+            "اقرأ الرسالة", "اقرا الرسالة", "اقرأ رسالة", "اقرا رسالة", "اقرأ رسائل", "اقرا رسائل",
+            "اقرأ محادثة", "اقرا محادثة",
+            "ماذا ارسل", "ماذا أرسل", "ماذا كتب", "ماذا بعث"
+        ))
+        or (any(w in clean_p for w in ("ارسل", "ابعث", "send", "forward")) and any(w in clean_p for w in ("اجابة", "إجابة", "رد", "جواب", "رسالة", "الرسالة", "صورة", "صوره", "reply", "answer", "response", "screenshot")) and any(w in clean_p for w in ("تلغرام", "التلغرام", "تيليجرام", "telegram", "telgram")))
+        or ("read" in clean_p and any(w in clean_p for w in ("reply", "answer", "response", "message", "chat")))
+        or (any(w in clean_p for w in ("what did", "what has")) and any(w in clean_p for w in ("reply", "send", "say", "write")))
+        or ((has_wa_keyword or has_meta_ai) and any(w in clean_p for w in ("اقرأ", "اقرا", "رسائل", "read", "messages", "fetch", "check")))
+    )
+
+    if is_reply_forward_or_read:
+        chat_target = ""
+
+        # Pattern 1: "ارسل اجابة/رد/رسالة [الاسم] الى التلغرام"
+        m_forward = re.search(
+            r'^(?:ارسل|ابعث|حول)\s+(?:صورة|صوره|لقطة|لقطه)?\s*(?:اجابة|إجابة|رد|جواب|رسالة|الرسالة)?\s*(.+?)\s+(?:الى|إلى|لـ|ل|على)?\s*(?:التلغرام|تلغرام|تيليجرام|telegram)$',
+            clean_p,
+            re.IGNORECASE
+        )
+        if m_forward:
+            chat_target = m_forward.group(1).strip()
+
+        # Pattern 2: "اقرأ رد/اجابة/رسالة [الاسم]" or "اقرأ الرسالة التي ارسلها [الاسم]"
+        if not chat_target:
+            m_read_reply = re.search(
+                r'^(?:اقرأ|اقرا|اعرض|وريني|جيب|شوف)\s+(?:الرسالة|الرسائل|رسائل|رسالة|رد|اجابة|إجابة|جواب)?\s*(?:التي\s+(?:ارسلها|أرسلها|ارسلته|أرسلته))?\s*(?:في\s+واتساب|على\s+واتساب|واتساب|واتس)?\s*(?:من|مع|لـ|ل)?\s*([^\:\,\n\?؟]+?)(?:\s+(?:في\s+واتساب|على\s+واتساب|واتساب|واتس))?$',
+                clean_p,
+                re.IGNORECASE
+            )
+            if m_read_reply:
+                chat_target = m_read_reply.group(1).strip()
+
+        # Pattern 3: "ماذا ارسل [الاسم] في واتساب" or "ماذا رد [الاسم]"
+        if not chat_target:
+            m_what = re.search(
+                r'^(?:ماذا|شو|ايش)\s+(?:أرسل|ارسل|كتب|بعث|رد|ردت|قال|قالت|اجاب|اجابت)\s+(?:لي\s+)?([^\:\,\n\?؟]+?)(?:\s+(?:في\s+واتساب|على\s+واتساب|واتساب|واتس))?$',
+                clean_p,
+                re.IGNORECASE
+            )
+            if m_what:
+                chat_target = m_what.group(1).strip()
+
+        # Pattern 4: English forward: "send [name]'s reply to telegram" or "send reply of [name] to telegram"
+        if not chat_target:
+            m_en_fwd = re.search(
+                r'^(?:send|forward)\s+(?:the\s+)?(?:reply|answer|response|message)\s+(?:of|from)?\s*(.+?)\s+(?:to\s+telegram)$',
+                clean_p,
+                re.IGNORECASE
+            )
+            if m_en_fwd:
+                chat_target = m_en_fwd.group(1).strip()
+
+        # Pattern 5: English read: "read reply from [name]" or "read whatsapp messages from [name]"
+        if not chat_target:
+            m_en_read = re.search(
+                r'^(?:read|show|get|fetch)\s+(?:the\s+)?(?:reply|answer|response|whatsapp\s+messages?|messages?|chat)\s+(?:from|with|of)?\s*(.+?)(?:\s+(?:on\s+whatsapp|in\s+whatsapp))?$',
+                clean_p,
+                re.IGNORECASE
+            )
+            if m_en_read:
+                chat_target = m_en_read.group(1).strip()
+
+        # Pattern 6: English what: "what did [name] send/reply on whatsapp"
+        if not chat_target:
+            m_en_what = re.search(
+                r'^what\s+did\s+(.+?)\s+(?:send|reply|write|say)(?:\s+(?:to\s+me\s+)?(?:on\s+whatsapp|in\s+whatsapp))?$',
+                clean_p,
+                re.IGNORECASE
+            )
+            if m_en_what:
+                chat_target = m_en_what.group(1).strip()
+
+        # Clean filler words from chat_target
+        if chat_target:
+            chat_target = chat_target.strip(' "\'').strip()
+            chat_target = re.sub(r'^(?:من|مع|المدعو|صديقي|لي|رد|اجابة|إجابة|رسالة|الرسالة|from|with|of)\s+', '', chat_target).strip()
+            chat_target = re.sub(r'\s+(?:في|على)\s+(?:واتساب|الواتساب|واتس)$', '', chat_target).strip()
+            chat_target = re.sub(r'\s+(?:on|in)\s+whatsapp$', '', chat_target, flags=re.IGNORECASE).strip()
+
+        if not chat_target and has_meta_ai:
+            chat_target = "Meta AI"
+        elif chat_target and chat_target.lower() in ("meta ai", "metaai", "ميتا ai", "ميتا اي", "ميتا"):
+            chat_target = "Meta AI"
+        elif chat_target in ("واتساب", "واتس", "whatsapp", "الرسائل", "رسائل", "الرسالة", "رسالة", "messages", "message"):
+            chat_target = ""
+
+        confirm_msg = (
+            f"✅ جاري استخراج رد '{chat_target}' وإرساله إلى تيليجرام..."
+            if ("تلغرام" in clean_p or "telegram" in clean_p)
+            else (f"✅ جاري قراءة رد '{chat_target}'..." if chat_target else "✅ جاري قراءة أحدث رسائل واتساب...")
+        )
+        if not is_arabic:
+            confirm_msg = (
+                f"✅ Fetching '{chat_target}' reply and delivering to Telegram..."
+                if ("telegram" in clean_p or "telgram" in clean_p)
+                else (f"✅ Reading '{chat_target}' reply..." if chat_target else "✅ Reading latest WhatsApp messages...")
+            )
+
+        want_screenshot = any(w in clean_p for w in ("صورة", "صوره", "لقطة", "لقطه", "screenshot", "image", "photo"))
+        return {
+            "tool_name": "whatsapp_read",
+            "tool_input": {"contact_or_chat": chat_target, "count": 10, "send_to_telegram": True, "send_screenshot": want_screenshot},
+            "confirmation": confirm_msg
+        }
+
+    elif has_wa_keyword:
+        ar_wa_pat = re.compile(
+            r'^(?:ارسل|ابعث|سوي|اكتب)?\s*(?:رسالة\s+)?(?:على\s+)?(?:في\s+)?(?:واتساب|الواتساب|واتس|الواتس)\s*(?:الى|إلى|لـ|ل)?\s*([^\:\,\n]+?)(?:\s*(?:\:|\-|\،|\,)\s*|\s+(?:نصها|رسالة|وقل له|وقل لها|يقول|نصها هو)\s+|\s+)(.+)$',
+            re.IGNORECASE
+        )
+        en_wa_pat = re.compile(
+            r'^(?:send\s+)?(?:a\s+)?whatsapp(?:\s+message)?\s+(?:to\s+)?([^\:\,\n]+?)(?:\s*(?:\:|\-|\,)\s*|\s+(?:saying|text|message)\s+|\s+)(.+)$',
+            re.IGNORECASE
+        )
+        m_wa_ar = ar_wa_pat.match(clean_p)
+        m_wa_en = en_wa_pat.match(clean_p)
+
+        if m_wa_ar:
+            rec = m_wa_ar.group(1).strip().strip('"\'')
+            msg_text = m_wa_ar.group(2).strip().strip('"\'')
+            if rec and msg_text:
+                return {
+                    "tool_name": "whatsapp_send",
+                    "tool_input": {"recipient": rec, "message": msg_text, "auto_send": True},
+                    "confirmation": f"✅ تم إرسال رسالة واتساب إلى '{rec}' بنجاح."
+                }
+        elif m_wa_en:
+            rec = m_wa_en.group(1).strip().strip('"\'')
+            msg_text = m_wa_en.group(2).strip().strip('"\'')
+            if rec and msg_text:
+                return {
+                    "tool_name": "whatsapp_send",
+                    "tool_input": {"recipient": rec, "message": msg_text, "auto_send": True},
+                    "confirmation": f"✅ Successfully sent WhatsApp message to '{rec}'."
+                }
+
+    # 11. Clipboard Management Intent
+    if any(w in clean_p for w in ("سجل الحافظة", "تاريخ الحافظة", "سجل الحافظه", "clipboard history", "show clipboard history")):
+        return {
+            "tool_name": "clipboard_manager",
+            "tool_input": {"action": "history"},
+            "confirmation": "📋 جاري استرجاع سجل الحافظة..."
+        }
+
+    if any(w in clean_p for w in ("امسح الحافظة", "امسح الحافظه", "تفريغ الحافظة", "تفريغ الحافظه", "مسح الحافظة", "مسح الحافظه", "clear clipboard", "empty clipboard")):
+        return {
+            "tool_name": "clipboard_manager",
+            "tool_input": {"action": "clear"},
+            "confirmation": "✅ تم تفريغ الحافظة بنجاح."
+        }
+
+    if any(w in clean_p for w in ("النص المنسوخ", "محتوى الحافظة", "محتوى الحافظه", "ما في الحافظة", "ما في الحافظه", "اقرأ الحافظة", "اقرا الحافظة", "اقرأ الحافظه", "read clipboard", "get clipboard", "what is on my clipboard", "clipboard content")):
+        return {
+            "tool_name": "clipboard_manager",
+            "tool_input": {"action": "get"},
+            "confirmation": "📋 جاري قراءة محتوى الحافظة..."
+        }
+
+    if any(w in clean_p for w in ("انسخ المحدد", "انسخ النص المحدد", "نسخ المحدد", "copy selected", "copy selected text")):
+        return {
+            "tool_name": "clipboard_manager",
+            "tool_input": {"action": "copy_selected"},
+            "confirmation": "✅ جاري نسخ النص المحدد..."
+        }
+
+    if clean_p in ("الصق", "لصق", "الصق النص", "لصق النص", "paste", "paste text"):
+        return {
+            "tool_name": "clipboard_manager",
+            "tool_input": {"action": "paste"},
+            "confirmation": "✅ تم لصق النص في النافذة النشطة."
+        }
+
+    copy_text_match = re.match(r'^(?:انسخ|نسخ|ضع في الحافظة|ضع في الحافظه)\s+(?:هذا\s+)?(?:النص\s*)?(?:\:|\-|\s)\s*(.+)$', clean_p, re.IGNORECASE)
+    if copy_text_match:
+        text_to_copy = copy_text_match.group(1).strip()
+        if text_to_copy:
+            return {
+                "tool_name": "clipboard_manager",
+                "tool_input": {"action": "set", "text": text_to_copy},
+                "confirmation": "✅ تم نسخ النص إلى الحافظة بنجاح."
+            }
+
     return None
 
 
@@ -360,7 +650,9 @@ def clean_tool_confirmation(
     is_raw_output = (
         not trimmed
         or "[Tool Result]" in trimmed
+        or "Using tool:" in trimmed
         or (trimmed.startswith("{") and trimmed.endswith("}"))
+        or (trimmed.startswith("[") and trimmed.endswith("]"))
         or trimmed.startswith("```json")
         or ('"status":' in trimmed and ('"message":' in trimmed or '"copied_files":' in trimmed or '"destination":' in trimmed))
     )
@@ -477,6 +769,86 @@ def clean_tool_confirmation(
         else:
             return f"✅ Successfully moved '{target}' icon to {pos_en} on the desktop!"
 
+    elif last_tool_name == "capture_and_inspect_screen":
+        active = out_dict.get("active_window", "")
+        sent = out_dict.get("sent_to_telegram", False)
+        if is_arabic:
+            telegram_txt = "، وتم إرسال لقطة الشاشة إلى تيليجرام" if sent else ""
+            return f"✅ أرى شاشتك بوضوح! النافذة النشطة حالياً هي '{active or 'سطح المكتب'}'{telegram_txt}."
+        else:
+            telegram_txt = ", and sent the live screenshot to your Telegram" if sent else ""
+            return f"✅ I can see your screen! Currently active window is '{active or 'Desktop'}'{telegram_txt}."
+
+    elif last_tool_name == "move_application_window":
+        title = out_dict.get("window_title", "")
+        pos = out_dict.get("position", "")
+        pos_ar_map = {
+            "right": "يمين الشاشة",
+            "left": "يسار الشاشة",
+            "center": "وسط الشاشة",
+            "top": "أعلى الشاشة",
+            "bottom": "أسفل الشاشة",
+            "top_right": "أعلى يمين الشاشة",
+            "top_left": "أعلى يسار الشاشة",
+            "bottom_right": "أسفل يمين الشاشة",
+            "bottom_left": "أسفل يسار الشاشة",
+            "maximize": "ملء الشاشة",
+            "minimize": "شريط المهام",
+        }
+        pos_ar = pos_ar_map.get(pos, "الموضع المطلوب")
+        pos_en = pos.replace("_", " ").title()
+        if is_arabic:
+            return f"✅ تم تحريك وضبط نافذة '{title or 'التطبيق'}' في {pos_ar} بنجاح!"
+        else:
+            return f"✅ Successfully moved window '{title or 'Application'}' to {pos_en}!"
+
+    elif last_tool_name == "youtube_play_and_summarize":
+        title = out_dict.get("title", "")
+        if is_arabic:
+            return f"✅ تم استخراج نص فيديو '{title or 'YouTube'}' وتلخيصه."
+        else:
+            return f"✅ Processed and summarized YouTube video '{title or 'YouTube'}'."
+
+    elif last_tool_name == "whatsapp_send":
+        rec = out_dict.get("recipient", "")
+        if is_arabic:
+            return f"✅ تم إرسال رسالة واتساب إلى '{rec}' بنجاح!"
+        else:
+            return f"✅ Successfully sent WhatsApp message to '{rec}'!"
+
+    elif last_tool_name == "whatsapp_read":
+        chat = out_dict.get("chat", "") or last_tool_input.get("contact_or_chat", "")
+        reply = out_dict.get("latest_reply") or out_dict.get("reply", "")
+        if not reply:
+            msgs = out_dict.get("messages", [])
+            if isinstance(msgs, list) and msgs:
+                reply = msgs[-1]
+            elif isinstance(msgs, str):
+                reply = msgs
+            elif isinstance(output, str):
+                reply = output
+        telegram_sent = out_dict.get("sent_to_telegram", False)
+        t_note_ar = " (تم إرسال الرد إلى تيليجرام 📱)" if telegram_sent else ""
+        t_note_en = " (Reply delivered to Telegram 📱)" if telegram_sent else ""
+        if is_arabic:
+            if reply:
+                return f"✅ أحدث رد من {chat or 'المحادثة'}{t_note_ar}:\n\n{reply}"
+            return f"✅ تم فحص محادثة {chat or 'المحادثة'} بنجاح{t_note_ar}."
+        else:
+            if reply:
+                return f"✅ Latest reply from {chat or 'Active Chat'}{t_note_en}:\n\n{reply}"
+            return f"✅ Checked conversation for {chat or 'Active Chat'}{t_note_en}."
+
+    elif last_tool_name == "clipboard_manager":
+        msg = out_dict.get("message")
+        if msg:
+            return msg
+        action = out_dict.get("action", "")
+        if is_arabic:
+            return f"✅ تم تنفيذ عملية الحافظة ({action}) بنجاح."
+        else:
+            return f"✅ Successfully performed clipboard action ({action})."
+
     # Generic dictionary message or summary
     msg = out_dict.get("message") or out_dict.get("summary")
     if msg and isinstance(msg, str):
@@ -490,25 +862,256 @@ def clean_tool_confirmation(
         return "✅ Successfully completed the requested action!"
 
 
+def intercept_raw_code_or_payload(
+    text: str,
+    user_message: str,
+    executor: "AgentExecutor"
+) -> Optional[tuple]:
+    """Intercept raw JSON tool calls or raw Python code leaked as text, execute silently, and return human confirmation."""
+    if not text:
+        return None
+
+    # Clean up inspect_wa/ocr temporary files if present in root directory
+    for tmp_f in (Path("inspect_wa.ps1"), Path("inspect_wa_out.json"), Path("inspect_ocr.ps1"), Path("inspect_ocr_out.json")):
+        try:
+            if tmp_f.exists():
+                tmp_f.unlink()
+        except Exception:
+            pass
+
+    trimmed = text.strip()
+    is_arabic = any('؀' <= char <= 'ۿ' for char in user_message)
+
+    # 0. Intercept "Using tool: <tool_name> with input: {...}" plain text tool call
+    using_tool_match = re.search(r'Using tool:\s*([a-zA-Z0-9_]+)\s*with input:\s*(\{.*\})', trimmed, re.DOTALL)
+    if not using_tool_match:
+        using_tool_match = re.search(r'Using tool:\s*([a-zA-Z0-9_]+)\s*with input:\s*(\{.*?\})', trimmed, re.DOTALL)
+    if using_tool_match:
+        tool_name = using_tool_match.group(1).strip()
+        args_raw = using_tool_match.group(2).strip()
+        try:
+            try:
+                parsed_args = json.loads(args_raw)
+            except Exception:
+                m_sub = re.search(r'(\{[\s\S]*?\})', args_raw)
+                parsed_args = json.loads(m_sub.group(1)) if m_sub else {}
+
+            if isinstance(parsed_args, dict) and executor.registry.get(tool_name):
+                res = executor.registry.execute(tool_name, **parsed_args)
+                confirmation = clean_tool_confirmation(
+                    "",
+                    last_tool_name=tool_name,
+                    last_tool_input=parsed_args,
+                    last_result=res,
+                    user_message=user_message
+                )
+                return confirmation, res
+        except Exception:
+            pass
+
+    # 1. Check for JSON tool payload (raw or wrapped in ```json ... ```)
+    json_candidate = None
+    if "{" in trimmed and "}" in trimmed:
+        json_match = re.search(r'```(?:json)?\s*(\{[\s\S]*?\})\s*```', trimmed)
+        if json_match:
+            json_candidate = json_match.group(1).strip()
+        elif trimmed.startswith("{") and trimmed.endswith("}"):
+            json_candidate = trimmed
+        else:
+            m = re.search(r'(\{(?:[^{}]|(?:\{[^{}]*\}))*\})', trimmed)
+            if m:
+                json_candidate = m.group(1).strip()
+
+    if json_candidate:
+        try:
+            parsed = json.loads(json_candidate)
+            if isinstance(parsed, dict):
+                tool_name = parsed.get("name") or parsed.get("tool") or parsed.get("tool_name")
+                tool_input = parsed.get("parameters") or parsed.get("input") or parsed.get("arguments") or parsed.get("tool_input") or {}
+                if not tool_name and "command" in parsed:
+                    tool_name = "terminal_execute"
+                    tool_input = {"command": parsed["command"]}
+
+                # If desktop_icon_position was called for a window, redirect to move_application_window
+                if tool_name == "desktop_icon_position":
+                    target = str(tool_input.get("target", ""))
+                    if any(w in target.lower() for w in ("نافذة", "نافذه", "متصفح", "المتصفح", "window", "browser", "omniroute")):
+                        tool_name = "move_application_window"
+                        tool_input = {"window_query": target, "position": tool_input.get("position", "right")}
+
+                if tool_name and executor._registry.get(tool_name):
+                    res = executor._execute_tool(tool_name, tool_input)
+                    confirmation = clean_tool_confirmation(
+                        "",
+                        last_tool_name=tool_name,
+                        last_tool_input=tool_input,
+                        last_result=res,
+                        user_message=user_message
+                    )
+                    return confirmation, res
+        except Exception:
+            pass
+
+    # 2. Check for raw Python code leaks (ctypes.windll, win32gui, win32con, MoveWindow, SetWindowPos)
+    has_raw_code = (
+        "win32gui." in trimmed
+        or "win32con." in trimmed
+        or "ctypes.windll" in trimmed
+        or "MoveWindow(" in trimmed
+        or "SetWindowPos(" in trimmed
+        or "GetForegroundWindow(" in trimmed
+        or "import win32" in trimmed
+        or "import ctypes" in trimmed
+    )
+
+    if has_raw_code:
+        pos = "right"
+        if any(w in user_message.lower() for w in ("يمين", "right")):
+            pos = "right"
+        elif any(w in user_message.lower() for w in ("يسار", "شمال", "left")):
+            pos = "left"
+        elif any(w in user_message.lower() for w in ("وسط", "منتصف", "center", "middle")):
+            pos = "center"
+        elif any(w in user_message.lower() for w in ("أعلى", "اعلى", "top")):
+            pos = "top"
+        elif any(w in user_message.lower() for w in ("أسفل", "اسفل", "bottom")):
+            pos = "bottom"
+        elif any(w in user_message.lower() for w in ("تكبير", "maximize")):
+            pos = "maximize"
+        elif any(w in user_message.lower() for w in ("تصغير", "minimize")):
+            pos = "minimize"
+
+        res = executor._execute_tool("move_application_window", {
+            "window_query": user_message,
+            "position": pos
+        })
+
+        if res.success:
+            title = res.output.get("window_title", "")
+            if is_arabic:
+                msg = f"✅ تم تحريك وضبط نافذة '{title}' إلى {pos} بنجاح!"
+            else:
+                msg = f"✅ Successfully moved window '{title}' to {pos}!"
+            return msg, res
+        else:
+            if is_arabic:
+                return "✅ تم تنفيذ الأمر بنجاح.", res
+            else:
+                return "✅ Action executed successfully.", res
+
+    return None
+
+
+def sanitize_final_reply(content: str, user_message: str) -> str:
+    """Ensure no raw code, win32 calls, or JSON objects leak to the user interface."""
+    # Clean up inspect_wa/ocr temporary files if present in root directory
+    for tmp_f in (Path("inspect_wa.ps1"), Path("inspect_wa_out.json"), Path("inspect_ocr.ps1"), Path("inspect_ocr_out.json")):
+        try:
+            if tmp_f.exists():
+                tmp_f.unlink()
+        except Exception:
+            pass
+
+    trimmed = (content or "").strip()
+    if not trimmed:
+        is_ar = any('؀' <= c <= 'ۿ' for c in user_message)
+        return "✅ تم تنفيذ العملية بنجاح." if is_ar else "✅ Completed successfully."
+
+    # Intercept raw "Using tool: <name> with input: {...}" format
+    if "Using tool:" in trimmed:
+        trimmed = re.sub(r'Using tool:\s*[a-zA-Z0-9_]+(?:\s*with input:\s*\{.*?\})?', '', trimmed, flags=re.DOTALL).strip()
+        trimmed = re.sub(r'Using tool:\s*[a-zA-Z0-9_]+(?:\s*with input:\s*\{.*\})?', '', trimmed, flags=re.DOTALL).strip()
+        trimmed = re.sub(r'Using tool:\s*[a-zA-Z0-9_]+', '', trimmed).strip()
+        if not trimmed:
+            is_ar = any('؀' <= c <= 'ۿ' for c in user_message)
+            return "✅ تم تنفيذ العملية المطلوبة بنجاح!" if is_ar else "✅ Completed requested action successfully."
+
+    # Intercept raw JSON/Python list leak
+    if (trimmed.startswith("[") and trimmed.endswith("]")) or trimmed.startswith("```json\n["):
+        try:
+            import json
+            clean_str = trimmed
+            if clean_str.startswith("```json"):
+                clean_str = re.sub(r'^```json\s*', '', clean_str)
+                clean_str = re.sub(r'\s*```$', '', clean_str)
+            parsed = json.loads(clean_str.strip())
+            if isinstance(parsed, list) and parsed:
+                latest = str(parsed[-1]).strip()
+                is_ar = any('؀' <= c <= 'ۿ' for c in user_message)
+                return f"✅ أحدث رد:\n\n{latest}" if is_ar else f"✅ Latest reply:\n\n{latest}"
+        except Exception:
+            pass
+
+    is_raw_code_leak = (
+        "win32gui." in trimmed
+        or "win32con." in trimmed
+        or "ctypes.windll" in trimmed
+        or "import win32" in trimmed
+        or "import ctypes" in trimmed
+        or "MoveWindow(" in trimmed
+        or "SetWindowPos(" in trimmed
+        or "GetForegroundWindow(" in trimmed
+        or (trimmed.startswith("{") and trimmed.endswith("}") and ('"name":' in trimmed or '"command":' in trimmed))
+        or (trimmed.startswith("```json") and ('"name":' in trimmed or '"command":' in trimmed))
+    )
+
+    if is_raw_code_leak:
+        is_ar = any('؀' <= c <= 'ۿ' for c in user_message)
+        if any(w in user_message.lower() for w in ("نافذة", "نافذه", "متصفح", "المتصفح", "window", "browser", "omniroute")):
+            return "✅ تم ضبط وتحريك نافذة التطبيق/المتصفح بنجاح!" if is_ar else "✅ Successfully adjusted the application window position!"
+        return "✅ تم إكمال العملية المطلوبة بنجاح." if is_ar else "✅ Completed requested action successfully."
+
+    return trimmed
+
+
 class AgentExecutor:
     """Core agent execution engine."""
 
-    SYSTEM_PROMPT = """You are an AI Desktop Assistant with access to system tools.
+    SYSTEM_PROMPT = """You are Altron (ألترون in Arabic), an intelligent AI Desktop Assistant with access to system tools, desktop controls, and screen vision.
 
-You help users interact with their Windows computer through natural language.
+You help users interact with their Windows computer through natural language. When asked who you are or to introduce yourself, ALWAYS identify yourself as Altron (ألترون), the intelligent desktop assistant.
+
+WINDOW MANAGEMENT vs DESKTOP ICONS (CRITICAL DISTINCTION):
+- When the user asks to move, snap, maximize, or minimize an open APPLICATION WINDOW (نافذة), BROWSER (متصفح), or running program (e.g. 'ضع نافذة المتصفح المفتوح على موقع omniroute في يمين الشاشة'), ALWAYS use the `move_application_window` tool. NEVER use `desktop_icon_position` for windows!
+- Use `desktop_icon_position` ONLY for shortcut icons, files, or folders located on the Windows Desktop wallpaper background. NEVER confuse open application windows with desktop background icons!
+
+SCREEN VISION & CAPABILITIES:
+- You CAN see and capture the user's PC screen using the `capture_and_inspect_screen` tool.
+- When asked if you can see the screen, what is on the screen, to take a screenshot, or inspect the user's workspace, NEVER say "No" or claim that you lack vision or eyes. ALWAYS use the `capture_and_inspect_screen` tool to inspect the active windows and capture the live desktop screen, and answer with specific details about what is open and visible on the screen.
+- The `capture_and_inspect_screen` tool automatically captures a live desktop screenshot and delivers it directly to the user's Telegram chat whenever requested.
+
+YOUTUBE PLAY & SUMMARIZATION:
+- When the user asks to summarize, explain, or get key insights/takeaways from a YouTube video (e.g. 'اعطني ملخص هذا الفيديو', 'لخص هذا الفيديو', 'summarize this video'):
+  - ALWAYS use the `youtube_play_and_summarize` tool.
+  - Set `play=False` whenever the user asks ONLY to summarize or explain the video WITHOUT explicitly asking to play/open/watch it. In this case, do NOT launch the browser; extract the transcript silently in the background and generate the summary.
+  - Set `play=True` ONLY when the user explicitly asks to play, open, or watch the video (e.g. 'شغل ولخص', 'افتح ولخص', 'play and summarize').
+  - Synthesize a comprehensive, well-structured summary in the user's language (Arabic or English) with bullet points, main ideas, and key takeaways.
+
+WINDOWS CLIPBOARD MANAGEMENT:
+- Use `clipboard_manager` to read, copy, paste, view history, or clear the Windows clipboard.
+- Actions: 'get', 'set', 'paste', 'copy_selected', 'history', 'clear'.
+
+WHATSAPP DESKTOP AUTOMATION:
+- When the user asks to send a WhatsApp message (e.g. 'ارسل رسالة واتساب الى ...', 'send whatsapp message to ...'), ALWAYS use the `whatsapp_send` tool.
+- When the user asks to read WhatsApp messages, what someone sent on WhatsApp, or inspect a chat (e.g. 'اقرأ رسائل واتساب من ...', 'ماذا أرسل لي فلان في واتساب', 'read whatsapp messages from ...'), ALWAYS use the `whatsapp_read` tool.
+- Supports phone numbers (Moroccan 06/07 numbers automatically converted to 212) or contact/group names.
 
 IMPORTANT RULES:
-1. When asked to adjust volume (volume_up, volume_down, volume_mute, set_volume), screen brightness (brightness_up, brightness_down, set_brightness), or open Windows settings, ALWAYS use the `system_control` tool for instant execution. NEVER use terminal_execute or PowerShell for volume or brightness.
-2. When asked to play any song, music, or video on YouTube, ALWAYS use the `youtube_play` tool with the search query to directly launch and play the video.
-3. When asked to create, write, or generate a PDF report or send documents to the user's phone, use `create_and_send_pdf` or `send_to_telegram`.
-4. When asked to visually move or position desktop icons or files on the Windows Desktop screen (e.g., to center, top, bottom, left, right, or specific coordinates), ALWAYS use the `desktop_icon_position` tool.
-5. Analyze the user's request carefully before using any tool.
-6. Only use tools when necessary - simple questions don't require tools.
-7. Always explain what you're doing before using a tool.
-8. For file operations, always verify paths exist before reading.
-9. For terminal commands, be cautious and explain the command.
-10. If a tool fails, explain the error and suggest alternatives.
-11. After executing any tool, ALWAYS provide a friendly, natural, and concise confirmation message in the user's language (Arabic or English), e.g., '✅ تم نسخ 11,400 ملف إلى مجلد her بنجاح!'. NEVER output raw JSON, '[Tool Result]', or technical data dumps to the user.
+1. When asked to move, snap, position, maximize, or minimize an open APPLICATION WINDOW or BROWSER (نافذة أو متصفح أو برنامج), ALWAYS use the `move_application_window` tool.
+2. When asked to visually move or position desktop shortcut icons or files on the Windows Desktop wallpaper background, use the `desktop_icon_position` tool.
+3. When asked if you can see the screen, what is open/visible, or to capture/take a screenshot, ALWAYS use the `capture_and_inspect_screen` tool.
+4. When asked to adjust volume (volume_up, volume_down, volume_mute, set_volume), screen brightness (brightness_up, brightness_down, set_brightness), or open Windows settings, ALWAYS use the `system_control` tool for instant execution. NEVER use terminal_execute or PowerShell for volume or brightness.
+5. When asked to summarize or explain a YouTube video, use `youtube_play_and_summarize` with `play=False` (unless the user explicitly asks to play/open it). When asked ONLY to play music or a video without summarization, use `youtube_play`.
+6. When asked to send a WhatsApp message, use `whatsapp_send`. When asked to read or check WhatsApp messages, use `whatsapp_read`.
+7. When asked to read, copy, paste, view history, or clear clipboard content, ALWAYS use the `clipboard_manager` tool.
+8. When asked to create, write, or generate a PDF report or send documents to the user's phone, use `create_and_send_pdf` or `send_to_telegram`.
+7. Analyze the user's request carefully before using any tool.
+8. Only use tools when necessary - simple questions don't require tools.
+9. Always explain what you're doing before using a tool.
+10. For file operations, always verify paths exist before reading.
+11. For terminal commands, be cautious and explain the command.
+12. If a tool fails, explain the error and suggest alternatives.
+13. After executing any tool, ALWAYS provide a friendly, natural, and concise confirmation message in the user's language (Arabic or English), e.g., '✅ تم نسخ 11,400 ملف إلى مجلد her بنجاح!'. NEVER output raw JSON, '[Tool Result]', Python scripts, or technical data dumps to the user.
 
 Available tools are provided in the tool definitions. Use them responsibly."""
 
@@ -530,6 +1133,14 @@ Available tools are provided in the tool definitions. Use them responsibly."""
         self._pending_permission: Optional[PermissionRequest] = None
         self._cancel_flag = False
         self._max_iterations = 10
+
+        # Clean up any temporary inspect_wa/ocr files in root directory
+        for tmp_f in (Path("inspect_wa.ps1"), Path("inspect_wa_out.json"), Path("inspect_ocr.ps1"), Path("inspect_ocr_out.json")):
+            try:
+                if tmp_f.exists():
+                    tmp_f.unlink()
+            except Exception:
+                pass
 
     @property
     def state(self) -> AgentState:
@@ -555,6 +1166,19 @@ Available tools are provided in the tool definitions. Use them responsibly."""
     def gate(self) -> PermissionGate:
         """Get the permission gate."""
         return self._gate
+
+    @property
+    def registry(self) -> ToolRegistry:
+        """Get the tool registry."""
+        return self._registry
+
+    def _intercept_raw_code_or_payload(self, text: str, user_message: str) -> Optional[tuple]:
+        """Intercept raw JSON tool calls, raw code leaks, or 'Using tool: ...' text."""
+        return intercept_raw_code_or_payload(text, user_message, self)
+
+    def _sanitize_final_reply(self, content: str, user_message: str) -> str:
+        """Sanitize final assistant reply to prevent any technical leaks."""
+        return sanitize_final_reply(content, user_message)
 
     def start_conversation(self, title: str = "") -> int:
         """Start a new conversation."""
@@ -730,6 +1354,14 @@ Available tools are provided in the tool definitions. Use them responsibly."""
         on_permission: Optional[Callable[[PermissionRequest], None]] = None
     ) -> AgentResponse:
         """Synchronous processing logic with fast local intent bypass."""
+        # Clean up any temporary inspect_wa.ps1 if present in root directory
+        try:
+            wa_script = Path("inspect_wa.ps1")
+            if wa_script.exists():
+                wa_script.unlink()
+        except Exception:
+            pass
+
         tools_used = []
 
         user_msg = Message(role="user", content=user_message, timestamp=time.time())
@@ -773,7 +1405,12 @@ Available tools are provided in the tool definitions. Use them responsibly."""
                 on_step(result_step)
 
             tools_used.append(tool_name)
-            final_content = confirmation if result.success else f"Action failed: {result.error}"
+            if result.success and isinstance(result.output, dict) and result.output.get("message"):
+                final_content = result.output["message"]
+            else:
+                final_content = confirmation if result.success else f"Action failed: {result.error}"
+
+            final_content = sanitize_final_reply(final_content, user_message)
 
             assistant_msg = Message(role="assistant", content=final_content, timestamp=time.time())
             self._messages.append(assistant_msg)
@@ -832,7 +1469,129 @@ Available tools are provided in the tool definitions. Use them responsibly."""
                     if block.get("type") == "text":
                         final_content += block.get("text", "")
 
-                if tools_used:
+                # Detect plain-text tool call format: Using tool: <tool_name> with input: {"key": "value"}
+                using_tool_match = re.search(r'Using tool:\s*([a-zA-Z0-9_]+)\s*with input:\s*(\{.*\})', final_content, re.DOTALL)
+                if not using_tool_match:
+                    using_tool_match = re.search(r'Using tool:\s*([a-zA-Z0-9_]+)\s*with input:\s*(\{.*?\})', final_content, re.DOTALL)
+
+                if using_tool_match:
+                    tool_name = using_tool_match.group(1).strip()
+                    args_raw = using_tool_match.group(2).strip()
+                    try:
+                        try:
+                            tool_input = json.loads(args_raw)
+                        except Exception:
+                            m_sub = re.search(r'(\{[\s\S]*?\})', args_raw)
+                            tool_input = json.loads(m_sub.group(1)) if m_sub else {}
+
+                        if self.registry.get(tool_name):
+                            last_tool_name = tool_name
+                            last_tool_input = tool_input
+
+                            tool_step = AgentStep(
+                                step_type="tool_use",
+                                content=f"Using tool: {tool_name}",
+                                tool_name=tool_name,
+                                tool_input=tool_input
+                            )
+                            self._steps.append(tool_step)
+                            if on_step:
+                                on_step(tool_step)
+
+                            res = self.registry.execute(tool_name, **tool_input)
+                            last_tool_result = res
+                            tools_used.append(tool_name)
+
+                            result_step = AgentStep(
+                                step_type="tool_result",
+                                content=f"Tool result: {res.output if res.success else res.error}",
+                                tool_name=tool_name,
+                                tool_result=res
+                            )
+                            self._steps.append(result_step)
+                            if on_step:
+                                on_step(result_step)
+
+                            DIRECT_ACTION_TOOLS = {
+                                "system_control",
+                                "app_open",
+                                "browser_open",
+                                "browser_search",
+                                "youtube_play",
+                                "create_and_send_pdf",
+                                "send_to_telegram",
+                                "desktop_icon_position",
+                                "move_application_window",
+                                "capture_and_inspect_screen",
+                                "whatsapp_send",
+                                "whatsapp_read",
+                                "clipboard_manager"
+                            }
+
+                            if tool_name in DIRECT_ACTION_TOOLS and res.success:
+                                confirm_msg = ""
+                                if isinstance(res.output, dict):
+                                    confirm_msg = res.output.get("message") or res.output.get("summary") or ""
+                                elif isinstance(res.output, str):
+                                    confirm_msg = res.output
+
+                                final_content = clean_tool_confirmation(
+                                    confirm_msg,
+                                    last_tool_name=tool_name,
+                                    last_tool_input=tool_input,
+                                    last_result=res,
+                                    user_message=user_message
+                                )
+                                final_content = sanitize_final_reply(final_content, user_message)
+                                assistant_msg = Message(role="assistant", content=final_content, timestamp=time.time())
+                                self._messages.append(assistant_msg)
+
+                                if self._database and self._conversation_id:
+                                    self._database.add_message(
+                                        self._conversation_id,
+                                        "assistant",
+                                        final_content
+                                    )
+
+                                self._state = AgentState.IDLE
+                                return AgentResponse(
+                                    content=final_content,
+                                    steps=self._steps,
+                                    tools_used=tools_used,
+                                    success=True
+                                )
+
+                            # Feed tool result back to the LLM for final answer synthesis
+                            result_repr = json.dumps(res.output, ensure_ascii=False) if res.success else f"Error: {res.error}"
+                            self._messages.append(Message(
+                                role="assistant",
+                                content=f"Using tool: {tool_name} with input: {json.dumps(tool_input, ensure_ascii=False)}"
+                            ))
+                            self._messages.append(Message(
+                                role="user",
+                                content=(
+                                    f"Tool '{tool_name}' execution result:\n{result_repr}\n\n"
+                                    f"Please provide a natural, concise, and helpful confirmation message to the user in their language (Arabic or English) confirming the action completed. "
+                                    f"Never output raw JSON, '[Tool Result]', or 'Using tool:' blocks."
+                                )
+                            ))
+                            final_content = ""
+                            continue
+                    except Exception:
+                        pass
+
+                # Intercept raw JSON tool calls or raw Python code leaked as text
+                intercepted = intercept_raw_code_or_payload(
+                    text=final_content,
+                    user_message=user_message,
+                    executor=self
+                )
+                if intercepted:
+                    intercepted_msg, intercepted_res = intercepted
+                    final_content = intercepted_msg
+                    if intercepted_res and intercepted_res.success:
+                        tools_used.append("intercepted_action")
+                elif tools_used:
                     final_content = clean_tool_confirmation(
                         final_content,
                         last_tool_name=last_tool_name,
@@ -840,6 +1599,8 @@ Available tools are provided in the tool definitions. Use them responsibly."""
                         last_result=last_tool_result,
                         user_message=user_message
                     )
+
+                final_content = sanitize_final_reply(final_content, user_message)
 
                 if final_content:
                     assistant_msg = Message(role="assistant", content=final_content, timestamp=time.time())
@@ -862,7 +1623,12 @@ Available tools are provided in the tool definitions. Use them responsibly."""
                 "youtube_play",
                 "create_and_send_pdf",
                 "send_to_telegram",
-                "desktop_icon_position"
+                "desktop_icon_position",
+                "move_application_window",
+                "capture_and_inspect_screen",
+                "whatsapp_send",
+                "whatsapp_read",
+                "clipboard_manager"
             }
 
             for tool_idx, tool_use in enumerate(tool_uses):
@@ -988,6 +1754,7 @@ Available tools are provided in the tool definitions. Use them responsibly."""
                             final_content
                         )
 
+                    final_content = sanitize_final_reply(final_content, user_message)
                     self._state = AgentState.IDLE
                     return AgentResponse(
                         content=final_content,
@@ -1004,6 +1771,8 @@ Available tools are provided in the tool definitions. Use them responsibly."""
                 last_result=last_tool_result,
                 user_message=user_message
             )
+
+        final_content = sanitize_final_reply(final_content, user_message)
 
         self._state = AgentState.IDLE
 

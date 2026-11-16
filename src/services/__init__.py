@@ -9,6 +9,8 @@ from src.services.telegram_service import (
     send_telegram_message,
     send_telegram_message_async,
     send_telegram_document,
+    send_telegram_photo,
+    send_telegram_photo_async,
 )
 
 __all__ = [
@@ -28,4 +30,6 @@ __all__ = [
     "send_telegram_message",
     "send_telegram_message_async",
     "send_telegram_document",
+    "send_telegram_photo",
+    "send_telegram_photo_async",
 ]

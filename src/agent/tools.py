@@ -14,7 +14,7 @@ import urllib.request
 import urllib.parse
 from pathlib import Path
 import html
-from src.services.telegram_service import send_telegram_message, send_telegram_document
+from src.services.telegram_service import send_telegram_message, send_telegram_message_async, send_telegram_document, send_telegram_photo_async
 from src.config.settings import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 
 
@@ -48,6 +48,11 @@ class ToolResult:
     requires_permission: bool = False
     permission_message: str = ""
     is_dangerous: bool = False
+    message: Optional[str] = None
+
+    def __post_init__(self):
+        if self.message and isinstance(self.output, dict) and "message" not in self.output:
+            self.output["message"] = self.message
 
 
 @dataclass
@@ -116,6 +121,23 @@ class ToolRegistry:
     def get_tools_by_category(self, category: ToolCategory) -> List[Tool]:
         """Get tools by category."""
         return [t for t in self._tools.values() if t.category == category]
+
+    def execute(self, name: str, **kwargs) -> ToolResult:
+        """Execute a tool by name with arguments."""
+        tool = self.get(name)
+        if not tool:
+            return ToolResult(
+                success=False,
+                output=None,
+                error=f"Tool not found: {name}"
+            )
+        if len(kwargs) == 1 and "params" in kwargs and isinstance(kwargs["params"], dict):
+            params = kwargs["params"]
+        elif len(kwargs) == 1 and "input" in kwargs and isinstance(kwargs["input"], dict):
+            params = kwargs["input"]
+        else:
+            params = kwargs
+        return tool.handler(params)
 
 
 # === Built-in Tool Handlers ===
@@ -724,12 +746,242 @@ def handle_window_control(params: Dict[str, Any]) -> ToolResult:
         return ToolResult(success=False, output=None, error=str(e))
 
 
+def find_matching_window(query: str) -> Optional[tuple]:
+    """Find visible top-level window HWND and title matching query."""
+    import win32gui
+    import win32process
+    import difflib
+
+    query_raw = (query or "").strip().lower()
+    if not query_raw or query_raw in ("active", "current", "foreground", "النشطة", "الحالية", "المفتوحة حاليا"):
+        fg = win32gui.GetForegroundWindow()
+        if fg and win32gui.IsWindowVisible(fg):
+            return fg, win32gui.GetWindowText(fg)
+        return None
+
+    candidates = []
+
+    def enum_cb(hwnd, lparam):
+        if win32gui.IsWindowVisible(hwnd):
+            title = win32gui.GetWindowText(hwnd).strip()
+            if title and title not in ("Default IME", "MSCTFIME UI", "Program Manager", "Windows Shell Experience Host"):
+                proc_name = ""
+                try:
+                    import psutil
+                    _, pid = win32process.GetWindowThreadProcessId(hwnd)
+                    if pid:
+                        proc_name = psutil.Process(pid).name().lower()
+                except Exception:
+                    pass
+                candidates.append((hwnd, title, proc_name))
+        return True
+
+    win32gui.EnumWindows(enum_cb, None)
+
+    # 1. Exact or substring match in window title
+    for hwnd, title, proc_name in candidates:
+        if query_raw in title.lower():
+            return hwnd, title
+
+    # 2. Match against process name (e.g. "brave", "chrome", "edge", "code", "vscode")
+    for hwnd, title, proc_name in candidates:
+        clean_proc = proc_name.replace(".exe", "")
+        if query_raw in clean_proc or clean_proc in query_raw:
+            return hwnd, title
+
+    # 3. Keyword extraction (ignoring Arabic/English stop words)
+    stop_words = {
+        "نافذة", "نافذه", "المتصفح", "متصفح", "المفتوح", "مفتوح", "المفتوحة", "مفتوحة",
+        "على", "علي", "موقع", "صفحة", "برنامج", "تطبيق", "في", "من", "الشاشة", "شاشة",
+        "window", "the", "browser", "open", "opened", "app", "application", "on", "at", "to", "site", "webpage", "screen"
+    }
+    tokens = [w for w in re.split(r'[\s\-_]+', query_raw) if w and w not in stop_words and len(w) > 1]
+    for token in tokens:
+        for hwnd, title, proc_name in candidates:
+            if token in title.lower() or token in proc_name:
+                return hwnd, title
+
+    # 4. If query mentions browser ("متصفح" / "browser"), match any open browser window
+    if any(b in query_raw for b in ("متصفح", "المتصفح", "browser", "chrome", "brave", "edge", "firefox")):
+        browser_names = ("brave", "chrome", "msedge", "edge", "firefox")
+        for hwnd, title, proc_name in candidates:
+            if any(b in proc_name for b in browser_names) or any(b in title.lower() for b in browser_names):
+                return hwnd, title
+
+    # 5. Fuzzy match on title
+    for hwnd, title, proc_name in candidates:
+        if difflib.SequenceMatcher(None, query_raw, title.lower()).ratio() > 0.45:
+            return hwnd, title
+
+    return None
+
+
+def handle_move_application_window(params: Dict[str, Any]) -> ToolResult:
+    """Move, snap, maximize, or minimize an open application window on the screen."""
+    window_query = str(params.get("window_query", "")).strip()
+    position = str(params.get("position", "right")).strip().lower()
+
+    if not window_query:
+        return ToolResult(
+            success=False,
+            output=None,
+            error="Window query is required (e.g. 'omniroute', 'brave', 'chrome', 'vscode', or 'المتصفح')"
+        )
+
+    try:
+        import win32gui
+        import win32con
+        import ctypes
+
+        found = find_matching_window(window_query)
+        if not found:
+            return ToolResult(
+                success=False,
+                output={"window_query": window_query},
+                error=f"Could not find any open visible window matching '{window_query}'"
+            )
+
+        hwnd, title = found
+
+        # Screen dimensions
+        user32 = ctypes.windll.user32
+        screen_w = user32.GetSystemMetrics(0)
+        screen_h = user32.GetSystemMetrics(1)
+        # Usable height excluding taskbar
+        work_h = screen_h - 40
+
+        pos_norm = position.replace(" ", "_").replace("-", "_")
+
+        # Minimize
+        if pos_norm in ("minimize", "تصغير", "اخفاء", "صغر"):
+            win32gui.ShowWindow(hwnd, win32con.SW_MINIMIZE)
+            return ToolResult(
+                success=True,
+                output={
+                    "window_title": title,
+                    "position": "minimize",
+                    "message": f"✅ تم تصغير نافذة '{title}' إلى شريط المهام."
+                }
+            )
+
+        # Maximize
+        if pos_norm in ("maximize", "تكبير", "كامل_الشاشة", "ملء_الشاشة", "كبر"):
+            win32gui.ShowWindow(hwnd, win32con.SW_MAXIMIZE)
+            try:
+                win32gui.SetForegroundWindow(hwnd)
+            except Exception:
+                pass
+            return ToolResult(
+                success=True,
+                output={
+                    "window_title": title,
+                    "position": "maximize",
+                    "message": f"✅ تم تكبير نافذة '{title}' على كامل الشاشة."
+                }
+            )
+
+        # Restore window if minimized/maximized before positioning
+        win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+
+        # Compute position coordinates
+        if pos_norm in ("right", "يمين", "اليمين", "لليمين", "في_يمين_الشاشة", "يمين_الشاشة"):
+            x = screen_w // 2
+            y = 0
+            w = screen_w // 2
+            h = work_h
+            pos_label = "right side of the screen"
+            pos_ar = "يمين الشاشة"
+        elif pos_norm in ("left", "يسار", "اليسار", "لليسار", "شمال", "الشمال", "في_يسار_الشاشة", "يسار_الشاشة"):
+            x = 0
+            y = 0
+            w = screen_w // 2
+            h = work_h
+            pos_label = "left side of the screen"
+            pos_ar = "يسار الشاشة"
+        elif pos_norm in ("top", "اعلى", "أعلى", "فوق"):
+            x = 0
+            y = 0
+            w = screen_w
+            h = work_h // 2
+            pos_label = "top half of the screen"
+            pos_ar = "أعلى الشاشة"
+        elif pos_norm in ("bottom", "اسفل", "أسفل", "تحت"):
+            x = 0
+            y = work_h // 2
+            w = screen_w
+            h = work_h // 2
+            pos_label = "bottom half of the screen"
+            pos_ar = "أسفل الشاشة"
+        elif pos_norm in ("top_right", "أعلى_اليمين", "اعلى_اليمين"):
+            x = screen_w // 2
+            y = 0
+            w = screen_w // 2
+            h = work_h // 2
+            pos_label = "top right corner"
+            pos_ar = "أعلى يمين الشاشة"
+        elif pos_norm in ("top_left", "أعلى_اليسار", "اعلى_اليسار"):
+            x = 0
+            y = 0
+            w = screen_w // 2
+            h = work_h // 2
+            pos_label = "top left corner"
+            pos_ar = "أعلى يسار الشاشة"
+        elif pos_norm in ("bottom_right", "أسفل_اليمين", "اسفل_اليمين"):
+            x = screen_w // 2
+            y = work_h // 2
+            w = screen_w // 2
+            h = work_h // 2
+            pos_label = "bottom right corner"
+            pos_ar = "أسفل يمين الشاشة"
+        elif pos_norm in ("bottom_left", "أسفل_اليسار", "اسفل_اليسار"):
+            x = 0
+            y = work_h // 2
+            w = screen_w // 2
+            h = work_h // 2
+            pos_label = "bottom left corner"
+            pos_ar = "أسفل يسار الشاشة"
+        else:  # center / middle / default
+            w = int(screen_w * 0.7)
+            h = int(screen_h * 0.7)
+            x = (screen_w - w) // 2
+            y = (work_h - h) // 2
+            pos_label = "center of the screen"
+            pos_ar = "وسط الشاشة"
+
+        win32gui.MoveWindow(hwnd, x, y, w, h, True)
+
+        try:
+            win32gui.SetForegroundWindow(hwnd)
+        except Exception:
+            pass
+
+        return ToolResult(
+            success=True,
+            output={
+                "window_title": title,
+                "position": pos_norm,
+                "coordinates": {"x": x, "y": y, "width": w, "height": h},
+                "message": f"✅ تم تحريك نافذة '{title}' إلى {pos_ar} بنجاح!"
+            }
+        )
+    except Exception as e:
+        return ToolResult(
+            success=False,
+            output=None,
+            error=f"Failed to move application window: {e}"
+        )
+
+
 def handle_desktop_icon_position(params: Dict[str, Any]) -> ToolResult:
     """Handle visual positioning of desktop icons on the Windows screen."""
     target = params.get("target", "").strip()
     position = params.get("position", "center")
     x = params.get("x")
     y = params.get("y")
+
+    # Strict safety net: If target mentions a window, browser, or app, redirect to handle_move_application_window
+    if any(w in target.lower() for w in ("نافذة", "نافذه", "متصفح", "المتصفح", "برنامج", "window", "browser", "omniroute", "chrome", "brave")):
+        return handle_move_application_window({"window_query": target, "position": position})
 
     if not target:
         return ToolResult(
@@ -1109,6 +1361,239 @@ def handle_youtube_play(params: Dict[str, Any]) -> ToolResult:
         )
 
 
+def extract_youtube_video_id(url_or_query: str) -> Optional[str]:
+    """Extract 11-character YouTube video ID if URL or ID is passed."""
+    patterns = [
+        r'(?:v=|\/v\/|youtu\.be\/|\/embed\/|\/shorts\/)([a-zA-Z0-9_-]{11})',
+        r'^([a-zA-Z0-9_-]{11})$'
+    ]
+    for pattern in patterns:
+        m = re.search(pattern, url_or_query.strip())
+        if m:
+            return m.group(1)
+    return None
+
+
+def fetch_youtube_transcript_text(video_id: str, languages: tuple = ("ar", "en", "fr")) -> str:
+    """Fetch complete spoken transcript text from YouTube using youtube_transcript_api."""
+    try:
+        from youtube_transcript_api import YouTubeTranscriptApi
+    except ImportError:
+        return ""
+
+    # 1. Try classmethod get_transcript (older versions)
+    if hasattr(YouTubeTranscriptApi, "get_transcript"):
+        try:
+            items = YouTubeTranscriptApi.get_transcript(video_id, languages=list(languages))
+            if items:
+                return " ".join(item.get("text", "") for item in items if item.get("text"))
+        except Exception:
+            pass
+
+    # 2. Try modern instance/class fetch
+    try:
+        api = YouTubeTranscriptApi() if callable(YouTubeTranscriptApi) else YouTubeTranscriptApi
+        fetched = None
+        for lang in languages:
+            try:
+                fetched = api.fetch(video_id, languages=(lang,))
+                if fetched:
+                    break
+            except Exception:
+                continue
+
+        if not fetched:
+            try:
+                fetched = api.fetch(video_id, languages=languages)
+            except Exception:
+                pass
+
+        if fetched:
+            if hasattr(fetched, "snippets"):
+                return " ".join(s.text for s in fetched.snippets if getattr(s, "text", ""))
+            elif hasattr(fetched, "to_raw_data"):
+                return " ".join(item.get("text", "") for item in fetched.to_raw_data() if item.get("text"))
+            elif isinstance(fetched, list):
+                return " ".join(item.get("text", "") for item in fetched if item.get("text"))
+    except Exception:
+        pass
+
+    # 3. Try listing and finding generated or manual transcripts
+    try:
+        api = YouTubeTranscriptApi() if callable(YouTubeTranscriptApi) else YouTubeTranscriptApi
+        list_fn = getattr(api, "list", None) or getattr(YouTubeTranscriptApi, "list_transcripts", None)
+        if list_fn:
+            t_list = list_fn(video_id)
+            chosen = None
+            try:
+                chosen = t_list.find_transcript(list(languages))
+            except Exception:
+                try:
+                    chosen = t_list.find_generated_transcript(list(languages))
+                except Exception:
+                    for tr in t_list:
+                        chosen = tr
+                        break
+
+            if chosen:
+                data = chosen.fetch()
+                if hasattr(data, "snippets"):
+                    return " ".join(s.text for s in data.snippets if getattr(s, "text", ""))
+                elif hasattr(data, "to_raw_data"):
+                    return " ".join(item.get("text", "") for item in data.to_raw_data() if item.get("text"))
+                elif isinstance(data, list):
+                    return " ".join(item.get("text", "") for item in data if item.get("text"))
+    except Exception:
+        pass
+
+    return ""
+
+
+def handle_youtube_play_and_summarize(params: Dict[str, Any]) -> ToolResult:
+    """Search for or open a YouTube video, optionally play it in browser, and fetch transcript to summarize."""
+    query_or_url = params.get("query_or_url", "").strip()
+    if not query_or_url:
+        return ToolResult(success=False, output=None, error="Parameter 'query_or_url' is required")
+
+    play = params.get("play", False)
+    if isinstance(play, str):
+        play = play.lower() in ("true", "1", "yes")
+
+    summarize = params.get("summarize", True)
+    if isinstance(summarize, str):
+        summarize = summarize.lower() in ("true", "1", "yes")
+
+    video_id = extract_youtube_video_id(query_or_url)
+    video_title = ""
+    video_url = ""
+    video_description = ""
+
+    # If it's a direct URL or ID
+    if video_id:
+        video_url = f"https://www.youtube.com/watch?v={video_id}"
+        # Extract title using yt-dlp quickly
+        try:
+            import yt_dlp
+            ydl_opts = {
+                'quiet': True,
+                'no_warnings': True,
+                'skip_download': True,
+            }
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(video_url, download=False)
+                if info:
+                    video_title = info.get("title", "")
+                    video_description = (info.get("description") or "")[:2000]
+        except Exception:
+            video_title = f"YouTube Video ({video_id})"
+    else:
+        # Search query: use yt-dlp ytsearch1
+        try:
+            import yt_dlp
+            ydl_opts = {
+                'quiet': True,
+                'no_warnings': True,
+                'skip_download': True,
+                'extract_flat': 'in_playlist',
+            }
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(f"ytsearch1:{query_or_url}", download=False)
+                if info and "entries" in info and info["entries"]:
+                    entry = info["entries"][0]
+                    video_id = entry.get("id")
+                    video_title = entry.get("title", query_or_url)
+                    video_url = entry.get("webpage_url") or f"https://www.youtube.com/watch?v={video_id}"
+                elif info:
+                    video_id = info.get("id")
+                    video_title = info.get("title", query_or_url)
+                    video_url = info.get("webpage_url") or f"https://www.youtube.com/watch?v={video_id}"
+        except Exception:
+            pass
+
+        # Fallback to web search regex if yt-dlp was unavailable
+        if not video_id:
+            try:
+                search_url = f"https://www.youtube.com/results?search_query={urllib.parse.quote_plus(query_or_url)}"
+                headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124.0.0.0 Safari/537.36"}
+                req = urllib.request.Request(search_url, headers=headers)
+                with urllib.request.urlopen(req, timeout=10) as response:
+                    html_content = response.read().decode("utf-8", errors="ignore")
+                    matches = re.findall(r'/watch\?v=([a-zA-Z0-9_-]{11})', html_content)
+                    if matches:
+                        video_id = matches[0]
+                        video_url = f"https://www.youtube.com/watch?v={video_id}"
+                        video_title = query_or_url
+            except Exception:
+                pass
+
+    if not video_url:
+        return ToolResult(
+            success=False,
+            output=None,
+            error=f"Could not find any YouTube video for '{query_or_url}'"
+        )
+
+    # 1. Play in browser if requested
+    if play:
+        try:
+            import webbrowser
+            webbrowser.open(video_url)
+        except Exception:
+            try:
+                if platform.system() == "Windows":
+                    os.startfile(video_url)
+            except Exception:
+                pass
+
+    # 2. Extract transcript if summarize requested
+    transcript_text = ""
+    if summarize and video_id:
+        transcript_text = fetch_youtube_transcript_text(video_id)
+
+        # Fallback to yt-dlp description/captions if transcript API returned empty
+        if not transcript_text:
+            try:
+                import yt_dlp
+                ydl_opts = {
+                    'quiet': True,
+                    'no_warnings': True,
+                    'skip_download': True,
+                }
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(video_url, download=False)
+                    if info:
+                        if not video_title:
+                            video_title = info.get("title", "")
+                        desc = info.get("description", "")
+                        if desc:
+                            transcript_text = f"[Video Description & Summary Context]:\n{desc[:3000]}"
+            except Exception:
+                pass
+
+    # Truncate overly long transcripts to prevent exceeding token limits (keep up to 14,000 chars)
+    if transcript_text and len(transcript_text) > 14000:
+        transcript_text = transcript_text[:14000] + "... [transcript truncated for brevity]"
+
+    output_data = {
+        "title": video_title or query_or_url,
+        "url": video_url,
+        "video_id": video_id,
+        "played_in_browser": play,
+        "transcript_available": bool(transcript_text),
+        "transcript": transcript_text if transcript_text else "Spoken transcript could not be automatically retrieved for this video.",
+        "description": video_description,
+        "instruction": (
+            "Based on the video title and spoken transcript above, provide a comprehensive, clear, and well-structured summary "
+            "in the user's language (Arabic or English) highlighting the main ideas, key takeaways, and conclusion."
+        )
+    }
+
+    return ToolResult(
+        success=True,
+        output=output_data
+    )
+
+
 def handle_create_and_send_pdf(params: Dict[str, Any]) -> ToolResult:
     """Generate a clean styled PDF supporting Arabic/English and deliver to Desktop + Telegram."""
     title = params.get("title", "Report").strip() or "Report"
@@ -1293,6 +1778,1097 @@ def handle_send_to_telegram(params: Dict[str, Any]) -> ToolResult:
     return ToolResult(success=False, output=None, error="No action taken")
 
 
+def handle_capture_and_inspect_screen(params: Dict[str, Any]) -> ToolResult:
+    """Capture a screenshot of the user's desktop, inspect open/active windows, and deliver to Telegram."""
+    send_to_telegram = params.get("send_to_telegram", True)
+    if isinstance(send_to_telegram, str):
+        send_to_telegram = send_to_telegram.lower() in ("true", "1", "yes")
+
+    caption = params.get("caption", "").strip()
+
+    # 1. Inspect active foreground window and visible windows
+    active_window = "Desktop"
+    visible_windows: List[str] = []
+
+    try:
+        import win32gui
+        hwnd = win32gui.GetForegroundWindow()
+        if hwnd:
+            active_window = win32gui.GetWindowText(hwnd).strip() or "Desktop"
+
+        def _enum_win_cb(h, window_list):
+            if win32gui.IsWindowVisible(h):
+                txt = win32gui.GetWindowText(h).strip()
+                if txt and txt not in ("Default IME", "MSCTFIME UI", "Program Manager") and txt not in window_list:
+                    window_list.append(txt)
+
+        win32gui.EnumWindows(_enum_win_cb, visible_windows)
+    except Exception:
+        # Fallback via ctypes
+        try:
+            import ctypes
+            user32 = ctypes.windll.user32
+            hwnd = user32.GetForegroundWindow()
+            if hwnd:
+                length = user32.GetWindowTextLengthW(hwnd)
+                if length > 0:
+                    buff = ctypes.create_unicode_buffer(length + 1)
+                    user32.GetWindowTextW(hwnd, buff, length + 1)
+                    active_window = buff.value.strip() or "Desktop"
+        except Exception:
+            active_window = "Desktop"
+
+    # 2. Capture screenshot of the Windows Desktop
+    import time
+    screenshot_dir = Path.home() / ".ai-desktop-assistant" / "screenshots"
+    screenshot_dir.mkdir(parents=True, exist_ok=True)
+    timestamp = int(time.time())
+    screenshot_path = screenshot_dir / f"screenshot_{timestamp}.png"
+
+    screenshot_captured = False
+    error_msg = ""
+
+    # Primary method: PIL.ImageGrab
+    try:
+        from PIL import ImageGrab
+        img = ImageGrab.grab(all_screens=True)
+        img.save(str(screenshot_path), format="PNG")
+        screenshot_captured = True
+    except Exception as e:
+        # Fallback 1: pyautogui
+        try:
+            import pyautogui
+            screenshot = pyautogui.screenshot()
+            screenshot.save(str(screenshot_path))
+            screenshot_captured = True
+        except Exception as e2:
+            # Fallback 2: PySide6 QGuiApplication
+            try:
+                from PySide6.QtGui import QGuiApplication
+                screen = QGuiApplication.primaryScreen()
+                if screen:
+                    pix = screen.grabWindow(0)
+                    pix.save(str(screenshot_path), "PNG")
+                    screenshot_captured = True
+            except Exception as e3:
+                error_msg = f"Screen grab failed: {e}; {e2}; {e3}"
+
+    if not screenshot_captured or not screenshot_path.exists():
+        return ToolResult(
+            success=False,
+            output={
+                "active_window": active_window,
+                "visible_windows": visible_windows[:15],
+            },
+            error=f"Could not capture desktop screen: {error_msg}"
+        )
+
+    # 3. Deliver to Telegram if requested
+    sent_telegram = False
+    telegram_status = ""
+    if send_to_telegram:
+        bot_token = TELEGRAM_BOT_TOKEN or os.environ.get("TELEGRAM_BOT_TOKEN", "")
+        chat_id = TELEGRAM_CHAT_ID or os.environ.get("TELEGRAM_CHAT_ID", "")
+        photo_caption = caption or f"🖥️ Live Screen: {active_window}"
+        if bot_token and chat_id:
+            send_telegram_photo_async(
+                image_path=str(screenshot_path),
+                caption=photo_caption,
+                token=bot_token,
+                chat_id=chat_id
+            )
+            sent_telegram = True
+            telegram_status = " Screenshot sent to your Telegram."
+        else:
+            telegram_status = " (Telegram not configured: set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in .env)"
+
+    top_apps = ", ".join(visible_windows[:8]) if visible_windows else "None detected"
+    summary = (
+        f"Active window: '{active_window}'. "
+        f"Open applications: {top_apps}. "
+        f"Screenshot captured at '{screenshot_path}'.{telegram_status}"
+    )
+
+    return ToolResult(
+        success=True,
+        output={
+            "active_window": active_window,
+            "visible_windows": visible_windows[:15],
+            "screenshot_path": str(screenshot_path),
+            "sent_to_telegram": sent_telegram,
+            "summary": summary,
+            "message": f"✅ Captured screen. Active window is '{active_window}'.{telegram_status}"
+        }
+    )
+
+
+# === Windows Clipboard Manager ===
+
+_CLIPBOARD_HISTORY: List[str] = []
+
+
+def _record_clipboard_history(text: str) -> None:
+    """Record text entry in clipboard history, keeping up to 20 unique items."""
+    global _CLIPBOARD_HISTORY
+    if not text or not str(text).strip():
+        return
+    clean = str(text).strip()
+    if clean in _CLIPBOARD_HISTORY:
+        _CLIPBOARD_HISTORY.remove(clean)
+    _CLIPBOARD_HISTORY.insert(0, clean)
+    if len(_CLIPBOARD_HISTORY) > 20:
+        _CLIPBOARD_HISTORY.pop()
+
+
+def _get_clipboard_unicode() -> str:
+    """Retrieve text from Windows clipboard safely."""
+    try:
+        import win32clipboard
+        import win32con
+        win32clipboard.OpenClipboard()
+        try:
+            if win32clipboard.IsClipboardFormatAvailable(win32con.CF_UNICODETEXT):
+                return win32clipboard.GetClipboardData(win32con.CF_UNICODETEXT) or ""
+            elif win32clipboard.IsClipboardFormatAvailable(win32con.CF_TEXT):
+                data = win32clipboard.GetClipboardData(win32con.CF_TEXT)
+                return data.decode("utf-8", errors="ignore") if isinstance(data, bytes) else str(data)
+            return ""
+        finally:
+            win32clipboard.CloseClipboard()
+    except Exception:
+        return ""
+
+
+def _set_clipboard_unicode(text: str) -> bool:
+    """Set Windows clipboard to unicode text."""
+    try:
+        import win32clipboard
+        import win32con
+        win32clipboard.OpenClipboard()
+        try:
+            win32clipboard.EmptyClipboard()
+            win32clipboard.SetClipboardData(win32con.CF_UNICODETEXT, str(text))
+            return True
+        finally:
+            win32clipboard.CloseClipboard()
+    except Exception:
+        return False
+
+
+def _simulate_keybd(vk_key: int, ctrl: bool = False) -> None:
+    """Simulate key press with optional Ctrl modifier using ctypes."""
+    import ctypes
+    user32 = ctypes.windll.user32
+    VK_CONTROL = 0x11
+    KEYEVENTF_KEYUP = 0x0002
+
+    if ctrl:
+        user32.keybd_event(VK_CONTROL, 0, 0, 0)
+    user32.keybd_event(vk_key, 0, 0, 0)
+    import time
+    time.sleep(0.04)
+    user32.keybd_event(vk_key, 0, KEYEVENTF_KEYUP, 0)
+    if ctrl:
+        user32.keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0)
+
+
+def handle_clipboard_manager(params: Dict[str, Any]) -> ToolResult:
+    """Manage Windows clipboard: read, write, paste, copy selected, history, or clear."""
+    action = str(params.get("action", "get")).strip().lower()
+    text = str(params.get("text", ""))
+    index = int(params.get("index", 0))
+
+    import time
+    global _CLIPBOARD_HISTORY
+
+    # 1. Clear clipboard
+    if action in ("clear", "empty", "مسح", "تفريغ"):
+        try:
+            import win32clipboard
+            win32clipboard.OpenClipboard()
+            try:
+                win32clipboard.EmptyClipboard()
+            finally:
+                win32clipboard.CloseClipboard()
+            return ToolResult(
+                success=True,
+                output={"action": "clear", "message": "✅ تم تفريغ الحافظة بنجاح."}
+            )
+        except Exception as e:
+            return ToolResult(success=False, output=None, error=f"Failed to clear clipboard: {e}")
+
+    # 2. Get / Read clipboard
+    if action in ("get", "read", "قراءة", "عرض", "الحافظة"):
+        clip_text = _get_clipboard_unicode()
+        if clip_text:
+            _record_clipboard_history(clip_text)
+            preview = clip_text[:200] + "..." if len(clip_text) > 200 else clip_text
+            return ToolResult(
+                success=True,
+                output={
+                    "action": "get",
+                    "text": clip_text,
+                    "length": len(clip_text),
+                    "message": f"📋 محتوى الحافظة: \"{preview}\""
+                }
+            )
+        else:
+            return ToolResult(
+                success=True,
+                output={"action": "get", "text": "", "message": "📋 الحافظة فارغة حالياً."}
+            )
+
+    # 3. Set / Copy text into clipboard
+    if action in ("set", "copy", "نسخ", "وضع"):
+        if not text:
+            return ToolResult(success=False, output=None, error="Parameter 'text' is required for action 'set'")
+        ok = _set_clipboard_unicode(text)
+        if ok:
+            _record_clipboard_history(text)
+            preview = text[:150] + "..." if len(text) > 150 else text
+            return ToolResult(
+                success=True,
+                output={
+                    "action": "set",
+                    "text": text,
+                    "length": len(text),
+                    "message": f"✅ تم نسخ النص إلى الحافظة: \"{preview}\""
+                }
+            )
+        else:
+            return ToolResult(success=False, output=None, error="Failed to write text to Windows clipboard")
+
+    # 4. Paste into active window
+    if action in ("paste", "لصق", "الصق"):
+        if text:
+            _set_clipboard_unicode(text)
+            _record_clipboard_history(text)
+
+        time.sleep(0.15)
+        # VK_V = 0x56
+        _simulate_keybd(0x56, ctrl=True)
+        return ToolResult(
+            success=True,
+            output={"action": "paste", "message": "✅ تم لصق النص في النافذة النشطة بنجاح."}
+        )
+
+    # 5. Copy selected text from foreground window
+    if action in ("copy_selected", "نسخ_المحدد", "نسخ_المحدد_حاليا"):
+        # VK_C = 0x43
+        _simulate_keybd(0x43, ctrl=True)
+        time.sleep(0.15)
+        new_text = _get_clipboard_unicode()
+        if new_text:
+            _record_clipboard_history(new_text)
+            preview = new_text[:150] + "..." if len(new_text) > 150 else new_text
+            return ToolResult(
+                success=True,
+                output={
+                    "action": "copy_selected",
+                    "text": new_text,
+                    "length": len(new_text),
+                    "message": f"✅ تم نسخ النص المحدد: \"{preview}\""
+                }
+            )
+        else:
+            return ToolResult(
+                success=True,
+                output={"action": "copy_selected", "text": "", "message": "⚠️ لم يتم العثور على نص محدد للنسخ."}
+            )
+
+    # 6. Clipboard History
+    if action in ("history", "سجل", "سجل_الحافظة", "تاريخ"):
+        if index > 0 and index <= len(_CLIPBOARD_HISTORY):
+            item_to_restore = _CLIPBOARD_HISTORY[index - 1]
+            _set_clipboard_unicode(item_to_restore)
+            _record_clipboard_history(item_to_restore)
+            preview = item_to_restore[:150] + "..." if len(item_to_restore) > 150 else item_to_restore
+            return ToolResult(
+                success=True,
+                output={
+                    "action": "history_restore",
+                    "restored_index": index,
+                    "text": item_to_restore,
+                    "message": f"✅ تم استعادة العنصر رقم {index} إلى الحافظة: \"{preview}\""
+                }
+            )
+        else:
+            if not _CLIPBOARD_HISTORY:
+                return ToolResult(
+                    success=True,
+                    output={"action": "history", "items": [], "message": "📋 سجل الحافظة فارغ حالياً."}
+                )
+
+            formatted_history = [
+                f"{i + 1}. {item[:80]}..." if len(item) > 80 else f"{i + 1}. {item}"
+                for i, item in enumerate(_CLIPBOARD_HISTORY)
+            ]
+            return ToolResult(
+                success=True,
+                output={
+                    "action": "history",
+                    "count": len(_CLIPBOARD_HISTORY),
+                    "items": _CLIPBOARD_HISTORY,
+                    "message": "📋 سجل الحافظة:\n" + "\n".join(formatted_history)
+                }
+            )
+
+    return ToolResult(success=False, output=None, error=f"Unknown clipboard action: {action}")
+
+
+# === WhatsApp Desktop Sender ===
+
+def _is_phone_number(val: str) -> bool:
+    """Check if recipient string looks like a numeric phone number."""
+    clean = re.sub(r'[\s\-\(\)\+]', '', val.strip())
+    return clean.isdigit() and len(clean) >= 8
+
+
+def _normalize_moroccan_phone(val: str) -> str:
+    """Normalize phone numbers, converting Moroccan 06/07 numbers to international 212 format."""
+    clean = re.sub(r'[\s\-\(\)\+]', '', val.strip())
+    if len(clean) == 10 and (clean.startswith("06") or clean.startswith("07")):
+        return "212" + clean[1:]
+    if clean.startswith("00212"):
+        return clean[2:]
+    return clean
+
+
+def _mouse_click(x: int, y: int) -> None:
+    """Move cursor to (x, y) and perform a left mouse click using ctypes."""
+    import ctypes
+    import time
+    try:
+        ctypes.windll.user32.SetCursorPos(int(x), int(y))
+        time.sleep(0.05)
+        ctypes.windll.user32.mouse_event(0x0002, 0, 0, 0, 0)  # MOUSEEVENTF_LEFTDOWN
+        time.sleep(0.05)
+        ctypes.windll.user32.mouse_event(0x0004, 0, 0, 0, 0)  # MOUSEEVENTF_LEFTUP
+        time.sleep(0.05)
+    except Exception:
+        pass
+
+
+def _focus_whatsapp_window() -> Optional[tuple[int, tuple[int, int, int, int]]]:
+    """Find WhatsApp window, bring it to the foreground, and return (hwnd, (left, top, right, bottom))."""
+    import win32gui
+    import win32con
+    import ctypes
+    import time
+
+    found = find_matching_window("whatsapp") or find_matching_window("واتساب")
+    if not found:
+        try:
+            os.startfile("whatsapp:")
+        except Exception:
+            pass
+        for _ in range(8):
+            time.sleep(0.5)
+            found = find_matching_window("whatsapp") or find_matching_window("واتساب")
+            if found:
+                break
+
+    if not found:
+        return None
+
+    hwnd, title = found
+    try:
+        if win32gui.IsIconic(hwnd):
+            win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+        else:
+            win32gui.ShowWindow(hwnd, win32con.SW_SHOW)
+        time.sleep(0.1)
+
+        try:
+            win32gui.SetForegroundWindow(hwnd)
+        except Exception:
+            ctypes.windll.user32.keybd_event(0x12, 0, 0, 0)  # Alt down
+            time.sleep(0.02)
+            ctypes.windll.user32.keybd_event(0x12, 0, 2, 0)  # Alt up
+            win32gui.SetForegroundWindow(hwnd)
+    except Exception:
+        pass
+
+    time.sleep(0.4)
+    try:
+        rect = win32gui.GetWindowRect(hwnd)
+        return hwnd, rect
+    except Exception:
+        return hwnd, (0, 0, 1000, 700)
+
+
+def _find_contact_element_uia(hwnd: int, win_left: int, win_width: int, recipient: str) -> Optional[tuple[int, int]]:
+    """Query UIA for a sidebar item matching recipient in left pane and return its center (cx, cy)."""
+    import subprocess
+    import json
+    from pathlib import Path
+
+    ps_file = Path("inspect_wa_contact.ps1")
+    out_file = Path("inspect_wa_contact_out.json")
+    out_resolved = str(out_file.resolve()).replace("\\", "\\\\").replace("'", "''")
+    safe_rec = recipient.replace("'", "''")
+
+    ps_script = f"""[Console]::OutputEncoding = [System.Text.Encoding]::UTF8;
+$OutputEncoding = [System.Text.Encoding]::UTF8;
+Add-Type -AssemblyName UIAutomationClient
+Add-Type -AssemblyName UIAutomationTypes
+
+$hwnd = [IntPtr]{hwnd}
+$targetWin = [System.Windows.Automation.AutomationElement]::FromHandle($hwnd)
+$foundItem = $null
+
+if ($targetWin) {{
+    $condTrue = [System.Windows.Automation.Condition]::TrueCondition
+    $elements = $targetWin.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condTrue)
+    $maxLeft = {win_left} + ({win_width} * 0.38)
+
+    foreach ($el in $elements) {{
+        try {{
+            $name = $el.Current.Name
+            $rect = $el.Current.BoundingRectangle
+            $ct = $el.Current.ControlType.ProgrammaticName
+            if ($name -and $rect -and $rect.Width -gt 0 -and $rect.Height -gt 0) {{
+                if ($rect.Left -lt $maxLeft) {{
+                    if ($ct -match '(?i)ListItem|DataItem|Button|Text') {{
+                        if ($name -match [regex]::Escape('{safe_rec}')) {{
+                            $foundItem = @{{
+                                Left = $rect.Left
+                                Top = $rect.Top
+                                Width = $rect.Width
+                                Height = $rect.Height
+                            }}
+                            break
+                        }}
+                    }}
+                }}
+            }}
+        }} catch {{}}
+    }}
+}}
+
+if ($foundItem) {{
+    $foundItem | ConvertTo-Json -Compress | Set-Content -Path '{out_resolved}' -Encoding utf8
+}} else {{
+    @{{ Found = $false }} | ConvertTo-Json -Compress | Set-Content -Path '{out_resolved}' -Encoding utf8
+}}
+"""
+    try:
+        ps_file.write_text(ps_script, encoding="utf-8")
+        subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", str(ps_file)],
+            capture_output=True,
+            timeout=8,
+            text=True,
+            encoding="utf-8",
+            errors="replace"
+        )
+        if out_file.exists():
+            data = json.loads(out_file.read_text(encoding="utf-8", errors="replace"))
+            if isinstance(data, dict) and data.get("Width") and data.get("Width") > 0:
+                cx = int(data["Left"] + data["Width"] // 2)
+                cy = int(data["Top"] + data["Height"] // 2)
+                return cx, cy
+    except Exception:
+        pass
+    finally:
+        for f in (ps_file, out_file):
+            try:
+                if f.exists():
+                    f.unlink()
+            except Exception:
+                pass
+    return None
+
+
+def _open_whatsapp_chat(recipient: str) -> bool:
+    """Reliably open a WhatsApp chat using direct UIA match or search box fallback."""
+    hwnd_rect = _focus_whatsapp_window()
+    if not hwnd_rect:
+        return False
+    hwnd, (win_left, win_top, win_right, win_bottom) = hwnd_rect
+    win_width = win_right - win_left
+
+    recipient = str(recipient).strip()
+    if not recipient:
+        return False
+
+    import subprocess
+    import json
+    import time
+    from pathlib import Path
+
+    # 1. Direct UIA Match First
+    contact_center = _find_contact_element_uia(hwnd, win_left, win_width, recipient)
+    if contact_center:
+        _mouse_click(contact_center[0], contact_center[1])
+        time.sleep(0.8)
+        return True
+
+    # 2. Search Box Fallback (if not currently visible in sidebar)
+    _simulate_keybd(0x1B, ctrl=False)  # VK_ESCAPE
+    time.sleep(0.1)
+    _simulate_keybd(0x1B, ctrl=False)
+    time.sleep(0.1)
+
+    search_ps = Path("inspect_wa_search.ps1")
+    search_out = Path("inspect_wa_search_out.json")
+    search_out_resolved = str(search_out.resolve()).replace("\\", "\\\\").replace("'", "''")
+
+    search_script = f"""[Console]::OutputEncoding = [System.Text.Encoding]::UTF8;
+$OutputEncoding = [System.Text.Encoding]::UTF8;
+Add-Type -AssemblyName UIAutomationClient
+Add-Type -AssemblyName UIAutomationTypes
+
+$hwnd = [IntPtr]{hwnd}
+$targetWin = [System.Windows.Automation.AutomationElement]::FromHandle($hwnd)
+$box = $null
+
+if ($targetWin) {{
+    $condTrue = [System.Windows.Automation.Condition]::TrueCondition
+    $elements = $targetWin.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condTrue)
+    $maxLeft = {win_left} + ({win_width} * 0.38)
+
+    foreach ($el in $elements) {{
+        try {{
+            $name = $el.Current.Name
+            $aid = $el.Current.AutomationId
+            $rect = $el.Current.BoundingRectangle
+            if ($rect -and $rect.Width -gt 0 -and $rect.Height -gt 0) {{
+                if ($rect.Left -lt $maxLeft) {{
+                    if (($name -match '(?i)search|بحث') -or ($aid -match '(?i)search')) {{
+                        $box = @{{
+                            Left = $rect.Left
+                            Top = $rect.Top
+                            Width = $rect.Width
+                            Height = $rect.Height
+                        }}
+                        break
+                    }}
+                }}
+            }}
+        }} catch {{}}
+    }}
+}}
+
+if ($box) {{
+    $box | ConvertTo-Json -Compress | Set-Content -Path '{search_out_resolved}' -Encoding utf8
+}} else {{
+    @{{ Found = $false }} | ConvertTo-Json -Compress | Set-Content -Path '{search_out_resolved}' -Encoding utf8
+}}
+"""
+    box_clicked = False
+    try:
+        search_ps.write_text(search_script, encoding="utf-8")
+        subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", str(search_ps)],
+            capture_output=True,
+            timeout=8,
+            text=True,
+            encoding="utf-8",
+            errors="replace"
+        )
+        if search_out.exists():
+            sdata = json.loads(search_out.read_text(encoding="utf-8", errors="replace"))
+            if isinstance(sdata, dict) and sdata.get("Width") and sdata.get("Width") > 0:
+                bx = int(sdata["Left"] + sdata["Width"] // 2)
+                by = int(sdata["Top"] + sdata["Height"] // 2)
+                _mouse_click(bx, by)
+                box_clicked = True
+    except Exception:
+        pass
+    finally:
+        for f in (search_ps, search_out):
+            try:
+                if f.exists():
+                    f.unlink()
+            except Exception:
+                pass
+
+    if not box_clicked:
+        _mouse_click(win_left + 180, win_top + 115)
+
+    time.sleep(0.2)
+
+    old_clip = _get_clipboard_unicode()
+    try:
+        _simulate_keybd(0x41, ctrl=True)  # Ctrl+A
+        _simulate_keybd(0x08, ctrl=False)  # Backspace
+        time.sleep(0.1)
+
+        _set_clipboard_unicode(recipient)
+        _simulate_keybd(0x56, ctrl=True)  # Ctrl+V
+        time.sleep(1.8)  # Wait 1.8 seconds for search results to filter
+    finally:
+        if old_clip:
+            _set_clipboard_unicode(old_clip)
+
+    res_center = _find_contact_element_uia(hwnd, win_left, win_width, recipient)
+    if res_center:
+        _mouse_click(res_center[0], res_center[1])
+    else:
+        _simulate_keybd(0x28, ctrl=False)
+        _simulate_keybd(0x0D, ctrl=False)
+
+    time.sleep(0.8)
+    return True
+
+
+def handle_whatsapp_send(params: Dict[str, Any]) -> ToolResult:
+    """Automate sending a message to a phone number or contact on Windows WhatsApp Desktop."""
+    recipient = str(params.get("recipient", "")).strip()
+    message = str(params.get("message", "")).strip()
+    auto_send = params.get("auto_send", True)
+    if isinstance(auto_send, str):
+        auto_send = auto_send.lower() in ("true", "1", "yes")
+
+    if not recipient:
+        return ToolResult(success=False, output=None, error="Parameter 'recipient' (phone number or contact name) is required")
+    if not message:
+        return ToolResult(success=False, output=None, error="Parameter 'message' is required")
+
+    import time
+    import urllib.parse
+
+    # Mode 1: Phone Number Mode
+    if _is_phone_number(recipient):
+        clean_phone = _normalize_moroccan_phone(recipient)
+        encoded_msg = urllib.parse.quote(message)
+        whatsapp_url = f"whatsapp://send?phone={clean_phone}&text={encoded_msg}"
+
+        try:
+            os.startfile(whatsapp_url)
+        except Exception as e:
+            try:
+                web_url = f"https://wa.me/{clean_phone}?text={encoded_msg}"
+                os.startfile(web_url)
+            except Exception as e2:
+                return ToolResult(success=False, output=None, error=f"Could not launch WhatsApp: {e}; {e2}")
+
+        time.sleep(2.0)
+        if auto_send:
+            # VK_RETURN = 0x0D
+            _simulate_keybd(0x0D, ctrl=False)
+
+        return ToolResult(
+            success=True,
+            output={
+                "mode": "phone",
+                "recipient": clean_phone,
+                "text": message,
+                "auto_sent": auto_send,
+                "message": f"✅ تم إرسال رسالة واتساب إلى الرقم {clean_phone} بنجاح!"
+            }
+        )
+
+    # Mode 2: Contact / Group Name Mode
+    else:
+        hwnd_rect = _focus_whatsapp_window()
+        if not hwnd_rect:
+            return ToolResult(success=False, output=None, error="Could not locate or bring WhatsApp window to foreground")
+        hwnd, (win_left, win_top, win_right, win_bottom) = hwnd_rect
+        win_width = win_right - win_left
+
+        opened = _open_whatsapp_chat(recipient)
+        if not opened:
+            return ToolResult(success=False, output=None, error=f"Could not open WhatsApp chat for contact '{recipient}'")
+
+        # Explicitly click bottom-right message input box before pasting message
+        input_x = win_left + int(win_width * 0.65)
+        input_y = win_bottom - 45
+        _mouse_click(input_x, input_y)
+        time.sleep(0.3)
+
+        old_clip = _get_clipboard_unicode()
+        try:
+            _set_clipboard_unicode(message)
+            _simulate_keybd(0x56, ctrl=True)  # VK_V
+            time.sleep(0.3)
+            if auto_send:
+                _simulate_keybd(0x0D, ctrl=False)  # VK_RETURN
+                time.sleep(0.2)
+        finally:
+            if old_clip:
+                _set_clipboard_unicode(old_clip)
+
+        return ToolResult(
+            success=True,
+            output={
+                "mode": "contact",
+                "recipient": recipient,
+                "text": message,
+                "auto_sent": auto_send,
+                "message": f"✅ تم إرسال رسالة واتساب إلى '{recipient}' بنجاح!"
+            }
+        )
+
+
+def handle_whatsapp_read(
+    params: Optional[Dict[str, Any]] = None,
+    contact_or_chat: str = "",
+    count: int = 10,
+    send_to_telegram: bool = True,
+    send_screenshot: bool = False,
+    **kwargs
+) -> ToolResult:
+    """Read latest messages from WhatsApp Desktop using deep UIA, Windows OCR fallback, and clean text Telegram delivery."""
+    if isinstance(params, dict):
+        contact_or_chat = params.get("contact_or_chat", contact_or_chat)
+        count = params.get("count", count)
+        send_to_telegram = params.get("send_to_telegram", send_to_telegram)
+        send_screenshot = params.get("send_screenshot", send_screenshot)
+    elif params is not None and not contact_or_chat:
+        contact_or_chat = str(params)
+
+    contact_or_chat = str(contact_or_chat or "").strip()
+    if contact_or_chat.lower() in ("meta ai", "metaai", "ميتا ai", "ميتا اي", "ميتا"):
+        contact_or_chat = "Meta AI"
+
+    import time
+    import os
+    import subprocess
+    import json
+    import re
+    from pathlib import Path
+    import win32gui
+    import win32con
+
+    # Clean up any leftover temporary inspection files
+    for tmp_file in (
+        Path("inspect_wa.ps1"), Path("inspect_wa_out.json"),
+        Path("inspect_ocr.ps1"), Path("inspect_ocr_out.json"),
+        Path("inspect_wa_contact.ps1"), Path("inspect_wa_contact_out.json"),
+        Path("inspect_wa_search.ps1"), Path("inspect_wa_search_out.json"),
+        Path("inspect_wa_res.ps1"), Path("inspect_wa_res_out.json"),
+        Path("inspect_wa_messages.ps1"), Path("inspect_wa_messages_out.json")
+    ):
+        try:
+            if tmp_file.exists():
+                tmp_file.unlink()
+        except Exception:
+            pass
+
+    # Step 1: Open chat or bring WhatsApp to foreground
+    if contact_or_chat:
+        _open_whatsapp_chat(contact_or_chat)
+    else:
+        _focus_whatsapp_window()
+        time.sleep(0.5)
+
+    # Capture cropped screenshot of right-side WhatsApp conversation pane for fallback
+    hwnd_rect = _focus_whatsapp_window()
+    chat_rect = None
+    hwnd = None
+    if hwnd_rect:
+        hwnd, (win_left, win_top, win_right, win_bottom) = hwnd_rect
+        w = win_right - win_left
+        h = win_bottom - win_top
+        if w > 400 and h > 200:
+            chat_rect = (win_left + int(w * 0.32), win_top + 60, win_right, win_bottom - 60)
+        elif w > 0 and h > 0:
+            chat_rect = (win_left, win_top, win_right, win_bottom)
+
+    screenshot_path = Path.home() / ".altron" / "whatsapp_chat.png"
+    screenshot_path.parent.mkdir(parents=True, exist_ok=True)
+    has_screenshot = False
+
+    try:
+        from PIL import ImageGrab
+        if chat_rect:
+            img = ImageGrab.grab(bbox=chat_rect)
+        else:
+            img = ImageGrab.grab()
+        img.save(str(screenshot_path), "PNG")
+        has_screenshot = True
+    except Exception:
+        try:
+            import pyautogui
+            if chat_rect:
+                cw = chat_rect[2] - chat_rect[0]
+                ch = chat_rect[3] - chat_rect[1]
+                img = pyautogui.screenshot(region=(chat_rect[0], chat_rect[1], cw, ch))
+            else:
+                img = pyautogui.screenshot()
+            img.save(str(screenshot_path))
+            has_screenshot = True
+        except Exception:
+            pass
+
+    # Step 2: Deep UIA Extraction ignoring elements outside active message pane, filtering chrome/outgoing, sorting by Top
+    latest_reply = ""
+    if hwnd_rect:
+        hwnd, (win_left, win_top, win_right, win_bottom) = hwnd_rect
+        win_width = win_right - win_left
+
+        ps_read_file = Path("inspect_wa_messages.ps1")
+        ps_read_out = Path("inspect_wa_messages_out.json")
+        ps_read_out_resolved = str(ps_read_out.resolve()).replace("\\", "\\\\").replace("'", "''")
+
+        read_script = f"""[Console]::OutputEncoding = [System.Text.Encoding]::UTF8;
+$OutputEncoding = [System.Text.Encoding]::UTF8;
+Add-Type -AssemblyName UIAutomationClient
+Add-Type -AssemblyName UIAutomationTypes
+
+$hwnd = [IntPtr]{hwnd}
+$targetWin = [System.Windows.Automation.AutomationElement]::FromHandle($hwnd)
+$collected = @()
+
+if ($targetWin) {{
+    $condTrue = [System.Windows.Automation.Condition]::TrueCondition
+    $elements = $targetWin.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condTrue)
+    $minLeft = {win_left} + ({win_width} * 0.35)
+    $minTop = {win_top} + 80
+    $maxBottom = {win_bottom} - 80
+
+    foreach ($el in $elements) {{
+        try {{
+            $rect = $el.Current.BoundingRectangle
+            if (-not $rect -or $rect.Width -le 0 -or $rect.Height -le 0) {{ continue }}
+
+            # Ignore elements outside active message history pane
+            if ($rect.Left -lt $minLeft -or $rect.Top -lt $minTop -or ($rect.Top + $rect.Height) -gt $maxBottom) {{
+                continue
+            }}
+
+            $text = $el.Current.Name
+            if (-not $text -or $text.Trim().Length -eq 0) {{
+                try {{
+                    $valObj = $el.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
+                    if ($valObj) {{
+                        $text = $valObj.Current.Value
+                    }}
+                }} catch {{}}
+            }}
+
+            if ($text -and $text.Trim().Length -gt 0) {{
+                $collected += @{{
+                    Text = $text.Trim()
+                    Top = $rect.Top
+                    Left = $rect.Left
+                }}
+            }}
+        }} catch {{}}
+    }}
+}}
+
+$collected | ConvertTo-Json -Compress | Set-Content -Path '{ps_read_out_resolved}' -Encoding utf8
+"""
+        try:
+            ps_read_file.write_text(read_script, encoding="utf-8")
+            subprocess.run(
+                ["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", str(ps_read_file)],
+                capture_output=True,
+                timeout=10,
+                text=True,
+                encoding="utf-8",
+                errors="replace"
+            )
+            if ps_read_out.exists():
+                rdata = json.loads(ps_read_out.read_text(encoding="utf-8", errors="replace"))
+                if isinstance(rdata, dict):
+                    rdata = [rdata]
+                elif not isinstance(rdata, list):
+                    rdata = []
+
+                noise_exact = {
+                    "type a message", "اكتب رسالة", "voice message", "رسالة صوتية",
+                    "attach", "ارفاق", "emojis, gifs, stickers", "ملصقات", "emoji", "إيموجي", "stickers",
+                    "delivered", "read", "sent", "تم التسليم", "تمت القراءة", "تم الإرسال",
+                    "wds-ic-read", "you:", "أنت:", "you", "أنت",
+                    "minimize", "maximize", "close", "restore", "whatsapp", "واتساب", "whatsapp web",
+                    "search", "search or start new chat", "بحث", "بحث أو بدء دردشة جديدة",
+                    "settings", "الإعدادات", "اعدادات", "profile", "الملف الشخصي",
+                    "starred messages", "الرسائل المميزة بنجمة", "new chat", "دردشة جديدة",
+                    "chats", "الدردشات", "status", "الحالة", "channels", "القنوات",
+                    "communities", "المجتمعات", "calls", "المكالمات", "archived", "المؤرشفة",
+                    "logout", "تسجيل الخروج", "online", "متصل الآن", "typing...", "يكتب الآن...",
+                    "meta ai", "metaai"
+                }
+
+                valid_messages = []
+                for item in rdata:
+                    if not isinstance(item, dict):
+                        continue
+                    txt = str(item.get("Text", "")).strip()
+                    top_pos = item.get("Top", 0)
+                    if not txt:
+                        continue
+                    t_low = txt.lower()
+                    if t_low in noise_exact or t_low == contact_or_chat.lower():
+                        continue
+                    # Exclude outgoing messages sent by the user (containing "You:" / "You " or "Delivered" or "أنت:" / "أنت ")
+                    if (
+                        t_low.startswith("you:")
+                        or t_low.startswith("you ")
+                        or t_low == "you"
+                        or t_low.startswith("أنت:")
+                        or t_low.startswith("أنت ")
+                        or t_low == "أنت"
+                        or "delivered" in t_low
+                        or "wds-ic-read" in t_low
+                    ):
+                        continue
+                    # Exclude timestamps
+                    if re.match(r'^(?:\d{1,2}:\d{2}(?::\d{2})?\s*(?:AM|PM|am|pm|ص|م)?|أمس|اليوم|yesterday|today|\d{1,2}/\d{1,2}(?:/\d{2,4})?)$', txt, re.IGNORECASE):
+                        continue
+                    if len(txt) <= 1 and not txt.isalnum():
+                        continue
+                    valid_messages.append((top_pos, txt))
+
+                # Sort remaining incoming messages by vertical position (BoundingRectangle.Top)
+                valid_messages.sort(key=lambda x: x[0])
+                if valid_messages:
+                    # Return ONLY the single latest (bottom-most) reply text
+                    latest_reply = valid_messages[-1][1]
+        except Exception:
+            pass
+        finally:
+            for f in (ps_read_file, ps_read_out):
+                try:
+                    if f.exists():
+                        f.unlink()
+                except Exception:
+                    pass
+
+    # Step 3: Windows OCR Fallback on cropped right-side chat screenshot if UIA found no message
+    if not latest_reply and has_screenshot and screenshot_path.exists():
+        ocr_ps_file = Path("inspect_ocr.ps1")
+        ocr_out_file = Path("inspect_ocr_out.json")
+        img_resolved = str(screenshot_path.resolve()).replace("\\", "\\\\").replace("'", "''")
+        ocr_out_resolved = str(ocr_out_file.resolve()).replace("\\", "\\\\").replace("'", "''")
+
+        ocr_script = """[Console]::OutputEncoding = [System.Text.Encoding]::UTF8;
+$OutputEncoding = [System.Text.Encoding]::UTF8;
+Add-Type -AssemblyName System.Runtime.WindowsRuntime
+[Windows.Storage.StorageFile, Windows.Storage, ContentType = WindowsRuntime] | Out-Null
+[Windows.Graphics.Imaging.BitmapDecoder, Windows.Graphics, ContentType = WindowsRuntime] | Out-Null
+[Windows.Media.Ocr.OcrEngine, Windows.Media.Ocr, ContentType = WindowsRuntime] | Out-Null
+
+function AwaitOperation($op) {
+    $task = [System.WindowsRuntimeSystemExtensions]::AsTask($op)
+    $task.Wait()
+    return $task.Result
+}
+
+try {
+    $file = AwaitOperation([Windows.Storage.StorageFile]::GetFileFromPathAsync('__IMG_RESOLVED__'))
+    $stream = AwaitOperation($file.OpenAsync([Windows.Storage.FileAccessMode]::Read))
+    $decoder = AwaitOperation([Windows.Graphics.Imaging.BitmapDecoder]::CreateAsync($stream))
+    $bitmap = AwaitOperation($decoder.GetSoftwareBitmapAsync())
+
+    $engine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromUserProfileLanguages()
+    if (-not $engine) {
+        $engine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromLanguage([Windows.Globalization.Language]::new("en-US"))
+    }
+    $res = AwaitOperation($engine.RecognizeAsync($bitmap))
+    $lines = @()
+    foreach ($l in $res.Lines) {
+        if ($l.Text and $l.Text.Trim().Length -gt 0) {
+            $lines += $l.Text.Trim()
+        }
+    }
+    $jsonOut = $lines | ConvertTo-Json -Compress
+    [System.IO.File]::WriteAllText('__OCR_OUT_RESOLVED__', $jsonOut, [System.Text.Encoding]::UTF8)
+} catch {
+    [System.IO.File]::WriteAllText('__OCR_OUT_RESOLVED__', '[]', [System.Text.Encoding]::UTF8)
+}
+""".replace("__IMG_RESOLVED__", img_resolved).replace("__OCR_OUT_RESOLVED__", ocr_out_resolved)
+        try:
+            ocr_ps_file.write_text(ocr_script, encoding="utf-8")
+            subprocess.run(
+                ["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", str(ocr_ps_file)],
+                capture_output=True,
+                timeout=12,
+                text=True,
+                encoding="utf-8",
+                errors="replace"
+            )
+            ocr_out = ""
+            if ocr_out_file.exists():
+                ocr_out = ocr_out_file.read_text(encoding="utf-8", errors="replace").strip()
+            if ocr_out:
+                parsed_ocr = json.loads(ocr_out)
+                if isinstance(parsed_ocr, list):
+                    ocr_lines = [str(x).strip() for x in parsed_ocr if str(x).strip()]
+                    noise_ocr = {
+                        "type a message", "اكتب رسالة", "voice message", "رسالة صوتية",
+                        "attach", "ارفاق", "emojis, gifs, stickers", "ملصقات", "delivered", "read", "sent",
+                        "wds-ic-read", "you:", "أنت:", "you", "أنت"
+                    }
+                    valid_ocr = []
+                    for line in ocr_lines:
+                        l_clean = line.strip()
+                        l_low = l_clean.lower()
+                        if not l_clean or l_low in noise_ocr or l_low == contact_or_chat.lower():
+                            continue
+                        if l_low.startswith("you:") or l_low.startswith("you ") or l_low.startswith("أنت:") or l_low.startswith("أنت ") or "delivered" in l_low:
+                            continue
+                        if re.match(r'^(?:\d{1,2}:\d{2}(?::\d{2})?\s*(?:AM|PM|am|pm|ص|م)?|أمس|اليوم|yesterday|today|\d{1,2}/\d{1,2}(?:/\d{2,4})?)$', l_clean, re.IGNORECASE):
+                            continue
+                        if len(l_clean) <= 1 and not l_clean.isalnum():
+                            continue
+                        valid_ocr.append(l_clean)
+                    if valid_ocr:
+                        latest_reply = valid_ocr[-1]
+        except Exception:
+            pass
+        finally:
+            for f in (ocr_ps_file, ocr_out_file):
+                try:
+                    if f.exists():
+                        f.unlink()
+                except Exception:
+                    pass
+
+    # Telegram Delivery: Send clean text reply to Telegram
+    sent_telegram = False
+    bot_token = TELEGRAM_BOT_TOKEN or os.environ.get("TELEGRAM_BOT_TOKEN", "")
+    chat_id = TELEGRAM_CHAT_ID or os.environ.get("TELEGRAM_CHAT_ID", "")
+    chat_name = contact_or_chat or "Active Chat"
+
+    if latest_reply:
+        telegram_text = f"💬 *رد {chat_name}:*\n\n{latest_reply}" if any('؀' <= c <= 'ۿ' for c in chat_name) else f"💬 *Reply from {chat_name}:*\n\n{latest_reply}"
+        if send_to_telegram and bot_token and chat_id:
+            send_telegram_message_async(
+                text=telegram_text,
+                token=bot_token,
+                chat_id=chat_id
+            )
+            sent_telegram = True
+
+        t_status = " (تم إرسال الرد إلى تيليجرام 📱)" if sent_telegram else ""
+        msg_summary = f"✅ أحدث رد من {chat_name}{t_status}:\n\n{latest_reply}"
+    else:
+        if has_screenshot and screenshot_path.exists() and send_to_telegram and bot_token and chat_id:
+            caption = f"💬 لقطة محادثة واتساب ({chat_name}) مرفقة أدناه."
+            send_telegram_photo_async(
+                image_path=str(screenshot_path),
+                caption=caption,
+                token=bot_token,
+                chat_id=chat_id
+            )
+            sent_telegram = True
+
+        t_status = " (تم إرسال لقطة المحادثة إلى تيليجرام 📱)" if sent_telegram else ""
+        msg_summary = f"✅ تم فحص محادثة {chat_name} بنجاح{t_status}."
+
+    return ToolResult(
+        success=True,
+        output={
+            "chat": chat_name,
+            "latest_reply": latest_reply,
+            "reply": latest_reply,
+            "messages": [latest_reply] if latest_reply else [],
+            "count": 1 if latest_reply else 0,
+            "sent_to_telegram": sent_telegram,
+            "screenshot_path": str(screenshot_path) if has_screenshot else "",
+            "message": msg_summary
+        }
+    )
+
+
+whatsapp_read = handle_whatsapp_read
+
+
 # === Create Default Registry ===
 
 def create_default_registry() -> ToolRegistry:
@@ -1470,15 +3046,27 @@ def create_default_registry() -> ToolRegistry:
 
     registry.register(Tool(
         name="desktop_icon_position",
-        description="Visually move desktop icons or files on the Windows Desktop screen to specific positions (center, top, bottom, left, right, top_left, top_right, bottom_left, bottom_right) or exact (x, y) coordinates",
+        description="Visually move DESKTOP ICONS, shortcut files, or folders located on the Windows Desktop wallpaper background. NEVER use this tool for open application windows, browsers, or running programs.",
         category=ToolCategory.SYSTEM,
         parameters=[
-            ToolParameter("target", "string", "Name of the desktop icon/file to move (e.g. 'her', 'main', 'PlayerMusic', or 'all')"),
+            ToolParameter("target", "string", "Name of the desktop shortcut/file to move on desktop background (e.g. 'her', 'main', 'PlayerMusic', or 'all')"),
             ToolParameter("position", "string", "Target screen position preset: 'center', 'top', 'bottom', 'left', 'right', 'top_left', 'top_right', 'bottom_left', 'bottom_right'", required=False, default="center", enum=["center", "top", "bottom", "left", "right", "top_left", "top_right", "bottom_left", "bottom_right"]),
             ToolParameter("x", "number", "Optional exact X screen coordinate", required=False, default=None),
             ToolParameter("y", "number", "Optional exact Y screen coordinate", required=False, default=None)
         ],
         handler=handle_desktop_icon_position,
+        requires_permission=False
+    ))
+
+    registry.register(Tool(
+        name="move_application_window",
+        description="Move, snap, position, maximize, or minimize an open APPLICATION WINDOW (e.g. browser, Chrome, Brave, Edge, VS Code, OmniRoute, or any running software window). ALWAYS use this tool whenever the user mentions a window (نافذة), browser (متصفح), or running program.",
+        category=ToolCategory.SYSTEM,
+        parameters=[
+            ToolParameter("window_query", "string", "Name, title, or type of the open window/app to move (e.g. 'omniroute', 'brave', 'chrome', 'vscode', or 'المتصفح')"),
+            ToolParameter("position", "string", "Target position preset: 'right', 'left', 'center', 'top', 'bottom', 'top_left', 'top_right', 'bottom_left', 'bottom_right', 'maximize', 'minimize'", required=False, default="right", enum=["right", "left", "center", "top", "bottom", "top_left", "top_right", "bottom_left", "bottom_right", "maximize", "minimize"])
+        ],
+        handler=handle_move_application_window,
         requires_permission=False
     ))
 
@@ -1522,6 +3110,19 @@ def create_default_registry() -> ToolRegistry:
     ))
 
     registry.register(Tool(
+        name="youtube_play_and_summarize",
+        description="Search for or open a YouTube video (by query or direct URL) to extract its spoken transcript and summarize its content. Set play=False when the user only asks to summarize or explain. Set play=True ONLY when the user explicitly asks to play/open/watch the video.",
+        category=ToolCategory.BROWSER,
+        parameters=[
+            ToolParameter("query_or_url", "string", "Search query or direct YouTube URL to find and summarize"),
+            ToolParameter("play", "boolean", "Whether to launch and play the video in the default browser. Set to False when user only wants to summarize/explain. Set to True only when user explicitly asks to play/open.", required=False, default=False),
+            ToolParameter("summarize", "boolean", "Whether to extract transcript text for summarization (default True)", required=False, default=True)
+        ],
+        handler=handle_youtube_play_and_summarize,
+        requires_permission=False
+    ))
+
+    registry.register(Tool(
         name="web_fetch",
         description="Fetch and extract readable text content from a web URL",
         category=ToolCategory.BROWSER,
@@ -1557,6 +3158,62 @@ def create_default_registry() -> ToolRegistry:
             ToolParameter("file_path", "string", "Path to a local file to send as a document", required=False, default="")
         ],
         handler=handle_send_to_telegram,
+        requires_permission=False
+    ))
+
+    # Screen Capture & Vision Tools
+    registry.register(Tool(
+        name="capture_and_inspect_screen",
+        description="Capture a live screenshot of the Windows desktop, inspect the active foreground window and open visible applications, and optionally deliver the screenshot to the user's Telegram phone chat",
+        category=ToolCategory.SYSTEM,
+        parameters=[
+            ToolParameter("send_to_telegram", "boolean", "Whether to deliver the screenshot photo to Telegram (default True)", required=False, default=True),
+            ToolParameter("caption", "string", "Optional caption for the Telegram photo", required=False, default="")
+        ],
+        handler=handle_capture_and_inspect_screen,
+        requires_permission=False
+    ))
+
+    # Windows Clipboard Manager Tool
+    registry.register(Tool(
+        name="clipboard_manager",
+        description="Manage the Windows clipboard: read current text ('get'), copy text to clipboard ('set'), paste into foreground window ('paste'), copy selected text ('copy_selected'), view or restore history ('history'), or clear clipboard ('clear')",
+        category=ToolCategory.UTILITY,
+        parameters=[
+            ToolParameter("action", "string", "Clipboard action: 'get', 'set', 'paste', 'copy_selected', 'history', 'clear'", enum=["get", "set", "paste", "copy_selected", "history", "clear"]),
+            ToolParameter("text", "string", "Text to copy or paste (used with 'set' or 'paste')", required=False, default=""),
+            ToolParameter("index", "number", "1-based history index to restore (used with 'history')", required=False, default=0)
+        ],
+        handler=handle_clipboard_manager,
+        requires_permission=False
+    ))
+
+    # WhatsApp Desktop Sender Tool
+    registry.register(Tool(
+        name="whatsapp_send",
+        description="Send a message to a contact name or phone number (e.g. Moroccan 06/07 numbers or international numbers) via Windows WhatsApp Desktop",
+        category=ToolCategory.UTILITY,
+        parameters=[
+            ToolParameter("recipient", "string", "Recipient phone number (e.g. '0612345678', '+2126...') or contact/group name"),
+            ToolParameter("message", "string", "Text message to send"),
+            ToolParameter("auto_send", "boolean", "Whether to automatically press Enter to send the message (default True)", required=False, default=True)
+        ],
+        handler=handle_whatsapp_send,
+        requires_permission=False
+    ))
+
+    # WhatsApp Desktop Reader Tool
+    registry.register(Tool(
+        name="whatsapp_read",
+        description="Read the latest messages from any WhatsApp Desktop chat (e.g. contact name or Meta AI) and deliver clean text or screenshot to Telegram",
+        category=ToolCategory.UTILITY,
+        parameters=[
+            ToolParameter("contact_or_chat", "string", "Contact name or chat title to open and read from (optional)", required=False, default=""),
+            ToolParameter("count", "number", "Number of latest messages to return (default 10)", required=False, default=10),
+            ToolParameter("send_to_telegram", "boolean", "Whether to deliver the response to Telegram (default True)", required=False, default=True),
+            ToolParameter("send_screenshot", "boolean", "Whether to explicitly send the chat screenshot photo instead of text (default False)", required=False, default=False)
+        ],
+        handler=handle_whatsapp_read,
         requires_permission=False
     ))
 
