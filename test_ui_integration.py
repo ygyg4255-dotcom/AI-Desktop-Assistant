@@ -43,7 +43,7 @@ def test_new_file_tools():
         assert not test_file.exists(), "File should not be created without approval"
         print("    [OK] Unapproved write blocked by permission check")
 
-        res_approved = handle_file_write({"path": str(test_file), "content": "Hello World", "_approved": True})
+        res_approved = handle_file_write({"path": str(test_file), "content": "Hello World"}, approved=True)
         assert res_approved.success is True
         assert test_file.exists()
         assert test_file.read_text(encoding="utf-8") == "Hello World"
@@ -67,7 +67,7 @@ def test_new_file_tools():
         assert copy_dest.exists(), "File should not be moved without approval"
         print("    [OK] Unapproved move blocked by permission check")
 
-        move_approved = handle_file_move({"source": str(copy_dest), "destination": str(move_dest), "_approved": True})
+        move_approved = handle_file_move({"source": str(copy_dest), "destination": str(move_dest)}, approved=True)
         assert move_approved.success is True
         assert move_dest.exists()
         assert not copy_dest.exists(), "Original file should be moved"
@@ -82,7 +82,7 @@ def test_new_file_tools():
 
         # 5. Test terminal_execute
         print("\n[1.5] Testing terminal_execute (approved execution)...")
-        term_res = handle_terminal_command({"command": "echo test_execution", "_approved": True})
+        term_res = handle_terminal_command({"command": "echo test_execution"}, approved=True)
         assert term_res.success is True
         assert "test_execution" in term_res.output.get("stdout", "")
         print("    [OK] Approved terminal command executed and captured output")

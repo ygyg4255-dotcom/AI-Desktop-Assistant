@@ -14,6 +14,7 @@ import urllib.request
 import urllib.parse
 from pathlib import Path
 import html
+import inspect
 from src.services.telegram_service import send_telegram_message, send_telegram_message_async, send_telegram_document, send_telegram_photo_async
 from src.config.settings import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 
@@ -66,6 +67,17 @@ class Tool:
     requires_permission: bool = True
     is_dangerous: bool = False
 
+    def run(self, params: Dict[str, Any], approved: bool = False) -> ToolResult:
+        """Dispatch to the handler with model input sanitized.
+
+        Approval is passed out-of-band as a keyword argument, never via the
+        input dict, so model-supplied keys cannot bypass the permission gate.
+        """
+        clean = strip_internal_keys(params)
+        if approved and "approved" in inspect.signature(self.handler).parameters:
+            return self.handler(clean, approved=True)
+        return self.handler(clean)
+
     def to_api_schema(self) -> Dict[str, Any]:
         """Convert to Anthropic tool use schema format."""
         properties = {}
@@ -96,6 +108,11 @@ class Tool:
         }
 
 
+def strip_internal_keys(params: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Remove reserved "_"-prefixed keys from model-supplied tool input."""
+    return {k: v for k, v in (params or {}).items() if not str(k).startswith("_")}
+
+
 class ToolRegistry:
     """Registry for managing available tools."""
 
@@ -103,7 +120,17 @@ class ToolRegistry:
         self._tools: Dict[str, Tool] = {}
 
     def register(self, tool: Tool) -> None:
-        """Register a tool."""
+        """Register a tool.
+
+        Raises ValueError if the tool requires permission but its handler cannot
+        accept the out-of-band ``approved`` argument; such a tool would otherwise
+        run unprompted or never be approvable.
+        """
+        if tool.requires_permission and "approved" not in inspect.signature(tool.handler).parameters:
+            raise ValueError(
+                f"Tool '{tool.name}' has requires_permission=True but its handler "
+                f"'{getattr(tool.handler, '__name__', tool.handler)}' has no 'approved' parameter"
+            )
         self._tools[tool.name] = tool
 
     def get(self, name: str) -> Optional[Tool]:
@@ -137,7 +164,7 @@ class ToolRegistry:
             params = kwargs["input"]
         else:
             params = kwargs
-        return tool.handler(params)
+        return tool.run(params)
 
 
 # === Built-in Tool Handlers ===
@@ -217,7 +244,7 @@ def handle_file_read(params: Dict[str, Any]) -> ToolResult:
         )
 
 
-def handle_file_write(params: Dict[str, Any]) -> ToolResult:
+def handle_file_write(params: Dict[str, Any], approved: bool = False) -> ToolResult:
     """Handle file write tool - requires permission."""
     file_path = params.get("path", "")
     content = params.get("content", "")
@@ -225,7 +252,7 @@ def handle_file_write(params: Dict[str, Any]) -> ToolResult:
     path = Path(file_path).expanduser()
     exists = path.exists()
 
-    if not params.get("_approved"):
+    if not approved:
         return ToolResult(
             success=False,
             output=None,
@@ -250,12 +277,12 @@ def handle_file_write(params: Dict[str, Any]) -> ToolResult:
         return ToolResult(success=False, output=None, error=str(e))
 
 
-def handle_file_delete(params: Dict[str, Any]) -> ToolResult:
+def handle_file_delete(params: Dict[str, Any], approved: bool = False) -> ToolResult:
     """Handle file delete tool - requires permission."""
     file_path = params.get("path", "")
     path = Path(file_path).expanduser()
 
-    if not params.get("_approved"):
+    if not approved:
         return ToolResult(
             success=False,
             output=None,
@@ -313,7 +340,7 @@ def handle_file_copy(params: Dict[str, Any]) -> ToolResult:
         return ToolResult(success=False, output=None, error=str(e))
 
 
-def handle_file_move(params: Dict[str, Any]) -> ToolResult:
+def handle_file_move(params: Dict[str, Any], approved: bool = False) -> ToolResult:
     """Handle file or directory move/rename - requires permission."""
     src_str = params.get("source", "")
     dst_str = params.get("destination", "")
@@ -324,7 +351,7 @@ def handle_file_move(params: Dict[str, Any]) -> ToolResult:
     src = Path(src_str).expanduser()
     dst = Path(dst_str).expanduser()
 
-    if not params.get("_approved"):
+    if not approved:
         return ToolResult(
             success=False,
             output=None,
@@ -373,12 +400,12 @@ def handle_file_open(params: Dict[str, Any]) -> ToolResult:
         return ToolResult(success=False, output=None, error=str(e))
 
 
-def handle_terminal_command(params: Dict[str, Any]) -> ToolResult:
+def handle_terminal_command(params: Dict[str, Any], approved: bool = False) -> ToolResult:
     """Handle terminal command execution - requires permission."""
     command = params.get("command", "")
     shell = params.get("shell", "powershell").lower()
 
-    if not params.get("_approved"):
+    if not approved:
         return ToolResult(
             success=False,
             output=None,
@@ -477,7 +504,7 @@ def handle_app_open(params: Dict[str, Any]) -> ToolResult:
         )
 
 
-def handle_app_close(params: Dict[str, Any]) -> ToolResult:
+def handle_app_close(params: Dict[str, Any], approved: bool = False) -> ToolResult:
     """Handle application close tool - requires permission."""
     import psutil
 
@@ -485,7 +512,7 @@ def handle_app_close(params: Dict[str, Any]) -> ToolResult:
     process_id = params.get("pid")
     target = f"process ID {process_id}" if process_id else app_name
 
-    if not params.get("_approved"):
+    if not approved:
         return ToolResult(
             success=False,
             output=None,
@@ -1001,7 +1028,7 @@ def handle_desktop_icon_position(params: Dict[str, Any]) -> ToolResult:
         return ToolResult(success=False, output=None, error=str(e))
 
 
-def handle_code_edit(params: Dict[str, Any]) -> ToolResult:
+def handle_code_edit(params: Dict[str, Any], approved: bool = False) -> ToolResult:
     """Handle targeted code search and replace within a file."""
     path_str = params.get("path", "")
     old_string = params.get("old_string", "")
@@ -1040,7 +1067,7 @@ def handle_code_edit(params: Dict[str, Any]) -> ToolResult:
         )
 
     # Permission check for dangerous modification
-    if not params.get("_approved", False):
+    if not approved:
         return ToolResult(
             success=False,
             output=None,

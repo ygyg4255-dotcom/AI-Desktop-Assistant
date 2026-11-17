@@ -104,9 +104,8 @@ def test_code_edit_tool():
         res_approved = handle_code_edit({
             "path": str(test_file),
             "old_string": "result = x * 2",
-            "new_string": "result = x * 10",
-            "_approved": True
-        })
+            "new_string": "result = x * 10"
+        }, approved=True)
         assert res_approved.success is True
         assert res_approved.output.get("occurrences_replaced") == 1
         updated = test_file.read_text(encoding="utf-8")
@@ -120,9 +119,8 @@ def test_code_edit_tool():
         res_missing = handle_code_edit({
             "path": str(test_file),
             "old_string": "nonexistent_code()",
-            "new_string": "new_code()",
-            "_approved": True
-        })
+            "new_string": "new_code()"
+        }, approved=True)
         assert res_missing.success is False
         assert "not found" in res_missing.error.lower()
         print("    [OK] Correctly reported missing target text")
@@ -136,9 +134,8 @@ def test_code_edit_tool():
             "path": str(multi_file),
             "old_string": "foo",
             "new_string": "replacement",
-            "replace_all": False,
-            "_approved": True
-        })
+            "replace_all": False
+        }, approved=True)
         assert res_ambiguous.success is False
         assert "occurs 3 times" in res_ambiguous.error
         print("    [OK] Ambiguous replacement blocked (requires replace_all=True)")
@@ -149,9 +146,8 @@ def test_code_edit_tool():
             "path": str(multi_file),
             "old_string": "foo",
             "new_string": "replacement",
-            "replace_all": True,
-            "_approved": True
-        })
+            "replace_all": True
+        }, approved=True)
         assert res_all.success is True
         assert res_all.output.get("occurrences_replaced") == 3
         assert multi_file.read_text(encoding="utf-8") == "replacement bar replacement baz replacement"

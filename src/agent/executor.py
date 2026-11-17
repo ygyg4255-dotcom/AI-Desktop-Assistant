@@ -1231,7 +1231,7 @@ Available tools are provided in the tool definitions. Use them responsibly."""
 
         return tool_uses
 
-    def _execute_tool(self, tool_name: str, tool_input: Dict[str, Any]) -> ToolResult:
+    def _execute_tool(self, tool_name: str, tool_input: Dict[str, Any], approved: bool = False) -> ToolResult:
         """Execute a tool by name."""
         tool = self._registry.get(tool_name)
         if not tool:
@@ -1241,7 +1241,7 @@ Available tools are provided in the tool definitions. Use them responsibly."""
                 error=f"Unknown tool: {tool_name}"
             )
 
-        return tool.handler(tool_input)
+        return tool.run(tool_input, approved=approved)
 
     def _execute_tool_with_permission(
         self,
@@ -1260,9 +1260,7 @@ Available tools are provided in the tool definitions. Use them responsibly."""
 
         # Check session permission
         if self._gate.get_permission_level(tool_name) == PermissionLevel.ALLOW:
-            exec_input = dict(tool_input)
-            exec_input["_approved"] = True
-            return tool.handler(exec_input)
+            return tool.run(tool_input, approved=True)
         elif self._gate.get_permission_level(tool_name) == PermissionLevel.DENY:
             return ToolResult(
                 success=False,
@@ -1274,9 +1272,7 @@ Available tools are provided in the tool definitions. Use them responsibly."""
         if self._database:
             saved_permission = self._database.get_tool_permission(tool_name)
             if saved_permission == "allow":
-                exec_input = dict(tool_input)
-                exec_input["_approved"] = True
-                return tool.handler(exec_input)
+                return tool.run(tool_input, approved=True)
             elif saved_permission == "deny":
                 return ToolResult(
                     success=False,
@@ -1286,7 +1282,7 @@ Available tools are provided in the tool definitions. Use them responsibly."""
 
         # Tool requires permission
         if tool.requires_permission:
-            result = tool.handler(tool_input)
+            result = tool.run(tool_input)
 
             if result.requires_permission:
                 self._state = AgentState.AWAITING_PERMISSION
@@ -1303,7 +1299,7 @@ Available tools are provided in the tool definitions. Use them responsibly."""
 
                 return result
 
-        return tool.handler(tool_input)
+        return tool.run(tool_input)
 
     def process(
         self,
@@ -1672,9 +1668,7 @@ Available tools are provided in the tool definitions. Use them responsibly."""
                         else:
                             exec_id = None
 
-                        exec_input = dict(tool_input)
-                        exec_input["_approved"] = True
-                        result = self._execute_tool(tool_name, exec_input)
+                        result = self._execute_tool(tool_name, tool_input, approved=True)
 
                         if self._database and self._conversation_id and exec_id:
                             self._database.update_tool_execution(
