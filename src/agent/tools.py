@@ -504,22 +504,17 @@ def handle_app_open(params: Dict[str, Any], approved: bool = False) -> ToolResul
             try:
                 os.startfile(target)
             except Exception:
-                if app_path:
-                    subprocess.Popen(
-                        [app_path],
-                        stdin=subprocess.DEVNULL,
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
-                        shell=True
-                    )
-                else:
-                    subprocess.Popen(
-                        f'start "" "{app_name}"',
-                        stdin=subprocess.DEVNULL,
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
-                        shell=True
-                    )
+                # No shell: an argument list cannot be quote-injected.
+                exe = app_path or shutil.which(app_name)
+                if not exe:
+                    raise FileNotFoundError(f"Application not found: {app_name}")
+                subprocess.Popen(
+                    [exe],
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    close_fds=True
+                )
         elif platform.system() == "Darwin":
             subprocess.Popen(
                 ["open", target],

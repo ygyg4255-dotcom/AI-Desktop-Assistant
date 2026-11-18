@@ -2,6 +2,7 @@
 
 Automatically spawns and manages the OmniRoute proxy server on app launch.
 """
+import shutil
 import subprocess
 import time
 import urllib.request
@@ -60,9 +61,12 @@ class OmniRouteManager:
         # Try to spawn omniroute in background
         try:
             # CREATE_NO_WINDOW = 0x08000000 - prevents console window on Windows
+            # Resolve the launcher (e.g. omniroute.cmd on Windows) so no shell is needed.
+            exe = shutil.which("omniroute")
+            if not exe:
+                return False
             self._process = subprocess.Popen(
-                "omniroute",
-                shell=True,
+                [exe],
                 creationflags=0x08000000,  # CREATE_NO_WINDOW
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL
