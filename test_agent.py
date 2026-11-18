@@ -158,7 +158,9 @@ def test_permission_gate():
 
     print("\n[3.1] Testing safe tools...")
     assert gate.is_safe("file_search") == True
-    assert gate.is_safe("file_read") == True
+    # file_read is conditional (S4): path-dependent approval, never blanket-safe
+    assert gate.is_safe("file_read") == False
+    assert "file_read" in gate.CONDITIONAL_TOOLS
     assert gate.is_safe("process_list") == True
     assert gate.is_safe("system_info") == True
     print("    [OK] Safe tools identified correctly")
@@ -173,7 +175,10 @@ def test_permission_gate():
     print("\n[3.3] Testing permission requirements...")
     assert gate.requires_permission("file_write") == True
     assert gate.requires_permission("terminal_execute") == True
+    # Conditional tools are gated per call via needs_approval_*, not by tool name
     assert gate.requires_permission("file_read") == False
+    from src.agent.permissions import needs_approval_file_read
+    assert needs_approval_file_read("C:/Users/x/.ssh/id_rsa") == True
     print("    [OK] Permission requirements correct")
 
     print("\n[3.4] Testing session permissions...")
