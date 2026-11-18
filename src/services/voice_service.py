@@ -14,6 +14,8 @@ from typing import Optional, List
 import numpy as np
 from PySide6.QtCore import QObject, QThread, Signal
 
+from src.services.signals import CallbackSignal
+
 from src.services.hud_status import update_hud_status
 
 # Global echo prevention event: set when TTS is speaking, cleared when finished
@@ -444,17 +446,20 @@ class FastVAD:
         return self._energy_vad.is_speech(frame_bytes)
 
 
-class SpeechRecognitionWorker(QThread):
-    """Always-On Continuous Speech Recognition background worker with VAD and fast CPU STT."""
+class SpeechRecognitionListener:
+    """Always-on continuous speech recognition loop (VAD + fast CPU STT), Qt-free.
 
-    started_listening = Signal()
-    status_updated = Signal(str)
-    text_recognized = Signal(str)
-    error_occurred = Signal(str)
-    finished_listening = Signal()
+    The headless runtime (main.py) calls ``run()`` on a plain ``threading.Thread``;
+    the signals are ``CallbackSignal`` objects invoked on that thread.
+    """
 
-    def __init__(self, languages: Optional[List[str]] = None, model_size: Optional[str] = None, parent=None):
-        super().__init__(parent)
+    started_listening = CallbackSignal()
+    status_updated = CallbackSignal()
+    text_recognized = CallbackSignal()
+    error_occurred = CallbackSignal()
+    finished_listening = CallbackSignal()
+
+    def __init__(self, languages: Optional[List[str]] = None, model_size: Optional[str] = None):
         self._is_aborted = False
         self._is_paused = False
         self._languages = languages or ["en-US", "ar-SA", "ar-MA"]
@@ -745,3 +750,23 @@ class SpeechRecognitionWorker(QThread):
                 self.error_occurred.emit(f"Microphone error: {e}")
         finally:
             self.finished_listening.emit()
+
+
+class SpeechRecognitionWorker(QThread, SpeechRecognitionListener):
+    """Legacy Qt wrapper (deprecated src/ui/ only): same loop, real Qt signals.
+
+    Start it with ``start()``; never call ``run()`` on it from a Python thread.
+    """
+
+    started_listening = Signal()
+    status_updated = Signal(str)
+    text_recognized = Signal(str)
+    error_occurred = Signal(str)
+    finished_listening = Signal()
+
+    def __init__(self, languages: Optional[List[str]] = None, model_size: Optional[str] = None, parent=None):
+        QThread.__init__(self, parent)
+        SpeechRecognitionListener.__init__(self, languages, model_size)
+
+    def run(self) -> None:
+        SpeechRecognitionListener.run(self)

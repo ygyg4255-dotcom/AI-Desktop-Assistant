@@ -16,8 +16,6 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from PySide6.QtCore import QCoreApplication, Qt
-
 from src.config import Settings
 from src.config.settings import get_config_value
 from src.storage.db import Database
@@ -32,14 +30,14 @@ from src.agent.approvals import (
 from src.services.hud_status import init_hud_status, update_hud_status
 from src.services.voice_service import (
     TTSManager,
-    SpeechRecognitionWorker,
+    SpeechRecognitionListener,
     is_speaking_event,
     parse_wake_word,
 )
 from src.services.telegram_service import (
     TelegramApprovalBridge,
     TelegramBotApi,
-    TelegramRemoteWorker,
+    TelegramRemoteListener,
     send_telegram_message_async,
 )
 from ui_server import start_hud_server
@@ -87,9 +85,6 @@ def make_approval_listener(bridge_ref: list, notify_telegram=send_telegram_messa
 
 def main() -> None:
     """Coordinate and supervise all Altron subsystems concurrently."""
-    # Ensure headless Qt core application is initialized for signals/events
-    _qt_app = QCoreApplication.instance() or QCoreApplication(sys.argv)
-
     # Initialize shared HUD status
     init_hud_status()
 
@@ -191,7 +186,7 @@ def main() -> None:
     def _run_voice():
         while not shutdown_event.is_set():
             try:
-                worker = SpeechRecognitionWorker()
+                worker = SpeechRecognitionListener()
                 active_voice_worker[0] = worker
 
                 def _on_recognized(text: str):
@@ -250,12 +245,12 @@ def main() -> None:
                     )
                     update_hud_status(state="Idle")
 
-                worker.text_recognized.connect(_on_recognized, Qt.ConnectionType.DirectConnection)
-                worker.error_occurred.connect(
-                    lambda err: print(f"[Voice Error] {err}"),
-                    Qt.ConnectionType.DirectConnection,
-                )
+                # Plain-Python listener: callbacks run on this thread (no Qt event loop).
+                worker.text_recognized.connect(_on_recognized)
+                worker.error_occurred.connect(lambda err: print(f"[Voice Error] {err}"))
                 worker.run()
+                if not shutdown_event.is_set():
+                    shutdown_event.wait(2)  # listener ended on its own: back off before restarting
             except Exception as voice_err:
                 print(f"[Voice Subsystem Error] {voice_err}")
                 time.sleep(2)
@@ -286,7 +281,7 @@ def main() -> None:
 
         while not shutdown_event.is_set():
             try:
-                tg_worker = TelegramRemoteWorker(
+                tg_worker = TelegramRemoteListener(
                     bot_token=bot_token,
                     allowed_chat_id=chat_id,
                     callback_handler=tg_bridge[0].handle_callback_query if tg_bridge[0] else None,
@@ -315,10 +310,10 @@ def main() -> None:
                         origin=CHANNEL_TELEGRAM,
                     )
 
-                tg_worker.remote_command_received.connect(
-                    _on_telegram_command, Qt.ConnectionType.DirectConnection
-                )
+                tg_worker.remote_command_received.connect(_on_telegram_command)
                 tg_worker.run()
+                if not shutdown_event.is_set():
+                    shutdown_event.wait(5)  # listener ended on its own: back off before restarting
             except Exception as tg_err:
                 print(f"[Telegram Subsystem Error] {tg_err}")
                 time.sleep(5)

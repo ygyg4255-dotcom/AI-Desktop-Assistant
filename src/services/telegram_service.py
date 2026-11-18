@@ -6,6 +6,7 @@ import os
 import re
 import json
 import threading
+import time
 import urllib.request
 from pathlib import Path
 from typing import Callable, Optional
@@ -13,6 +14,7 @@ from typing import Callable, Optional
 from PySide6.QtCore import QThread, Signal
 from src.config.paths import runtime_file
 from src.config.settings import get_config_value
+from src.services.signals import CallbackSignal
 
 _BOT_TOKEN_RE = re.compile(r"bot\d{5,}:[A-Za-z0-9_-]{20,}")
 
@@ -381,14 +383,17 @@ def save_update_offset(token: Optional[str], offset: int) -> None:
         print(f"[Telegram Worker] Could not persist update offset: {type(err).__name__}")
 
 
-class TelegramRemoteWorker(QThread):
-    """Background worker that long-polls Telegram getUpdates for phone remote control."""
+class TelegramRemoteListener:
+    """Long-polls Telegram getUpdates for phone remote control (Qt-free).
 
-    remote_command_received = Signal(str)
+    The headless runtime (main.py) calls ``run()`` on a plain ``threading.Thread``;
+    ``remote_command_received`` is a ``CallbackSignal`` invoked on that thread.
+    """
 
-    def __init__(self, bot_token: Optional[str] = None, allowed_chat_id: Optional[str] = None, parent=None,
+    remote_command_received = CallbackSignal()
+
+    def __init__(self, bot_token: Optional[str] = None, allowed_chat_id: Optional[str] = None,
                  callback_handler: Optional[Callable[[dict], object]] = None):
-        super().__init__(parent)
         self._token, self._allowed_chat_id = resolve_credentials(bot_token, allowed_chat_id)
         self._is_running = True
         self._offset = load_update_offset(self._token)
@@ -419,7 +424,7 @@ class TelegramRemoteWorker(QThread):
                     data = json.loads(resp.read().decode("utf-8"))
 
                 if not data.get("ok"):
-                    self.msleep(1000)
+                    time.sleep(1.0)
                     continue
 
                 for update in data.get("result", []):
@@ -461,4 +466,21 @@ class TelegramRemoteWorker(QThread):
             except Exception as e:
                 # On network glitch or timeout, back off briefly
                 print(f"[Telegram Worker] Polling error: {redact_secrets(e, self._token)}")
-                self.msleep(2000)
+                time.sleep(2.0)
+
+
+class TelegramRemoteWorker(QThread, TelegramRemoteListener):
+    """Legacy Qt wrapper (deprecated src/ui/ only): same loop, a real Qt signal.
+
+    Start it with ``start()``; never call ``run()`` on it from a Python thread.
+    """
+
+    remote_command_received = Signal(str)
+
+    def __init__(self, bot_token: Optional[str] = None, allowed_chat_id: Optional[str] = None, parent=None,
+                 callback_handler: Optional[Callable[[dict], object]] = None):
+        QThread.__init__(self, parent)
+        TelegramRemoteListener.__init__(self, bot_token, allowed_chat_id, callback_handler)
+
+    def run(self) -> None:
+        TelegramRemoteListener.run(self)
