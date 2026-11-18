@@ -20,12 +20,17 @@ from pathlib import Path
 import html
 import inspect
 from src.services.telegram_service import send_telegram_message, send_telegram_message_async, send_telegram_document, send_telegram_photo_async
-from src.config.settings import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+from src.config.settings import get_config_value
 from src.agent.permissions import (
     needs_approval_app_open,
     needs_approval_file_open,
     needs_approval_file_read,
 )
+
+
+def _telegram_credentials() -> tuple:
+    """(bot_token, chat_id) via the canonical .env > environment > default lookup."""
+    return get_config_value("TELEGRAM_BOT_TOKEN"), get_config_value("TELEGRAM_CHAT_ID")
 
 
 class ToolCategory(Enum):
@@ -1853,8 +1858,7 @@ def handle_create_and_send_pdf(params: Dict[str, Any]) -> ToolResult:
         sent_telegram = False
         telegram_status = ""
         if send_to_phone:
-            bot_token = TELEGRAM_BOT_TOKEN or os.environ.get("TELEGRAM_BOT_TOKEN", "")
-            chat_id = TELEGRAM_CHAT_ID or os.environ.get("TELEGRAM_CHAT_ID", "")
+            bot_token, chat_id = _telegram_credentials()
             if bot_token and chat_id:
                 sent_telegram = send_telegram_document(
                     file_path=str(out_path),
@@ -1887,8 +1891,7 @@ def handle_create_and_send_pdf(params: Dict[str, Any]) -> ToolResult:
 
 def handle_send_to_telegram(params: Dict[str, Any], approved: bool = False) -> ToolResult:
     """Send text messages (auto) or local files (requires permission) to the authorized Telegram chat."""
-    bot_token = TELEGRAM_BOT_TOKEN or os.environ.get("TELEGRAM_BOT_TOKEN", "")
-    chat_id = TELEGRAM_CHAT_ID or os.environ.get("TELEGRAM_CHAT_ID", "")
+    bot_token, chat_id = _telegram_credentials()
 
     if not bot_token or not chat_id:
         return ToolResult(
@@ -2037,8 +2040,7 @@ def handle_capture_and_inspect_screen(params: Dict[str, Any]) -> ToolResult:
     sent_telegram = False
     telegram_status = ""
     if send_to_telegram:
-        bot_token = TELEGRAM_BOT_TOKEN or os.environ.get("TELEGRAM_BOT_TOKEN", "")
-        chat_id = TELEGRAM_CHAT_ID or os.environ.get("TELEGRAM_CHAT_ID", "")
+        bot_token, chat_id = _telegram_credentials()
         photo_caption = caption or f"🖥️ Live Screen: {active_window}"
         if bot_token and chat_id:
             send_telegram_photo_async(
@@ -2991,8 +2993,7 @@ try {
 
     # Telegram Delivery: Send clean text reply to Telegram
     sent_telegram = False
-    bot_token = TELEGRAM_BOT_TOKEN or os.environ.get("TELEGRAM_BOT_TOKEN", "")
-    chat_id = TELEGRAM_CHAT_ID or os.environ.get("TELEGRAM_CHAT_ID", "")
+    bot_token, chat_id = _telegram_credentials()
     chat_name = contact_or_chat or "Active Chat"
 
     if latest_reply:

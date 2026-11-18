@@ -74,3 +74,11 @@ def test_save_ai_config_defaults_to_canonical_env_path(env_file):
 def test_single_default_model_definition():
     assert ai_client.DEFAULT_MODEL is settings.DEFAULT_MODEL
     assert settings.DEFAULT_MODEL == "claude-sonnet-5-5"
+
+
+def test_agent_tools_use_the_same_telegram_precedence(env_file, monkeypatch):
+    from src.agent import tools as tools_mod
+    env_file.write_text("TELEGRAM_BOT_TOKEN=file-token\n", encoding="utf-8")
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "env-token")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "env-chat")
+    assert tools_mod._telegram_credentials() == ("file-token", "env-chat")

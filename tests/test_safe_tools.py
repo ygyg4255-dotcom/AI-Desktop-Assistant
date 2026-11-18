@@ -60,8 +60,7 @@ def test_file_copy_runs_when_approved(tmp_path):
 
 
 def test_telegram_file_requires_approval_and_sends_nothing(monkeypatch):
-    monkeypatch.setattr(tools_mod, "TELEGRAM_BOT_TOKEN", "t")
-    monkeypatch.setattr(tools_mod, "TELEGRAM_CHAT_ID", "c")
+    monkeypatch.setattr(tools_mod, "_telegram_credentials", lambda: ("t", "c"))
     send_doc, send_msg = MagicMock(return_value=True), MagicMock(return_value=True)
     monkeypatch.setattr(tools_mod, "send_telegram_document", send_doc)
     monkeypatch.setattr(tools_mod, "send_telegram_message", send_msg)
@@ -75,8 +74,7 @@ def test_telegram_file_requires_approval_and_sends_nothing(monkeypatch):
 
 
 def test_telegram_text_only_still_auto_runs(monkeypatch):
-    monkeypatch.setattr(tools_mod, "TELEGRAM_BOT_TOKEN", "t")
-    monkeypatch.setattr(tools_mod, "TELEGRAM_CHAT_ID", "c")
+    monkeypatch.setattr(tools_mod, "_telegram_credentials", lambda: ("t", "c"))
     send_msg = MagicMock(return_value=True)
     monkeypatch.setattr(tools_mod, "send_telegram_message", send_msg)
 
