@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from PySide6.QtCore import QThread, Signal
+from src.config.paths import runtime_file
 from src.config.settings import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 
 DEFAULT_BOT_TOKEN = TELEGRAM_BOT_TOKEN
@@ -128,65 +129,66 @@ def send_telegram_message_async(text: str, token: Optional[str] = None, chat_id:
     return thread
 
 
-def send_telegram_document(
+# Bot API upload limits (sendDocument 50 MB, sendPhoto 10 MB).
+MAX_DOCUMENT_BYTES = 50 * 1024 * 1024
+MAX_PHOTO_BYTES = 10 * 1024 * 1024
+_CAPTION_LIMIT = 1024
+
+
+def _post_file(
+    method: str,
+    field: str,
     file_path: str,
-    caption: str = "",
-    token: Optional[str] = None,
-    chat_id: Optional[str] = None
+    caption: str,
+    token: Optional[str],
+    chat_id: Optional[str],
+    max_bytes: int,
+    content_type: Optional[str] = None,
 ) -> bool:
-    """Send a local file (e.g. PDF) to Telegram chat using multipart/form-data."""
+    """Upload a local file with a streamed multipart POST (never reads it into memory)."""
+    import requests
+
     bot_token = token or os.environ.get("TELEGRAM_BOT_TOKEN") or DEFAULT_BOT_TOKEN
     target_chat_id = chat_id or os.environ.get("TELEGRAM_CHAT_ID") or DEFAULT_CHAT_ID
 
     path = Path(file_path).expanduser().resolve()
     if not path.is_file() or not bot_token or not target_chat_id:
         return False
+    try:
+        size = path.stat().st_size
+    except OSError:
+        return False
+    if size > max_bytes:
+        print(f"[Telegram Service] {method}: file too large ({size} > {max_bytes} bytes), not sent")
+        return False
 
-    url = f"https://api.telegram.org/bot{bot_token}/sendDocument"
-
-    boundary = "----WebKitFormBoundary7MA4YWxkTrZu0gW"
-    body = bytearray()
-
-    # chat_id field
-    body.extend(f"--{boundary}\r\n".encode("utf-8"))
-    body.extend(f'Content-Disposition: form-data; name="chat_id"\r\n\r\n'.encode("utf-8"))
-    body.extend(f"{target_chat_id}\r\n".encode("utf-8"))
-
-    # caption field (Telegram caption limit is 1024 characters)
+    data = {"chat_id": str(target_chat_id)}
     if caption:
-        safe_caption = caption[:995] + "..." if len(caption) > 1000 else caption
-        body.extend(f"--{boundary}\r\n".encode("utf-8"))
-        body.extend(f'Content-Disposition: form-data; name="caption"\r\n\r\n'.encode("utf-8"))
-        body.extend(f"{safe_caption}\r\n".encode("utf-8"))
-
-    # document file
-    filename = path.name
-    with open(path, "rb") as f:
-        file_bytes = f.read()
-
-    body.extend(f"--{boundary}\r\n".encode("utf-8"))
-    body.extend(f'Content-Disposition: form-data; name="document"; filename="{filename}"\r\n'.encode("utf-8"))
-    body.extend(b"Content-Type: application/octet-stream\r\n\r\n")
-    body.extend(file_bytes)
-    body.extend(b"\r\n")
-
-    body.extend(f"--{boundary}--\r\n".encode("utf-8"))
-
-    req = urllib.request.Request(
-        url,
-        data=bytes(body),
-        headers={
-            "Content-Type": f"multipart/form-data; boundary={boundary}",
-            "Content-Length": str(len(body))
-        }
-    )
+        data["caption"] = caption if len(caption) <= _CAPTION_LIMIT else caption[:_CAPTION_LIMIT - 3] + "..."
 
     try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            res_json = json.loads(resp.read().decode("utf-8"))
-            return bool(res_json.get("ok"))
-    except Exception:
+        with open(path, "rb") as fh:
+            file_tuple = (path.name, fh, content_type) if content_type else (path.name, fh)
+            resp = requests.post(
+                f"https://api.telegram.org/bot{bot_token}/{method}",
+                data=data,
+                files={field: file_tuple},
+                timeout=30,
+            )
+        return bool(resp.json().get("ok"))
+    except Exception as err:
+        print(f"[Telegram Service] {method} failed: {redact_secrets(err, bot_token)}")
         return False
+
+
+def send_telegram_document(
+    file_path: str,
+    caption: str = "",
+    token: Optional[str] = None,
+    chat_id: Optional[str] = None
+) -> bool:
+    """Send a local file (e.g. PDF) to the Telegram chat (max 50 MB)."""
+    return _post_file("sendDocument", "document", file_path, caption, token, chat_id, MAX_DOCUMENT_BYTES)
 
 
 def send_telegram_photo(
@@ -195,62 +197,10 @@ def send_telegram_photo(
     token: Optional[str] = None,
     chat_id: Optional[str] = None
 ) -> bool:
-    """Send an image photo to Telegram chat via Bot API sendPhoto using multipart/form-data."""
-    bot_token = token or os.environ.get("TELEGRAM_BOT_TOKEN") or DEFAULT_BOT_TOKEN
-    target_chat_id = chat_id or os.environ.get("TELEGRAM_CHAT_ID") or DEFAULT_CHAT_ID
-
-    path = Path(image_path).expanduser().resolve()
-    if not path.is_file() or not bot_token or not target_chat_id:
-        return False
-
-    url = f"https://api.telegram.org/bot{bot_token}/sendPhoto"
-
-    boundary = "----WebKitFormBoundary7MA4YWxkTrZu0gW"
-    body = bytearray()
-
-    # chat_id field
-    body.extend(f"--{boundary}\r\n".encode("utf-8"))
-    body.extend(f'Content-Disposition: form-data; name="chat_id"\r\n\r\n'.encode("utf-8"))
-    body.extend(f"{target_chat_id}\r\n".encode("utf-8"))
-
-    # caption field (Telegram caption limit is 1024 characters)
-    if caption:
-        safe_caption = caption[:995] + "..." if len(caption) > 1000 else caption
-        body.extend(f"--{boundary}\r\n".encode("utf-8"))
-        body.extend(f'Content-Disposition: form-data; name="caption"\r\n\r\n'.encode("utf-8"))
-        body.extend(f"{safe_caption}\r\n".encode("utf-8"))
-
-    # photo file field
-    filename = path.name
-    with open(path, "rb") as f:
-        file_bytes = f.read()
-
-    ext = path.suffix.lower()
-    content_type = "image/png" if ext == ".png" else "image/jpeg" if ext in (".jpg", ".jpeg") else "application/octet-stream"
-
-    body.extend(f"--{boundary}\r\n".encode("utf-8"))
-    body.extend(f'Content-Disposition: form-data; name="photo"; filename="{filename}"\r\n'.encode("utf-8"))
-    body.extend(f"Content-Type: {content_type}\r\n\r\n".encode("utf-8"))
-    body.extend(file_bytes)
-    body.extend(b"\r\n")
-
-    body.extend(f"--{boundary}--\r\n".encode("utf-8"))
-
-    req = urllib.request.Request(
-        url,
-        data=bytes(body),
-        headers={
-            "Content-Type": f"multipart/form-data; boundary={boundary}",
-            "Content-Length": str(len(body))
-        }
-    )
-
-    try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            res_json = json.loads(resp.read().decode("utf-8"))
-            return bool(res_json.get("ok"))
-    except Exception:
-        return False
+    """Send an image to the Telegram chat via sendPhoto (max 10 MB)."""
+    ext = Path(image_path).suffix.lower()
+    content_type = "image/png" if ext == ".png" else "image/jpeg" if ext in (".jpg", ".jpeg") else None
+    return _post_file("sendPhoto", "photo", image_path, caption, token, chat_id, MAX_PHOTO_BYTES, content_type)
 
 
 def send_telegram_photo_async(
@@ -410,6 +360,35 @@ class TelegramApprovalBridge:
         return result.outcome
 
 
+_OFFSET_FILE = "telegram_offset.json"
+
+
+def _bot_id(token: Optional[str]) -> str:
+    return (token or "").split(":", 1)[0]
+
+
+def load_update_offset(token: Optional[str]) -> int:
+    """Last persisted getUpdates offset for this bot (0 if none/corrupt/other bot)."""
+    try:
+        data = json.loads(runtime_file(_OFFSET_FILE).read_text(encoding="utf-8"))
+        if data.get("bot_id") == _bot_id(token):
+            return max(0, int(data.get("offset", 0)))
+    except Exception:
+        pass
+    return 0
+
+
+def save_update_offset(token: Optional[str], offset: int) -> None:
+    """Atomically persist the getUpdates offset so a restart does not replay old messages."""
+    target = runtime_file(_OFFSET_FILE)
+    tmp = target.with_name(target.name + ".tmp")
+    try:
+        tmp.write_text(json.dumps({"bot_id": _bot_id(token), "offset": int(offset)}), encoding="utf-8")
+        os.replace(tmp, target)
+    except Exception as err:
+        print(f"[Telegram Worker] Could not persist update offset: {type(err).__name__}")
+
+
 class TelegramRemoteWorker(QThread):
     """Background worker that long-polls Telegram getUpdates for phone remote control."""
 
@@ -421,7 +400,7 @@ class TelegramRemoteWorker(QThread):
         self._token = bot_token or os.environ.get("TELEGRAM_BOT_TOKEN") or DEFAULT_BOT_TOKEN
         self._allowed_chat_id = str(allowed_chat_id or os.environ.get("TELEGRAM_CHAT_ID") or DEFAULT_CHAT_ID)
         self._is_running = True
-        self._offset = 0
+        self._offset = load_update_offset(self._token)
         # Handles inline-keyboard callback_query updates (approval buttons). It must
         # return quickly; the approval bridge does its network I/O off this thread.
         self._callback_handler = callback_handler
@@ -459,6 +438,8 @@ class TelegramRemoteWorker(QThread):
                     update_id = update.get("update_id", 0)
                     if update_id >= self._offset:
                         self._offset = update_id + 1
+                        # Persist before handling: at-most-once, so a restart never replays commands.
+                        save_update_offset(self._token, self._offset)
 
                     callback_query = update.get("callback_query")
                     if callback_query is not None:
