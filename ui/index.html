@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>A.L.T.R.O.N // AI DESKTOP ASSISTANT</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body class="state-idle">
+  <div class="dashboard-root">
+    <!-- Top Status Header Bar -->
+    <header class="top-header">
+      <div class="header-left">
+        <span class="status-dot"></span>
+        <span class="brand-title">A.L.T.R.O.N</span>
+      </div>
+
+      <div class="header-center">
+        <span id="hud-clock" class="clock-time">12:00:00 AM</span>
+        <span class="clock-divider">|</span>
+        <span id="hud-date" class="clock-date">November 17, 2026</span>
+      </div>
+
+      <div class="header-right">
+        <div class="status-pill">
+          <span class="temp-badge">20°C</span>
+          <span class="pill-divider">|</span>
+          <span class="online-badge">Online</span>
+        </div>
+        <div class="battery-pill" id="battery-container">
+          <span class="battery-icon">⚡</span>
+          <span id="battery-value">--%</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- 3-Column Dashboard Body -->
+    <main class="dashboard-body">
+      <!-- LEFT COLUMN: GREETING, SYSTEM STATS, AI CONFIGURATION -->
+      <aside class="panel left-panel">
+        <div class="card greeting-card">
+          <h2 id="greeting-title" class="greeting-title">Good Evening Sir</h2>
+          <p class="greeting-subtitle">Welcome! How can I help you today?</p>
+        </div>
+
+        <div class="card stats-card">
+          <div class="card-header">
+            <span class="card-tag">SYSTEM STATS</span>
+          </div>
+
+          <div class="stat-row">
+            <div class="stat-label">
+              <span>CPU Usage</span>
+              <span id="cpu-value" class="stat-val">-- %</span>
+            </div>
+            <div class="progress-track">
+              <div id="cpu-bar" class="progress-fill fill-cpu" style="width: 0%"></div>
+            </div>
+          </div>
+
+          <div class="stat-row">
+            <div class="stat-label">
+              <span>CPU Temp</span>
+              <span id="temp-value" class="stat-val">-- °C</span>
+            </div>
+            <div class="progress-track">
+              <div id="temp-bar" class="progress-fill fill-temp" style="width: 0%"></div>
+            </div>
+          </div>
+
+          <div class="stat-row">
+            <div class="stat-label">
+              <span>RAM Usage</span>
+              <span id="ram-value" class="stat-val">-- / -- GB</span>
+            </div>
+            <div class="progress-track">
+              <div id="ram-bar" class="progress-fill fill-ram" style="width: 0%"></div>
+            </div>
+          </div>
+
+          <div class="stat-row">
+            <div class="stat-label">
+              <span>Memory / Disk</span>
+              <span id="disk-value" class="stat-val">-- / -- GB</span>
+            </div>
+            <div class="progress-track">
+              <div id="disk-bar" class="progress-fill fill-disk" style="width: 0%"></div>
+            </div>
+          </div>
+
+          <div class="net-status-row">
+            <span class="net-indicator">
+              <span class="net-dot"></span> NET ONLINE
+            </span>
+            <span class="net-speed">Active</span>
+          </div>
+        </div>
+
+        <div class="card config-card" id="card-ai-config" title="Click to configure AI Provider & Settings">
+          <div class="card-header">
+            <span class="card-tag">AI CONFIGURATION</span>
+            <span class="settings-hint">⚙️</span>
+          </div>
+          <div class="config-row">
+            <span class="cfg-key">AI Engine</span>
+            <span id="display-ai-engine" class="cfg-val">Claude 3.5 Sonnet</span>
+          </div>
+          <div class="config-row">
+            <span class="cfg-key">Language</span>
+            <span id="display-ai-lang" class="cfg-val">English</span>
+          </div>
+          <div class="config-row">
+            <span class="cfg-key">Voice</span>
+            <span class="cfg-val">Male (RyanNeural)</span>
+          </div>
+        </div>
+      </aside>
+
+      <!-- CENTER COLUMN: CORE ORB & COMMAND INPUT -->
+      <section class="panel center-panel">
+        <div class="center-core">
+          <div class="radar-rings">
+            <div class="ring ring-outer"></div>
+            <div class="ring ring-middle"></div>
+            <div class="ring ring-inner"></div>
+            <div class="grid-crosshairs"></div>
+            <div class="core-pulse-circle"></div>
+            <div class="core-orb"></div>
+          </div>
+
+          <h1 class="core-title">A . L . T . R . O . N</h1>
+          <div class="core-status">
+            <span id="core-state-icon" class="state-icon">●</span>
+            <span id="core-status-text" class="state-text">Listening for commands...</span>
+          </div>
+        </div>
+
+        <div class="command-bar-wrapper">
+          <form id="command-form" class="command-bar">
+            <input
+              type="text"
+              id="command-input"
+              class="command-input"
+              placeholder="Type here ..."
+              dir="auto"
+              autocomplete="off"
+            />
+            <div class="command-actions">
+              <button type="button" id="btn-settings" class="action-btn settings-btn" title="AI & System Settings">⚙️</button>
+              <button type="button" id="btn-clear-input" class="action-btn" title="Clear input">✕</button>
+              <button type="button" id="btn-mic" class="action-btn mic-btn" title="Microphone Active">🎤</button>
+              <button type="submit" id="btn-send" class="action-btn send-btn" title="Send command">➤</button>
+            </div>
+          </form>
+        </div>
+      </section>
+
+      <!-- RIGHT COLUMN: CONVERSATION, TODAY'S EVENTS, REMINDERS -->
+      <aside class="panel right-panel">
+        <div class="card conv-card">
+          <div class="card-header">
+            <span class="card-tag">CONVERSATION</span>
+            <div class="card-actions">
+              <button id="btn-clear-chat" class="header-btn" type="button" title="Clear conversation logs">Clear</button>
+              <button id="btn-export-chat" class="header-btn" type="button" title="Export conversation as .txt">Export Chat</button>
+            </div>
+          </div>
+          <div id="chat-messages" class="chat-feed">
+            <div class="msg-bubble system">
+              <span class="bubble-sender">[SYSTEM]</span>
+              <span class="bubble-text">Altron is online. Listening for voice and commands.</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="card events-card">
+          <div class="card-header">
+            <span class="card-tag">TODAY'S EVENTS</span>
+            <span class="badge-count" id="events-count">2</span>
+          </div>
+          <div class="events-list">
+            <div class="event-item">
+              <span class="event-dot"></span>
+              <div class="event-details">
+                <span class="event-title">Daily AI Assistant Sync</span>
+                <span class="event-time">10:00 AM</span>
+              </div>
+            </div>
+            <div class="event-item">
+              <span class="event-dot"></span>
+              <div class="event-details">
+                <span class="event-title">Scheduled Telegram Backup</span>
+                <span class="event-time">08:00 PM</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card reminders-card">
+          <div class="card-header">
+            <span class="card-tag">REMINDERS</span>
+            <span class="badge-count">Active</span>
+          </div>
+          <div class="reminders-list">
+            <div class="reminder-item">
+              <span class="rem-icon">🔔</span>
+              <span>Proactive 60s Break Alert: Active</span>
+            </div>
+            <div class="reminder-item">
+              <span class="rem-icon">🛡️</span>
+              <span>Microphone Echo Prevention: Enabled</span>
+            </div>
+            <div class="reminder-item">
+              <span class="rem-icon">⚡</span>
+              <span>Voice Pipeline: FastVAD + RyanNeural</span>
+            </div>
+          </div>
+        </div>
+      </aside>
+    </main>
+  </div>
+
+  <!-- AI & System Configuration Modal -->
+  <div id="settings-modal" class="modal-backdrop" style="display: none;">
+    <div class="modal-window">
+      <div class="modal-header">
+        <span class="modal-title">AI & SYSTEM CONFIGURATION</span>
+        <button type="button" id="btn-close-modal" class="modal-close-btn" title="Close">✕</button>
+      </div>
+      <form id="settings-form" class="modal-body">
+        <div class="form-group">
+          <label for="cfg-provider">AI Provider</label>
+          <select id="cfg-provider" class="form-control">
+            <option value="ollama">Ollama (Local)</option>
+            <option value="anthropic">Anthropic (Claude)</option>
+            <option value="openai">OpenAI</option>
+            <option value="gemini">Google Gemini</option>
+            <option value="custom">Custom OpenAI-Compatible</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="cfg-model">Model Name</label>
+          <input type="text" id="cfg-model" class="form-control" placeholder="e.g. claude-3-5-sonnet-20241022" />
+        </div>
+
+        <div class="form-group">
+          <label for="cfg-api-key">API Key <span class="label-hint">(optional for local Ollama)</span></label>
+          <input type="password" id="cfg-api-key" class="form-control" placeholder="Enter API key" autocomplete="off" />
+        </div>
+
+        <div class="form-group">
+          <label for="cfg-base-url">API Base URL</label>
+          <input type="text" id="cfg-base-url" class="form-control" placeholder="https://api.anthropic.com" />
+        </div>
+
+        <div class="form-group">
+          <label for="cfg-language">Language</label>
+          <select id="cfg-language" class="form-control">
+            <option value="English">English</option>
+            <option value="Arabic">Arabic</option>
+            <option value="Auto">Auto</option>
+          </select>
+        </div>
+
+        <div id="test-connection-status" class="test-status" style="display: none;"></div>
+
+        <div class="modal-footer">
+          <button type="button" id="btn-test-settings" class="btn-secondary">TEST CONNECTION</button>
+          <button type="button" id="btn-cancel-settings" class="btn-secondary">CANCEL</button>
+          <button type="submit" id="btn-save-settings" class="btn-primary">SAVE & APPLY</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -2,7 +2,13 @@
 from src.services.database import DatabaseService
 from src.services.ai_client import AIClient, Message, AIResponse, ConnectionStatus
 from src.services.omniroute_manager import OmniRouteManager
-from src.services.voice_service import TTSManager, SpeechRecognitionWorker, clean_text_for_speech, parse_wake_word
+from src.services.voice_service import (
+    TTSManager,
+    SpeechRecognitionWorker,
+    clean_text_for_speech,
+    parse_wake_word,
+    is_speaking_event,
+)
 from src.services.desktop_icon_service import position_desktop_icon, get_desktop_icons
 from src.services.telegram_service import (
     TelegramRemoteWorker,
@@ -24,6 +30,7 @@ __all__ = [
     "SpeechRecognitionWorker",
     "clean_text_for_speech",
     "parse_wake_word",
+    "is_speaking_event",
     "position_desktop_icon",
     "get_desktop_icons",
     "TelegramRemoteWorker",

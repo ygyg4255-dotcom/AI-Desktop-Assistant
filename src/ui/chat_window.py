@@ -938,6 +938,12 @@ class ChatWindow(QWidget):
         has_wake_word, remainder = parse_wake_word(clean_text)
         is_awake = time.time() < getattr(self, "_wake_active_until", 0.0)
 
+        # Record latest VAD & STT timings from worker
+        self._last_voice_timings = {
+            "listen_vad": getattr(self._voice_worker, "last_listen_duration", 0.0),
+            "stt": getattr(self._voice_worker, "last_stt_duration", 0.0),
+        }
+
         if has_wake_word:
             if remainder:
                 # Pattern a: Single phrase "altron <command>"
@@ -1056,6 +1062,8 @@ class ChatWindow(QWidget):
             source = "telegram"
 
         self._current_command_source = source
+        if source == "voice":
+            self._voice_agent_start = time.perf_counter()
         self._tts_manager.stop()
 
         if source == "telegram":
@@ -1144,19 +1152,26 @@ class ChatWindow(QWidget):
             self._set_processing_state(False)
             self._active_permission_request = None
 
+            is_voice_source = (getattr(self, "_current_command_source", "text") == "voice")
+            agent_time = time.perf_counter() - getattr(self, "_voice_agent_start", time.perf_counter())
+            tts_init_time = 0.0
+
             if response.content:
                 self._add_message_bubble("assistant", response.content)
                 send_telegram_message_async(response.content)
                 print(f"[ChatWindow] Dispatched final response ({len(response.content)} chars) to Telegram.")
 
-                is_voice_source = (getattr(self, "_current_command_source", "text") == "voice")
-                if is_voice_source and self._tts_manager.is_enabled and not self._tts_manager.is_muted:
+                # Automatically speak every Altron response via internal TTSManager
+                if self._tts_manager.is_enabled and not self._tts_manager.is_muted:
                     self._status_state = "speaking"
                     self._set_notch_status("🔊 Speaking...")
                     self._status_label.setText("Speaking response...")
+                    t_tts0 = time.perf_counter()
                     try:
                         self._tts_manager.speak(response.content)
+                        tts_init_time = time.perf_counter() - t_tts0
                     except Exception:
+                        tts_init_time = time.perf_counter() - t_tts0
                         self._status_state = "listening"
                         self._set_notch_status("Altron")
                         self._status_label.setText("Standby (say 'Altron')")
@@ -1168,6 +1183,13 @@ class ChatWindow(QWidget):
                 self._status_state = "listening"
                 self._set_notch_status("Altron")
                 self._status_label.setText("Standby (say 'Altron')")
+
+            if is_voice_source:
+                timings = getattr(self, "_last_voice_timings", {})
+                listen_time = timings.get("listen_vad", 0.0)
+                stt_time = timings.get("stt", 0.0)
+                total_time = listen_time + stt_time + agent_time + tts_init_time
+                print(f"[Voice Timing] Listen/VAD: {listen_time:.2f}s | STT: {stt_time:.2f}s | Agent/LLM: {agent_time:.2f}s | TTS Init: {tts_init_time:.2f}s | Total: {total_time:.2f}s")
         finally:
             self._is_remote_executing = False
             self._current_command_source = "text"
@@ -1185,6 +1207,14 @@ class ChatWindow(QWidget):
             err_msg = f"⚠️ Error: {error_str}"
             self._add_message_bubble("assistant", err_msg)
             send_telegram_message_async(err_msg)
+
+            if getattr(self, "_current_command_source", "text") == "voice":
+                agent_time = time.perf_counter() - getattr(self, "_voice_agent_start", time.perf_counter())
+                timings = getattr(self, "_last_voice_timings", {})
+                listen_time = timings.get("listen_vad", 0.0)
+                stt_time = timings.get("stt", 0.0)
+                total_time = listen_time + stt_time + agent_time
+                print(f"[Voice Timing] Listen/VAD: {listen_time:.2f}s | STT: {stt_time:.2f}s | Agent/LLM: {agent_time:.2f}s | TTS Init: 0.00s | Total: {total_time:.2f}s")
         finally:
             self._is_remote_executing = False
             self._current_command_source = "text"

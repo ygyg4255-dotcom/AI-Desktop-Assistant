@@ -1,0 +1,3787 @@
+{
+  "version": "1.0.0",
+  "project": {
+    "name": "Altron",
+    "languages": [
+      "config",
+      "css",
+      "html",
+      "javascript",
+      "json",
+      "markdown",
+      "python",
+      "txt"
+    ],
+    "frameworks": [
+      "PySide6",
+      "Flask",
+      "Edge-TTS"
+    ],
+    "description": "Autonomous Windows desktop assistant featuring a floating dynamic capsule UI, voice wake-word detection, conditional speech synthesis, desktop icon control, and remote Telegram control.",
+    "analyzedAt": "2026-11-17T15:05:25.649609+00:00",
+    "gitCommitHash": "090a5f8956716c2a22a4905144348d0e74b43a46"
+  },
+  "nodes": [
+    {
+      "id": "file:src/app.py",
+      "type": "file",
+      "name": "app.py",
+      "filePath": "src/app.py",
+      "summary": "Desktop application bootstrap initializing Qt, system tray icon, and the PySide6 event loop.",
+      "tags": [
+        "ui",
+        "qt",
+        "bootstrap",
+        "entrypoint"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "class:src/app.py:Application",
+      "type": "class",
+      "name": "Application",
+      "filePath": "src/app.py",
+      "lineRange": [
+        15,
+        160
+      ],
+      "summary": "Application class in app.py (methods: __init__, initialize, run, shutdown).",
+      "tags": [
+        "class",
+        "ui",
+        "qt"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "function:src/app.py:main",
+      "type": "function",
+      "name": "main",
+      "filePath": "src/app.py",
+      "lineRange": [
+        163,
+        171
+      ],
+      "summary": "Function main() implementing core logic in app.py.",
+      "tags": [
+        "function",
+        "ui",
+        "qt"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:src/services/database.py",
+      "type": "file",
+      "name": "database.py",
+      "filePath": "src/services/database.py",
+      "summary": "Database service wrapper providing high-level persistence helpers over SQLite.",
+      "tags": [
+        "database",
+        "service",
+        "storage"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "class:src/services/database.py:DatabaseService",
+      "type": "class",
+      "name": "DatabaseService",
+      "filePath": "src/services/database.py",
+      "lineRange": [
+        6,
+        10
+      ],
+      "summary": "DatabaseService class in database.py (methods: __init__).",
+      "tags": [
+        "class",
+        "database",
+        "service"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:src/storage/__init__.py",
+      "type": "file",
+      "name": "__init__.py",
+      "filePath": "src/storage/__init__.py",
+      "summary": "Storage package exports exposing database models and conversation repositories.",
+      "tags": [
+        "storage",
+        "exports"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:src/storage/db.py",
+      "type": "file",
+      "name": "db.py",
+      "filePath": "src/storage/db.py",
+      "summary": "SQLite database engine and ORM data models for conversations, messages, and tool logs.",
+      "tags": [
+        "database",
+        "sqlite",
+        "orm",
+        "models"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "class:src/storage/db.py:Conversation",
+      "type": "class",
+      "name": "Conversation",
+      "filePath": "src/storage/db.py",
+      "lineRange": [
+        11,
+        16
+      ],
+      "summary": "Conversation class in db.py (class definition).",
+      "tags": [
+        "class",
+        "database",
+        "sqlite"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "class:src/storage/db.py:ChatMessage",
+      "type": "class",
+      "name": "ChatMessage",
+      "filePath": "src/storage/db.py",
+      "lineRange": [
+        20,
+        27
+      ],
+      "summary": "ChatMessage class in db.py (class definition).",
+      "tags": [
+        "class",
+        "database",
+        "sqlite"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "class:src/storage/db.py:ToolExecution",
+      "type": "class",
+      "name": "ToolExecution",
+      "filePath": "src/storage/db.py",
+      "lineRange": [
+        31,
+        39
+      ],
+      "summary": "ToolExecution class in db.py (class definition).",
+      "tags": [
+        "class",
+        "database",
+        "sqlite"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "class:src/storage/db.py:Database",
+      "type": "class",
+      "name": "Database",
+      "filePath": "src/storage/db.py",
+      "lineRange": [
+        42,
+        400
+      ],
+      "summary": "Database class in db.py (methods: __init__, initialize, _create_tables, _migrate).",
+      "tags": [
+        "class",
+        "database",
+        "sqlite"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "file:src/ui/__init__.py",
+      "type": "file",
+      "name": "__init__.py",
+      "filePath": "src/ui/__init__.py",
+      "summary": "UI module exports exposing capsule chat window and system tray components.",
+      "tags": [
+        "ui",
+        "exports"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:src/ui/chat_window.py",
+      "type": "file",
+      "name": "chat_window.py",
+      "filePath": "src/ui/chat_window.py",
+      "summary": "Floating Dynamic Island capsule UI implementing expandable chat window, message bubbles, and permission cards.",
+      "tags": [
+        "ui",
+        "pyside6",
+        "capsule",
+        "dynamic-island",
+        "animations"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "class:src/ui/chat_window.py:AgentBridge",
+      "type": "class",
+      "name": "AgentBridge",
+      "filePath": "src/ui/chat_window.py",
+      "lineRange": [
+        23,
+        29
+      ],
+      "summary": "AgentBridge class in chat_window.py (class definition).",
+      "tags": [
+        "class",
+        "ui",
+        "pyside6"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "class:src/ui/chat_window.py:MessageBubble",
+      "type": "class",
+      "name": "MessageBubble",
+      "filePath": "src/ui/chat_window.py",
+      "lineRange": [
+        32,
+        77
+      ],
+      "summary": "MessageBubble class in chat_window.py (methods: __init__, _setup_ui).",
+      "tags": [
+        "class",
+        "ui",
+        "pyside6"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "class:src/ui/chat_window.py:StepBubble",
+      "type": "class",
+      "name": "StepBubble",
+      "filePath": "src/ui/chat_window.py",
+      "lineRange": [
+        80,
+        157
+      ],
+      "summary": "StepBubble class in chat_window.py (methods: __init__, _setup_ui).",
+      "tags": [
+        "class",
+        "ui",
+        "pyside6"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "class:src/ui/chat_window.py:PermissionCard",
+      "type": "class",
+      "name": "PermissionCard",
+      "filePath": "src/ui/chat_window.py",
+      "lineRange": [
+        160,
+        300
+      ],
+      "summary": "PermissionCard class in chat_window.py (methods: __init__, _setup_ui, _disable_buttons, _on_approve).",
+      "tags": [
+        "class",
+        "ui",
+        "pyside6"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "class:src/ui/chat_window.py:ChatWindow",
+      "type": "class",
+      "name": "ChatWindow",
+      "filePath": "src/ui/chat_window.py",
+      "lineRange": [
+        303,
+        1261
+      ],
+      "summary": "ChatWindow class in chat_window.py (methods: collapsed_width, collapsed_height, collapsed_y, __init__).",
+      "tags": [
+        "class",
+        "ui",
+        "pyside6"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "file:src/ui/system_tray.py",
+      "type": "file",
+      "name": "system_tray.py",
+      "filePath": "src/ui/system_tray.py",
+      "summary": "Windows system tray icon integration providing context menu actions, status display, and settings access.",
+      "tags": [
+        "ui",
+        "system-tray",
+        "pyside6"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "class:src/ui/system_tray.py:SystemTrayIcon",
+      "type": "class",
+      "name": "SystemTrayIcon",
+      "filePath": "src/ui/system_tray.py",
+      "lineRange": [
+        8,
+        81
+      ],
+      "summary": "SystemTrayIcon class in system_tray.py (methods: __init__, initialize, _create_icon, _on_activated).",
+      "tags": [
+        "class",
+        "ui",
+        "system-tray"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:memory.py",
+      "type": "file",
+      "name": "memory.py",
+      "filePath": "memory.py",
+      "summary": "Compatibility bridge module redirecting top-level memory imports to src/agent/memory.py.",
+      "tags": [
+        "memory",
+        "compatibility",
+        "facade"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:src/agent/__init__.py",
+      "type": "file",
+      "name": "__init__.py",
+      "filePath": "src/agent/__init__.py",
+      "summary": "Agent package exports exposing AgentExecutor, AgentMemory, and permission classes.",
+      "tags": [
+        "agent",
+        "exports"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:src/agent/executor.py",
+      "type": "file",
+      "name": "executor.py",
+      "filePath": "src/agent/executor.py",
+      "summary": "Core agent execution engine implementing ReAct autonomous loop, tool dispatch, and memory management.",
+      "tags": [
+        "agent",
+        "executor",
+        "react-loop",
+        "tool-calling",
+        "core"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "class:src/agent/executor.py:AgentState",
+      "type": "class",
+      "name": "AgentState",
+      "filePath": "src/agent/executor.py",
+      "lineRange": [
+        25,
+        32
+      ],
+      "summary": "AgentState class in executor.py (class definition).",
+      "tags": [
+        "class",
+        "agent",
+        "executor"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "class:src/agent/executor.py:AgentStep",
+      "type": "class",
+      "name": "AgentStep",
+      "filePath": "src/agent/executor.py",
+      "lineRange": [
+        36,
+        43
+      ],
+      "summary": "AgentStep class in executor.py (class definition).",
+      "tags": [
+        "class",
+        "agent",
+        "executor"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "class:src/agent/executor.py:AgentResponse",
+      "type": "class",
+      "name": "AgentResponse",
+      "filePath": "src/agent/executor.py",
+      "lineRange": [
+        47,
+        53
+      ],
+      "summary": "AgentResponse class in executor.py (class definition).",
+      "tags": [
+        "class",
+        "agent",
+        "executor"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "class:src/agent/executor.py:PermissionRequest",
+      "type": "class",
+      "name": "PermissionRequest",
+      "filePath": "src/agent/executor.py",
+      "lineRange": [
+        56,
+        92
+      ],
+      "summary": "PermissionRequest class in executor.py (methods: __init__, approve, reject, wait).",
+      "tags": [
+        "class",
+        "agent",
+        "executor"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "class:src/agent/executor.py:AgentExecutor",
+      "type": "class",
+      "name": "AgentExecutor",
+      "filePath": "src/agent/executor.py",
+      "lineRange": [
+        1069,
+        1923
+      ],
+      "summary": "AgentExecutor class in executor.py (methods: __init__, _get_system_prompt, memory, state).",
+      "tags": [
+        "class",
+        "agent",
+        "executor"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "function:src/agent/executor.py:match_local_intent",
+      "type": "function",
+      "name": "match_local_intent",
+      "filePath": "src/agent/executor.py",
+      "lineRange": [
+        95,
+        640
+      ],
+      "summary": "Function match_local_intent(prompt) implementing core logic in executor.py.",
+      "tags": [
+        "function",
+        "agent",
+        "executor"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:src/agent/executor.py:clean_tool_confirmation",
+      "type": "function",
+      "name": "clean_tool_confirmation",
+      "filePath": "src/agent/executor.py",
+      "lineRange": [
+        643,
+        864
+      ],
+      "summary": "Function clean_tool_confirmation(content, last_tool_name, last_tool_input) implementing core logic in executor.py.",
+      "tags": [
+        "function",
+        "agent",
+        "executor"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:src/agent/executor.py:intercept_raw_code_or_payload",
+      "type": "function",
+      "name": "intercept_raw_code_or_payload",
+      "filePath": "src/agent/executor.py",
+      "lineRange": [
+        867,
+        1004
+      ],
+      "summary": "Function intercept_raw_code_or_payload(text, user_message, executor) implementing core logic in executor.py.",
+      "tags": [
+        "function",
+        "agent",
+        "executor"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:src/agent/executor.py:sanitize_final_reply",
+      "type": "function",
+      "name": "sanitize_final_reply",
+      "filePath": "src/agent/executor.py",
+      "lineRange": [
+        1007,
+        1066
+      ],
+      "summary": "Function sanitize_final_reply(content, user_message) implementing core logic in executor.py.",
+      "tags": [
+        "function",
+        "agent",
+        "executor"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:src/agent/memory.py",
+      "type": "file",
+      "name": "memory.py",
+      "filePath": "src/agent/memory.py",
+      "summary": "Agent memory manager handling short-term conversation context, token pruning, and fact storage.",
+      "tags": [
+        "agent",
+        "memory",
+        "context-management"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "class:src/agent/memory.py:ConversationMemory",
+      "type": "class",
+      "name": "ConversationMemory",
+      "filePath": "src/agent/memory.py",
+      "lineRange": [
+        8,
+        92
+      ],
+      "summary": "ConversationMemory class in memory.py (methods: __init__, _ensure_file, _read_messages, _write_messages).",
+      "tags": [
+        "class",
+        "agent",
+        "memory"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:src/agent/permissions.py",
+      "type": "file",
+      "name": "permissions.py",
+      "filePath": "src/agent/permissions.py",
+      "summary": "Security permission gate and rule evaluation system enforcing user confirmation for sensitive operations.",
+      "tags": [
+        "agent",
+        "security",
+        "permissions",
+        "gate"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "class:src/agent/permissions.py:PermissionLevel",
+      "type": "class",
+      "name": "PermissionLevel",
+      "filePath": "src/agent/permissions.py",
+      "lineRange": [
+        7,
+        11
+      ],
+      "summary": "PermissionLevel class in permissions.py (class definition).",
+      "tags": [
+        "class",
+        "agent",
+        "security"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "class:src/agent/permissions.py:PermissionRule",
+      "type": "class",
+      "name": "PermissionRule",
+      "filePath": "src/agent/permissions.py",
+      "lineRange": [
+        15,
+        19
+      ],
+      "summary": "PermissionRule class in permissions.py (class definition).",
+      "tags": [
+        "class",
+        "agent",
+        "security"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "class:src/agent/permissions.py:PermissionGate",
+      "type": "class",
+      "name": "PermissionGate",
+      "filePath": "src/agent/permissions.py",
+      "lineRange": [
+        22,
+        97
+      ],
+      "summary": "PermissionGate class in permissions.py (methods: __init__, is_safe, is_dangerous, requires_permission).",
+      "tags": [
+        "class",
+        "agent",
+        "security"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:src/agent/tools.py",
+      "type": "file",
+      "name": "tools.py",
+      "filePath": "src/agent/tools.py",
+      "summary": "Comprehensive suite of automation tools for Win32 desktop control, file operations, web fetching, and process management.",
+      "tags": [
+        "agent",
+        "tools",
+        "desktop-automation",
+        "win32",
+        "shell"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "class:src/agent/tools.py:ToolCategory",
+      "type": "class",
+      "name": "ToolCategory",
+      "filePath": "src/agent/tools.py",
+      "lineRange": [
+        21,
+        28
+      ],
+      "summary": "ToolCategory class in tools.py (class definition).",
+      "tags": [
+        "class",
+        "agent",
+        "tools"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "class:src/agent/tools.py:ToolParameter",
+      "type": "class",
+      "name": "ToolParameter",
+      "filePath": "src/agent/tools.py",
+      "lineRange": [
+        32,
+        39
+      ],
+      "summary": "ToolParameter class in tools.py (class definition).",
+      "tags": [
+        "class",
+        "agent",
+        "tools"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "class:src/agent/tools.py:ToolResult",
+      "type": "class",
+      "name": "ToolResult",
+      "filePath": "src/agent/tools.py",
+      "lineRange": [
+        43,
+        55
+      ],
+      "summary": "ToolResult class in tools.py (methods: __post_init__).",
+      "tags": [
+        "class",
+        "agent",
+        "tools"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "class:src/agent/tools.py:Tool",
+      "type": "class",
+      "name": "Tool",
+      "filePath": "src/agent/tools.py",
+      "lineRange": [
+        59,
+        96
+      ],
+      "summary": "Tool class in tools.py (methods: to_api_schema).",
+      "tags": [
+        "class",
+        "agent",
+        "tools"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "class:src/agent/tools.py:ToolRegistry",
+      "type": "class",
+      "name": "ToolRegistry",
+      "filePath": "src/agent/tools.py",
+      "lineRange": [
+        99,
+        140
+      ],
+      "summary": "ToolRegistry class in tools.py (methods: __init__, register, get, list_tools).",
+      "tags": [
+        "class",
+        "agent",
+        "tools"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:src/agent/tools.py:handle_file_search",
+      "type": "function",
+      "name": "handle_file_search",
+      "filePath": "src/agent/tools.py",
+      "lineRange": [
+        145,
+        176
+      ],
+      "summary": "Function handle_file_search(params) implementing core logic in tools.py.",
+      "tags": [
+        "function",
+        "agent",
+        "tools"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:src/agent/tools.py:handle_file_read",
+      "type": "function",
+      "name": "handle_file_read",
+      "filePath": "src/agent/tools.py",
+      "lineRange": [
+        179,
+        217
+      ],
+      "summary": "Function handle_file_read(params) implementing core logic in tools.py.",
+      "tags": [
+        "function",
+        "agent",
+        "tools"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:src/agent/tools.py:handle_file_write",
+      "type": "function",
+      "name": "handle_file_write",
+      "filePath": "src/agent/tools.py",
+      "lineRange": [
+        220,
+        250
+      ],
+      "summary": "Function handle_file_write(params) implementing core logic in tools.py.",
+      "tags": [
+        "function",
+        "agent",
+        "tools"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:src/agent/tools.py:handle_file_delete",
+      "type": "function",
+      "name": "handle_file_delete",
+      "filePath": "src/agent/tools.py",
+      "lineRange": [
+        253,
+        280
+      ],
+      "summary": "Function handle_file_delete(params) implementing core logic in tools.py.",
+      "tags": [
+        "function",
+        "agent",
+        "tools"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:src/agent/tools.py:handle_file_copy",
+      "type": "function",
+      "name": "handle_file_copy",
+      "filePath": "src/agent/tools.py",
+      "lineRange": [
+        283,
+        313
+      ],
+      "summary": "Function handle_file_copy(params) implementing core logic in tools.py.",
+      "tags": [
+        "function",
+        "agent",
+        "tools"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:src/agent/tools.py:handle_file_move",
+      "type": "function",
+      "name": "handle_file_move",
+      "filePath": "src/agent/tools.py",
+      "lineRange": [
+        316,
+        347
+      ],
+      "summary": "Function handle_file_move(params) implementing core logic in tools.py.",
+      "tags": [
+        "function",
+        "agent",
+        "tools"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:src/agent/tools.py:handle_file_open",
+      "type": "function",
+      "name": "handle_file_open",
+      "filePath": "src/agent/tools.py",
+      "lineRange": [
+        350,
+        373
+      ],
+      "summary": "Function handle_file_open(params) implementing core logic in tools.py.",
+      "tags": [
+        "function",
+        "agent",
+        "tools"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:src/agent/tools.py:handle_terminal_command",
+      "type": "function",
+      "name": "handle_terminal_command",
+      "filePath": "src/agent/tools.py",
+      "lineRange": [
+        376,
+        414
+      ],
+      "summary": "Function handle_terminal_command(params) implementing core logic in tools.py.",
+      "tags": [
+        "function",
+        "agent",
+        "tools"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:src/agent/tools.py:handle_app_open",
+      "type": "function",
+      "name": "handle_app_open",
+      "filePath": "src/agent/tools.py",
+      "lineRange": [
+        417,
+        477
+      ],
+      "summary": "Function handle_app_open(params) implementing core logic in tools.py.",
+      "tags": [
+        "function",
+        "agent",
+        "tools"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:src/agent/tools.py:handle_app_close",
+      "type": "function",
+      "name": "handle_app_close",
+      "filePath": "src/agent/tools.py",
+      "lineRange": [
+        480,
+        517
+      ],
+      "summary": "Function handle_app_close(params) implementing core logic in tools.py.",
+      "tags": [
+        "function",
+        "agent",
+        "tools"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:src/agent/tools.py:handle_browser_open",
+      "type": "function",
+      "name": "handle_browser_open",
+      "filePath": "src/agent/tools.py",
+      "lineRange": [
+        520,
+        566
+      ],
+      "summary": "Function handle_browser_open(params) implementing core logic in tools.py.",
+      "tags": [
+        "function",
+        "agent",
+        "tools"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:src/agent/tools.py:handle_process_list",
+      "type": "function",
+      "name": "handle_process_list",
+      "filePath": "src/agent/tools.py",
+      "lineRange": [
+        569,
+        597
+      ],
+      "summary": "Function handle_process_list(params) implementing core logic in tools.py.",
+      "tags": [
+        "function",
+        "agent",
+        "tools"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:src/agent/tools.py:handle_system_info",
+      "type": "function",
+      "name": "handle_system_info",
+      "filePath": "src/agent/tools.py",
+      "lineRange": [
+        600,
+        627
+      ],
+      "summary": "Function handle_system_info(params) implementing core logic in tools.py.",
+      "tags": [
+        "function",
+        "agent",
+        "tools"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:src/agent/tools.py:handle_window_control",
+      "type": "function",
+      "name": "handle_window_control",
+      "filePath": "src/agent/tools.py",
+      "lineRange": [
+        630,
+        746
+      ],
+      "summary": "Function handle_window_control(params) implementing core logic in tools.py.",
+      "tags": [
+        "function",
+        "agent",
+        "tools"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:src/agent/tools.py:find_matching_window",
+      "type": "function",
+      "name": "find_matching_window",
+      "filePath": "src/agent/tools.py",
+      "lineRange": [
+        749,
+        816
+      ],
+      "summary": "Function find_matching_window(query) implementing core logic in tools.py.",
+      "tags": [
+        "function",
+        "agent",
+        "tools"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:src/agent/tools.py:handle_move_application_window",
+      "type": "function",
+      "name": "handle_move_application_window",
+      "filePath": "src/agent/tools.py",
+      "lineRange": [
+        819,
+        972
+      ],
+      "summary": "Function handle_move_application_window(params) implementing core logic in tools.py.",
+      "tags": [
+        "function",
+        "agent",
+        "tools"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:src/agent/tools.py:handle_desktop_icon_position",
+      "type": "function",
+      "name": "handle_desktop_icon_position",
+      "filePath": "src/agent/tools.py",
+      "lineRange": [
+        975,
+        1001
+      ],
+      "summary": "Function handle_desktop_icon_position(params) implementing core logic in tools.py.",
+      "tags": [
+        "function",
+        "agent",
+        "tools"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:src/agent/tools.py:handle_code_edit",
+      "type": "function",
+      "name": "handle_code_edit",
+      "filePath": "src/agent/tools.py",
+      "lineRange": [
+        1004,
+        1071
+      ],
+      "summary": "Function handle_code_edit(params) implementing core logic in tools.py.",
+      "tags": [
+        "function",
+        "agent",
+        "tools"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:src/agent/tools.py:handle_web_fetch",
+      "type": "function",
+      "name": "handle_web_fetch",
+      "filePath": "src/agent/tools.py",
+      "lineRange": [
+        1074,
+        1153
+      ],
+      "summary": "Function handle_web_fetch(params) implementing core logic in tools.py.",
+      "tags": [
+        "function",
+        "agent",
+        "tools"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:src/agent/tools.py:handle_system_control",
+      "type": "function",
+      "name": "handle_system_control",
+      "filePath": "src/agent/tools.py",
+      "lineRange": [
+        1156,
+        1295
+      ],
+      "summary": "Function handle_system_control(params) implementing core logic in tools.py.",
+      "tags": [
+        "function",
+        "agent",
+        "tools"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:src/agent/tools.py:handle_youtube_play",
+      "type": "function",
+      "name": "handle_youtube_play",
+      "filePath": "src/agent/tools.py",
+      "lineRange": [
+        1298,
+        1361
+      ],
+      "summary": "Function handle_youtube_play(params) implementing core logic in tools.py.",
+      "tags": [
+        "function",
+        "agent",
+        "tools"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:src/agent/tools.py:extract_youtube_video_id",
+      "type": "function",
+      "name": "extract_youtube_video_id",
+      "filePath": "src/agent/tools.py",
+      "lineRange": [
+        1364,
+        1374
+      ],
+      "summary": "Function extract_youtube_video_id(url_or_query) implementing core logic in tools.py.",
+      "tags": [
+        "function",
+        "agent",
+        "tools"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:src/agent/tools.py:fetch_youtube_transcript_text",
+      "type": "function",
+      "name": "fetch_youtube_transcript_text",
+      "filePath": "src/agent/tools.py",
+      "lineRange": [
+        1377,
+        1449
+      ],
+      "summary": "Function fetch_youtube_transcript_text(video_id, languages) implementing core logic in tools.py.",
+      "tags": [
+        "function",
+        "agent",
+        "tools"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:src/agent/tools.py:handle_youtube_play_and_summarize",
+      "type": "function",
+      "name": "handle_youtube_play_and_summarize",
+      "filePath": "src/agent/tools.py",
+      "lineRange": [
+        1452,
+        1594
+      ],
+      "summary": "Function handle_youtube_play_and_summarize(params) implementing core logic in tools.py.",
+      "tags": [
+        "function",
+        "agent",
+        "tools"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:src/agent/tools.py:handle_create_and_send_pdf",
+      "type": "function",
+      "name": "handle_create_and_send_pdf",
+      "filePath": "src/agent/tools.py",
+      "lineRange": [
+        1597,
+        1724
+      ],
+      "summary": "Function handle_create_and_send_pdf(params) implementing core logic in tools.py.",
+      "tags": [
+        "function",
+        "agent",
+        "tools"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:src/agent/tools.py:handle_send_to_telegram",
+      "type": "function",
+      "name": "handle_send_to_telegram",
+      "filePath": "src/agent/tools.py",
+      "lineRange": [
+        1727,
+        1778
+      ],
+      "summary": "Function handle_send_to_telegram(params) implementing core logic in tools.py.",
+      "tags": [
+        "function",
+        "agent",
+        "tools"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:src/agent/tools.py:handle_capture_and_inspect_screen",
+      "type": "function",
+      "name": "handle_capture_and_inspect_screen",
+      "filePath": "src/agent/tools.py",
+      "lineRange": [
+        1781,
+        1902
+      ],
+      "summary": "Function handle_capture_and_inspect_screen(params) implementing core logic in tools.py.",
+      "tags": [
+        "function",
+        "agent",
+        "tools"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:src/agent/tools.py:_record_clipboard_history",
+      "type": "function",
+      "name": "_record_clipboard_history",
+      "filePath": "src/agent/tools.py",
+      "lineRange": [
+        1910,
+        1920
+      ],
+      "summary": "Function _record_clipboard_history(text) implementing core logic in tools.py.",
+      "tags": [
+        "function",
+        "agent",
+        "tools"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:src/agent/tools.py:_get_clipboard_unicode",
+      "type": "function",
+      "name": "_get_clipboard_unicode",
+      "filePath": "src/agent/tools.py",
+      "lineRange": [
+        1923,
+        1939
+      ],
+      "summary": "Function _get_clipboard_unicode() implementing core logic in tools.py.",
+      "tags": [
+        "function",
+        "agent",
+        "tools"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:src/agent/tools.py:_set_clipboard_unicode",
+      "type": "function",
+      "name": "_set_clipboard_unicode",
+      "filePath": "src/agent/tools.py",
+      "lineRange": [
+        1942,
+        1955
+      ],
+      "summary": "Function _set_clipboard_unicode(text) implementing core logic in tools.py.",
+      "tags": [
+        "function",
+        "agent",
+        "tools"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:src/agent/tools.py:_simulate_keybd",
+      "type": "function",
+      "name": "_simulate_keybd",
+      "filePath": "src/agent/tools.py",
+      "lineRange": [
+        1958,
+        1972
+      ],
+      "summary": "Function _simulate_keybd(vk_key, ctrl) implementing core logic in tools.py.",
+      "tags": [
+        "function",
+        "agent",
+        "tools"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:src/agent/tools.py:handle_clipboard_manager",
+      "type": "function",
+      "name": "handle_clipboard_manager",
+      "filePath": "src/agent/tools.py",
+      "lineRange": [
+        1975,
+        2116
+      ],
+      "summary": "Function handle_clipboard_manager(params) implementing core logic in tools.py.",
+      "tags": [
+        "function",
+        "agent",
+        "tools"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:src/agent/tools.py:_mouse_click",
+      "type": "function",
+      "name": "_mouse_click",
+      "filePath": "src/agent/tools.py",
+      "lineRange": [
+        2137,
+        2149
+      ],
+      "summary": "Function _mouse_click(x, y) implementing core logic in tools.py.",
+      "tags": [
+        "function",
+        "agent",
+        "tools"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:src/agent/tools.py:_focus_whatsapp_window",
+      "type": "function",
+      "name": "_focus_whatsapp_window",
+      "filePath": "src/agent/tools.py",
+      "lineRange": [
+        2152,
+        2197
+      ],
+      "summary": "Function _focus_whatsapp_window() implementing core logic in tools.py.",
+      "tags": [
+        "function",
+        "agent",
+        "tools"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:src/agent/tools.py:_find_contact_element_uia",
+      "type": "function",
+      "name": "_find_contact_element_uia",
+      "filePath": "src/agent/tools.py",
+      "lineRange": [
+        2200,
+        2280
+      ],
+      "summary": "Function _find_contact_element_uia(hwnd, win_left, win_width) implementing core logic in tools.py.",
+      "tags": [
+        "function",
+        "agent",
+        "tools"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:src/agent/tools.py:_open_whatsapp_chat",
+      "type": "function",
+      "name": "_open_whatsapp_chat",
+      "filePath": "src/agent/tools.py",
+      "lineRange": [
+        2283,
+        2413
+      ],
+      "summary": "Function _open_whatsapp_chat(recipient) implementing core logic in tools.py.",
+      "tags": [
+        "function",
+        "agent",
+        "tools"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:src/agent/tools.py:handle_whatsapp_send",
+      "type": "function",
+      "name": "handle_whatsapp_send",
+      "filePath": "src/agent/tools.py",
+      "lineRange": [
+        2416,
+        2502
+      ],
+      "summary": "Function handle_whatsapp_send(params) implementing core logic in tools.py.",
+      "tags": [
+        "function",
+        "agent",
+        "tools"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:src/agent/tools.py:handle_whatsapp_read",
+      "type": "function",
+      "name": "handle_whatsapp_read",
+      "filePath": "src/agent/tools.py",
+      "lineRange": [
+        2505,
+        2866
+      ],
+      "summary": "Function handle_whatsapp_read(params, contact_or_chat, count) implementing core logic in tools.py.",
+      "tags": [
+        "function",
+        "agent",
+        "tools"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:src/agent/tools.py:create_default_registry",
+      "type": "function",
+      "name": "create_default_registry",
+      "filePath": "src/agent/tools.py",
+      "lineRange": [
+        2874,
+        3220
+      ],
+      "summary": "Function create_default_registry() implementing core logic in tools.py.",
+      "tags": [
+        "function",
+        "agent",
+        "tools"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:src/config/__init__.py",
+      "type": "file",
+      "name": "__init__.py",
+      "filePath": "src/config/__init__.py",
+      "summary": "Configuration module initializer exporting global settings and environment helpers.",
+      "tags": [
+        "config",
+        "exports"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:src/config/settings.py",
+      "type": "file",
+      "name": "settings.py",
+      "filePath": "src/config/settings.py",
+      "summary": "Central configuration manager handling environment variables, API key resolution, and persistent user settings.",
+      "tags": [
+        "config",
+        "settings",
+        "env"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "class:src/config/settings.py:Settings",
+      "type": "class",
+      "name": "Settings",
+      "filePath": "src/config/settings.py",
+      "lineRange": [
+        103,
+        229
+      ],
+      "summary": "Settings class in settings.py (methods: __post_init__, load_environment, get_config_dict).",
+      "tags": [
+        "class",
+        "config",
+        "settings"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "function:src/config/settings.py:load_env_file",
+      "type": "function",
+      "name": "load_env_file",
+      "filePath": "src/config/settings.py",
+      "lineRange": [
+        16,
+        26
+      ],
+      "summary": "Function load_env_file(env_path) implementing core logic in settings.py.",
+      "tags": [
+        "function",
+        "config",
+        "settings"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:src/config/settings.py:save_ai_config",
+      "type": "function",
+      "name": "save_ai_config",
+      "filePath": "src/config/settings.py",
+      "lineRange": [
+        37,
+        99
+      ],
+      "summary": "Function save_ai_config(provider, model, api_key) implementing core logic in settings.py.",
+      "tags": [
+        "function",
+        "config",
+        "settings"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:src/services/telegram_service.py",
+      "type": "file",
+      "name": "telegram_service.py",
+      "filePath": "src/services/telegram_service.py",
+      "summary": "Remote Telegram control service using long-polling to receive user commands and send responses and documents.",
+      "tags": [
+        "services",
+        "telegram",
+        "remote-control",
+        "bot"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "class:src/services/telegram_service.py:TelegramRemoteWorker",
+      "type": "class",
+      "name": "TelegramRemoteWorker",
+      "filePath": "src/services/telegram_service.py",
+      "lineRange": [
+        264,
+        330
+      ],
+      "summary": "TelegramRemoteWorker class in telegram_service.py (methods: __init__, stop, run).",
+      "tags": [
+        "class",
+        "services",
+        "telegram"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:src/services/telegram_service.py:chunk_message",
+      "type": "function",
+      "name": "chunk_message",
+      "filePath": "src/services/telegram_service.py",
+      "lineRange": [
+        19,
+        51
+      ],
+      "summary": "Function chunk_message(text, max_length) implementing core logic in telegram_service.py.",
+      "tags": [
+        "function",
+        "services",
+        "telegram"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:src/services/telegram_service.py:send_telegram_message",
+      "type": "function",
+      "name": "send_telegram_message",
+      "filePath": "src/services/telegram_service.py",
+      "lineRange": [
+        54,
+        101
+      ],
+      "summary": "Function send_telegram_message(text, token, chat_id) implementing core logic in telegram_service.py.",
+      "tags": [
+        "function",
+        "services",
+        "telegram"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:src/services/telegram_service.py:send_telegram_message_async",
+      "type": "function",
+      "name": "send_telegram_message_async",
+      "filePath": "src/services/telegram_service.py",
+      "lineRange": [
+        104,
+        116
+      ],
+      "summary": "Function send_telegram_message_async(text, token, chat_id) implementing core logic in telegram_service.py.",
+      "tags": [
+        "function",
+        "services",
+        "telegram"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:src/services/telegram_service.py:send_telegram_document",
+      "type": "function",
+      "name": "send_telegram_document",
+      "filePath": "src/services/telegram_service.py",
+      "lineRange": [
+        119,
+        177
+      ],
+      "summary": "Function send_telegram_document(file_path, caption, token) implementing core logic in telegram_service.py.",
+      "tags": [
+        "function",
+        "services",
+        "telegram"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:src/services/telegram_service.py:send_telegram_photo",
+      "type": "function",
+      "name": "send_telegram_photo",
+      "filePath": "src/services/telegram_service.py",
+      "lineRange": [
+        180,
+        241
+      ],
+      "summary": "Function send_telegram_photo(image_path, caption, token) implementing core logic in telegram_service.py.",
+      "tags": [
+        "function",
+        "services",
+        "telegram"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:src/services/telegram_service.py:send_telegram_photo_async",
+      "type": "function",
+      "name": "send_telegram_photo_async",
+      "filePath": "src/services/telegram_service.py",
+      "lineRange": [
+        244,
+        261
+      ],
+      "summary": "Function send_telegram_photo_async(image_path, caption, token) implementing core logic in telegram_service.py.",
+      "tags": [
+        "function",
+        "services",
+        "telegram"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:src/ui/settings_window.py",
+      "type": "file",
+      "name": "settings_window.py",
+      "filePath": "src/ui/settings_window.py",
+      "summary": "PySide6 graphical settings dialog for configuring AI provider credentials, voice options, and startup preferences.",
+      "tags": [
+        "ui",
+        "settings",
+        "pyside6",
+        "preferences"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "class:src/ui/settings_window.py:SettingsWindow",
+      "type": "class",
+      "name": "SettingsWindow",
+      "filePath": "src/ui/settings_window.py",
+      "lineRange": [
+        67,
+        709
+      ],
+      "summary": "SettingsWindow class in settings_window.py (methods: __init__, _setup_ui, _create_gateway_tab, _create_permissions_tab).",
+      "tags": [
+        "class",
+        "ui",
+        "settings"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "function:src/ui/settings_window.py:is_windows_startup_enabled",
+      "type": "function",
+      "name": "is_windows_startup_enabled",
+      "filePath": "src/ui/settings_window.py",
+      "lineRange": [
+        29,
+        39
+      ],
+      "summary": "Function is_windows_startup_enabled() implementing core logic in settings_window.py.",
+      "tags": [
+        "function",
+        "ui",
+        "settings"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:src/ui/settings_window.py:set_windows_startup",
+      "type": "function",
+      "name": "set_windows_startup",
+      "filePath": "src/ui/settings_window.py",
+      "lineRange": [
+        42,
+        64
+      ],
+      "summary": "Function set_windows_startup(enabled) implementing core logic in settings_window.py.",
+      "tags": [
+        "function",
+        "ui",
+        "settings"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:main.py",
+      "type": "file",
+      "name": "main.py",
+      "filePath": "main.py",
+      "summary": "Central orchestrator coordinating concurrent threads for the Flask HUD, voice listener, Telegram worker, and desktop agent.",
+      "tags": [
+        "orchestrator",
+        "entrypoint",
+        "threading",
+        "main"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "function:main.py:main",
+      "type": "function",
+      "name": "main",
+      "filePath": "main.py",
+      "lineRange": [
+        39,
+        307
+      ],
+      "summary": "Function main() implementing core logic in main.py.",
+      "tags": [
+        "function",
+        "orchestrator",
+        "entrypoint"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:src/services/hud_status.py",
+      "type": "file",
+      "name": "hud_status.py",
+      "filePath": "src/services/hud_status.py",
+      "summary": "Thread-safe status manager tracking agent state, audio activity, and latency metrics for HUD synchronization.",
+      "tags": [
+        "services",
+        "hud",
+        "state-management",
+        "metrics"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:src/services/hud_status.py:get_system_metrics",
+      "type": "function",
+      "name": "get_system_metrics",
+      "filePath": "src/services/hud_status.py",
+      "lineRange": [
+        17,
+        60
+      ],
+      "summary": "Function get_system_metrics() implementing core logic in hud_status.py.",
+      "tags": [
+        "function",
+        "services",
+        "hud"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:src/services/hud_status.py:get_hud_status",
+      "type": "function",
+      "name": "get_hud_status",
+      "filePath": "src/services/hud_status.py",
+      "lineRange": [
+        63,
+        82
+      ],
+      "summary": "Function get_hud_status() implementing core logic in hud_status.py.",
+      "tags": [
+        "function",
+        "services",
+        "hud"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:src/services/hud_status.py:update_hud_status",
+      "type": "function",
+      "name": "update_hud_status",
+      "filePath": "src/services/hud_status.py",
+      "lineRange": [
+        85,
+        124
+      ],
+      "summary": "Function update_hud_status(state, log_entry) implementing core logic in hud_status.py.",
+      "tags": [
+        "function",
+        "services",
+        "hud"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:src/services/hud_status.py:clear_hud_logs",
+      "type": "function",
+      "name": "clear_hud_logs",
+      "filePath": "src/services/hud_status.py",
+      "lineRange": [
+        127,
+        150
+      ],
+      "summary": "Function clear_hud_logs() implementing core logic in hud_status.py.",
+      "tags": [
+        "function",
+        "services",
+        "hud"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:src/services/hud_status.py:init_hud_status",
+      "type": "function",
+      "name": "init_hud_status",
+      "filePath": "src/services/hud_status.py",
+      "lineRange": [
+        153,
+        168
+      ],
+      "summary": "Function init_hud_status() implementing core logic in hud_status.py.",
+      "tags": [
+        "function",
+        "services",
+        "hud"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:src/services/voice_service.py",
+      "type": "file",
+      "name": "voice_service.py",
+      "filePath": "src/services/voice_service.py",
+      "summary": "Voice input and output pipeline providing wake-word recognition, audio recording, and Edge-TTS synthesis with feedback prevention.",
+      "tags": [
+        "services",
+        "voice",
+        "wake-word",
+        "tts",
+        "edge-tts",
+        "audio"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "class:src/services/voice_service.py:TTSManager",
+      "type": "class",
+      "name": "TTSManager",
+      "filePath": "src/services/voice_service.py",
+      "lineRange": [
+        76,
+        395
+      ],
+      "summary": "TTSManager class in voice_service.py (methods: __init__, is_enabled, is_enabled, is_muted).",
+      "tags": [
+        "class",
+        "services",
+        "voice"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "class:src/services/voice_service.py:EnergyVAD",
+      "type": "class",
+      "name": "EnergyVAD",
+      "filePath": "src/services/voice_service.py",
+      "lineRange": [
+        398,
+        422
+      ],
+      "summary": "EnergyVAD class in voice_service.py (methods: __init__, is_speech).",
+      "tags": [
+        "class",
+        "services",
+        "voice"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "class:src/services/voice_service.py:FastVAD",
+      "type": "class",
+      "name": "FastVAD",
+      "filePath": "src/services/voice_service.py",
+      "lineRange": [
+        425,
+        444
+      ],
+      "summary": "FastVAD class in voice_service.py (methods: __init__, is_speech).",
+      "tags": [
+        "class",
+        "services",
+        "voice"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "class:src/services/voice_service.py:SpeechRecognitionWorker",
+      "type": "class",
+      "name": "SpeechRecognitionWorker",
+      "filePath": "src/services/voice_service.py",
+      "lineRange": [
+        447,
+        747
+      ],
+      "summary": "SpeechRecognitionWorker class in voice_service.py (methods: __init__, abort, pause, resume).",
+      "tags": [
+        "class",
+        "services",
+        "voice"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "function:src/services/voice_service.py:clean_text_for_speech",
+      "type": "function",
+      "name": "clean_text_for_speech",
+      "filePath": "src/services/voice_service.py",
+      "lineRange": [
+        23,
+        51
+      ],
+      "summary": "Function clean_text_for_speech(text) implementing core logic in voice_service.py.",
+      "tags": [
+        "function",
+        "services",
+        "voice"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:src/services/voice_service.py:parse_wake_word",
+      "type": "function",
+      "name": "parse_wake_word",
+      "filePath": "src/services/voice_service.py",
+      "lineRange": [
+        60,
+        73
+      ],
+      "summary": "Function parse_wake_word(text) implementing core logic in voice_service.py.",
+      "tags": [
+        "function",
+        "services",
+        "voice"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:ui_server.py",
+      "type": "file",
+      "name": "ui_server.py",
+      "filePath": "ui_server.py",
+      "summary": "Flask HUD web server serving the browser-based dashboard and REST/WebSocket endpoints for agent status and commands.",
+      "tags": [
+        "server",
+        "flask",
+        "hud",
+        "api",
+        "endpoints"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:ui_server.py:set_command_handler",
+      "type": "function",
+      "name": "set_command_handler",
+      "filePath": "ui_server.py",
+      "lineRange": [
+        44,
+        47
+      ],
+      "summary": "Function set_command_handler(handler) implementing core logic in ui_server.py.",
+      "tags": [
+        "function",
+        "server",
+        "flask"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:ui_server.py:set_config_updated_callback",
+      "type": "function",
+      "name": "set_config_updated_callback",
+      "filePath": "ui_server.py",
+      "lineRange": [
+        50,
+        53
+      ],
+      "summary": "Function set_config_updated_callback(cb) implementing core logic in ui_server.py.",
+      "tags": [
+        "function",
+        "server",
+        "flask"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:ui_server.py:get_active_config",
+      "type": "function",
+      "name": "get_active_config",
+      "filePath": "ui_server.py",
+      "lineRange": [
+        56,
+        70
+      ],
+      "summary": "Function get_active_config() implementing core logic in ui_server.py.",
+      "tags": [
+        "function",
+        "server",
+        "flask"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:ui_server.py:_get_default_browser",
+      "type": "function",
+      "name": "_get_default_browser",
+      "filePath": "ui_server.py",
+      "lineRange": [
+        82,
+        102
+      ],
+      "summary": "Function _get_default_browser() implementing core logic in ui_server.py.",
+      "tags": [
+        "function",
+        "server",
+        "flask"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:ui_server.py:open_hud_window",
+      "type": "function",
+      "name": "open_hud_window",
+      "filePath": "ui_server.py",
+      "lineRange": [
+        115,
+        134
+      ],
+      "summary": "Function open_hud_window(url) implementing core logic in ui_server.py.",
+      "tags": [
+        "function",
+        "server",
+        "flask"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:ui_server.py:start_hud_server",
+      "type": "function",
+      "name": "start_hud_server",
+      "filePath": "ui_server.py",
+      "lineRange": [
+        409,
+        448
+      ],
+      "summary": "Function start_hud_server(host, port, open_browser) implementing core logic in ui_server.py.",
+      "tags": [
+        "function",
+        "server",
+        "flask"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:src/services/__init__.py",
+      "type": "file",
+      "name": "__init__.py",
+      "filePath": "src/services/__init__.py",
+      "summary": "Services module initializer exposing AIClient, VoiceService, TelegramWorker, and automation managers.",
+      "tags": [
+        "services",
+        "exports"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:src/services/ai_client.py",
+      "type": "file",
+      "name": "ai_client.py",
+      "filePath": "src/services/ai_client.py",
+      "summary": "Multi-provider LLM client adapter supporting Claude, OpenAI, Gemini, Ollama, and local proxy backends with streaming.",
+      "tags": [
+        "services",
+        "ai",
+        "llm",
+        "client",
+        "streaming"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "class:src/services/ai_client.py:ConnectionStatus",
+      "type": "class",
+      "name": "ConnectionStatus",
+      "filePath": "src/services/ai_client.py",
+      "lineRange": [
+        23,
+        28
+      ],
+      "summary": "ConnectionStatus class in ai_client.py (class definition).",
+      "tags": [
+        "class",
+        "services",
+        "ai"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "class:src/services/ai_client.py:Message",
+      "type": "class",
+      "name": "Message",
+      "filePath": "src/services/ai_client.py",
+      "lineRange": [
+        32,
+        60
+      ],
+      "summary": "Message class in ai_client.py (methods: to_api_format, to_dict, from_dict).",
+      "tags": [
+        "class",
+        "services",
+        "ai"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "class:src/services/ai_client.py:AIResponse",
+      "type": "class",
+      "name": "AIResponse",
+      "filePath": "src/services/ai_client.py",
+      "lineRange": [
+        64,
+        70
+      ],
+      "summary": "AIResponse class in ai_client.py (class definition).",
+      "tags": [
+        "class",
+        "services",
+        "ai"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "class:src/services/ai_client.py:AIClient",
+      "type": "class",
+      "name": "AIClient",
+      "filePath": "src/services/ai_client.py",
+      "lineRange": [
+        87,
+        558
+      ],
+      "summary": "AIClient class in ai_client.py (methods: __init__, update_config, _normalize_config, provider).",
+      "tags": [
+        "class",
+        "services",
+        "ai"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "function:src/services/ai_client.py:_clean_schema_for_gemini",
+      "type": "function",
+      "name": "_clean_schema_for_gemini",
+      "filePath": "src/services/ai_client.py",
+      "lineRange": [
+        73,
+        84
+      ],
+      "summary": "Function _clean_schema_for_gemini(val) implementing core logic in ai_client.py.",
+      "tags": [
+        "function",
+        "services",
+        "ai"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:src/services/desktop_icon_service.py",
+      "type": "file",
+      "name": "desktop_icon_service.py",
+      "filePath": "src/services/desktop_icon_service.py",
+      "summary": "Win32 SysListView32 desktop automation service for discovering, organizing, and repositioning desktop icons.",
+      "tags": [
+        "services",
+        "win32",
+        "desktop",
+        "icons",
+        "automation"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "class:src/services/desktop_icon_service.py:LVITEMW",
+      "type": "class",
+      "name": "LVITEMW",
+      "filePath": "src/services/desktop_icon_service.py",
+      "lineRange": [
+        32,
+        50
+      ],
+      "summary": "LVITEMW class in desktop_icon_service.py (class definition).",
+      "tags": [
+        "class",
+        "services",
+        "win32"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:src/services/desktop_icon_service.py:get_desktop_listview_hwnd",
+      "type": "function",
+      "name": "get_desktop_listview_hwnd",
+      "filePath": "src/services/desktop_icon_service.py",
+      "lineRange": [
+        53,
+        87
+      ],
+      "summary": "Function get_desktop_listview_hwnd() implementing core logic in desktop_icon_service.py.",
+      "tags": [
+        "function",
+        "services",
+        "win32"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:src/services/desktop_icon_service.py:get_screen_dimensions",
+      "type": "function",
+      "name": "get_screen_dimensions",
+      "filePath": "src/services/desktop_icon_service.py",
+      "lineRange": [
+        90,
+        95
+      ],
+      "summary": "Function get_screen_dimensions() implementing core logic in desktop_icon_service.py.",
+      "tags": [
+        "function",
+        "services",
+        "win32"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:src/services/desktop_icon_service.py:get_desktop_icons",
+      "type": "function",
+      "name": "get_desktop_icons",
+      "filePath": "src/services/desktop_icon_service.py",
+      "lineRange": [
+        98,
+        168
+      ],
+      "summary": "Function get_desktop_icons() implementing core logic in desktop_icon_service.py.",
+      "tags": [
+        "function",
+        "services",
+        "win32"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:src/services/desktop_icon_service.py:calculate_screen_coordinates",
+      "type": "function",
+      "name": "calculate_screen_coordinates",
+      "filePath": "src/services/desktop_icon_service.py",
+      "lineRange": [
+        171,
+        230
+      ],
+      "summary": "Function calculate_screen_coordinates(position, screen_width, screen_height) implementing core logic in desktop_icon_service.py.",
+      "tags": [
+        "function",
+        "services",
+        "win32"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:src/services/desktop_icon_service.py:position_desktop_icon",
+      "type": "function",
+      "name": "position_desktop_icon",
+      "filePath": "src/services/desktop_icon_service.py",
+      "lineRange": [
+        233,
+        358
+      ],
+      "summary": "Function position_desktop_icon(target, position, x) implementing core logic in desktop_icon_service.py.",
+      "tags": [
+        "function",
+        "services",
+        "win32"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:src/services/omniroute_manager.py",
+      "type": "file",
+      "name": "omniroute_manager.py",
+      "filePath": "src/services/omniroute_manager.py",
+      "summary": "Lifecycle manager for OmniRoute, a local LLM proxy server providing unified OpenAI-compatible routing.",
+      "tags": [
+        "services",
+        "proxy",
+        "omniroute",
+        "local-llm"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "class:src/services/omniroute_manager.py:OmniRouteManager",
+      "type": "class",
+      "name": "OmniRouteManager",
+      "filePath": "src/services/omniroute_manager.py",
+      "lineRange": [
+        12,
+        106
+      ],
+      "summary": "OmniRouteManager class in omniroute_manager.py (methods: __init__, is_running, start_if_needed, stop).",
+      "tags": [
+        "class",
+        "services",
+        "proxy"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "config:.env.example",
+      "type": "config",
+      "name": ".env.example",
+      "filePath": ".env.example",
+      "summary": "Template configuration file defining required environment variables and API keys for Altron services.",
+      "tags": [
+        "config",
+        "environment",
+        "template"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "document:CLAUDE.md",
+      "type": "document",
+      "name": "CLAUDE.md",
+      "filePath": "CLAUDE.md",
+      "summary": "Project instructions and architectural guidelines for AI coding assistants working in the Altron repository.",
+      "tags": [
+        "docs",
+        "guidelines",
+        "claude"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "document:README.md",
+      "type": "document",
+      "name": "README.md",
+      "filePath": "README.md",
+      "summary": "Comprehensive project documentation detailing features, setup instructions, architecture, and Telegram bot configuration.",
+      "tags": [
+        "docs",
+        "readme",
+        "architecture",
+        "overview"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "config:memory.json",
+      "type": "config",
+      "name": "memory.json",
+      "filePath": "memory.json",
+      "summary": "Persistent JSON storage capturing long-term agent memory facts and user preferences.",
+      "tags": [
+        "data",
+        "memory",
+        "storage",
+        "json"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "config:requirements.txt",
+      "type": "config",
+      "name": "requirements.txt",
+      "filePath": "requirements.txt",
+      "summary": "Python package dependency manifest listing PySide6, Flask, Edge-TTS, and Windows automation libraries.",
+      "tags": [
+        "config",
+        "dependencies",
+        "pip",
+        "manifest"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "config:status.json",
+      "type": "config",
+      "name": "status.json",
+      "filePath": "status.json",
+      "summary": "Runtime status cache capturing current agent activity and voice synthesis state.",
+      "tags": [
+        "data",
+        "status",
+        "cache"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:build_exe.py",
+      "type": "file",
+      "name": "build_exe.py",
+      "filePath": "build_exe.py",
+      "summary": "PyInstaller build script automating compilation of Altron into a standalone Windows executable distribution.",
+      "tags": [
+        "build",
+        "pyinstaller",
+        "packaging",
+        "executable"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:build_exe.py:build",
+      "type": "function",
+      "name": "build",
+      "filePath": "build_exe.py",
+      "lineRange": [
+        14,
+        91
+      ],
+      "summary": "Function build() implementing core logic in build_exe.py.",
+      "tags": [
+        "function",
+        "build",
+        "pyinstaller"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "document:prompts/system_prompt.txt",
+      "type": "document",
+      "name": "system_prompt.txt",
+      "filePath": "prompts/system_prompt.txt",
+      "summary": "Core system prompt defining Altron personality, capabilities, tool usage instructions, and safety guardrails.",
+      "tags": [
+        "prompt",
+        "persona",
+        "system-prompt"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:src/__init__.py",
+      "type": "file",
+      "name": "__init__.py",
+      "filePath": "src/__init__.py",
+      "summary": "Top-level source package root initializer.",
+      "tags": [
+        "package",
+        "initializer"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:ui/app.js",
+      "type": "file",
+      "name": "app.js",
+      "filePath": "ui/app.js",
+      "summary": "Frontend JavaScript application powering HUD status updates, sound wave animations, and real-time polling.",
+      "tags": [
+        "ui",
+        "frontend",
+        "javascript",
+        "hud",
+        "animations"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:ui/index.html",
+      "type": "file",
+      "name": "index.html",
+      "filePath": "ui/index.html",
+      "summary": "HTML template for the floating HUD status dashboard displaying system status, microphone wave, and activity log.",
+      "tags": [
+        "ui",
+        "html",
+        "hud",
+        "markup"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:ui/style.css",
+      "type": "file",
+      "name": "style.css",
+      "filePath": "ui/style.css",
+      "summary": "Dark modern glassmorphism stylesheet for the HUD dashboard with custom keyframe animations and status indicators.",
+      "tags": [
+        "ui",
+        "css",
+        "styling",
+        "glassmorphism",
+        "animations"
+      ],
+      "complexity": "moderate"
+    }
+  ],
+  "edges": [
+    {
+      "source": "file:src/app.py",
+      "target": "file:src/agent/executor.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:src/app.py",
+      "target": "file:src/config/__init__.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:src/app.py",
+      "target": "file:src/services/__init__.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:src/app.py",
+      "target": "file:src/storage/db.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:src/app.py",
+      "target": "file:src/ui/__init__.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:src/app.py",
+      "target": "class:src/app.py:Application",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/app.py",
+      "target": "function:src/app.py:main",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/services/database.py",
+      "target": "file:src/storage/db.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:src/services/database.py",
+      "target": "class:src/services/database.py:DatabaseService",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/storage/__init__.py",
+      "target": "file:src/storage/db.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:src/storage/db.py",
+      "target": "class:src/storage/db.py:Conversation",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/storage/db.py",
+      "target": "class:src/storage/db.py:ChatMessage",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/storage/db.py",
+      "target": "class:src/storage/db.py:ToolExecution",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/storage/db.py",
+      "target": "class:src/storage/db.py:Database",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/ui/__init__.py",
+      "target": "file:src/ui/chat_window.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:src/ui/__init__.py",
+      "target": "file:src/ui/settings_window.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:src/ui/__init__.py",
+      "target": "file:src/ui/system_tray.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:src/ui/chat_window.py",
+      "target": "file:src/agent/executor.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:src/ui/chat_window.py",
+      "target": "file:src/services/ai_client.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:src/ui/chat_window.py",
+      "target": "file:src/services/telegram_service.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:src/ui/chat_window.py",
+      "target": "file:src/services/voice_service.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:src/ui/chat_window.py",
+      "target": "file:src/storage/db.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:src/ui/chat_window.py",
+      "target": "class:src/ui/chat_window.py:AgentBridge",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/ui/chat_window.py",
+      "target": "class:src/ui/chat_window.py:MessageBubble",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/ui/chat_window.py",
+      "target": "class:src/ui/chat_window.py:StepBubble",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/ui/chat_window.py",
+      "target": "class:src/ui/chat_window.py:PermissionCard",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/ui/chat_window.py",
+      "target": "class:src/ui/chat_window.py:ChatWindow",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/ui/system_tray.py",
+      "target": "class:src/ui/system_tray.py:SystemTrayIcon",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:memory.py",
+      "target": "file:src/agent/memory.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:src/agent/__init__.py",
+      "target": "file:src/agent/executor.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:src/agent/__init__.py",
+      "target": "file:src/agent/memory.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:src/agent/__init__.py",
+      "target": "file:src/agent/permissions.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:src/agent/__init__.py",
+      "target": "file:src/agent/tools.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:src/agent/executor.py",
+      "target": "file:src/agent/memory.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:src/agent/executor.py",
+      "target": "file:src/agent/permissions.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:src/agent/executor.py",
+      "target": "file:src/agent/tools.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:src/agent/executor.py",
+      "target": "file:src/services/ai_client.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:src/agent/executor.py",
+      "target": "file:src/services/hud_status.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:src/agent/executor.py",
+      "target": "file:src/storage/db.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:src/agent/executor.py",
+      "target": "class:src/agent/executor.py:AgentState",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/agent/executor.py",
+      "target": "class:src/agent/executor.py:AgentStep",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/agent/executor.py",
+      "target": "class:src/agent/executor.py:AgentResponse",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/agent/executor.py",
+      "target": "class:src/agent/executor.py:PermissionRequest",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/agent/executor.py",
+      "target": "class:src/agent/executor.py:AgentExecutor",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/agent/executor.py",
+      "target": "function:src/agent/executor.py:match_local_intent",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/agent/executor.py",
+      "target": "function:src/agent/executor.py:clean_tool_confirmation",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/agent/executor.py",
+      "target": "function:src/agent/executor.py:intercept_raw_code_or_payload",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/agent/executor.py",
+      "target": "function:src/agent/executor.py:sanitize_final_reply",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/agent/memory.py",
+      "target": "class:src/agent/memory.py:ConversationMemory",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/agent/permissions.py",
+      "target": "class:src/agent/permissions.py:PermissionLevel",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/agent/permissions.py",
+      "target": "class:src/agent/permissions.py:PermissionRule",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/agent/permissions.py",
+      "target": "class:src/agent/permissions.py:PermissionGate",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/agent/tools.py",
+      "target": "file:src/config/settings.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:src/agent/tools.py",
+      "target": "file:src/services/telegram_service.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:src/agent/tools.py",
+      "target": "class:src/agent/tools.py:ToolCategory",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/agent/tools.py",
+      "target": "class:src/agent/tools.py:ToolParameter",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/agent/tools.py",
+      "target": "class:src/agent/tools.py:ToolResult",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/agent/tools.py",
+      "target": "class:src/agent/tools.py:Tool",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/agent/tools.py",
+      "target": "class:src/agent/tools.py:ToolRegistry",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/agent/tools.py",
+      "target": "function:src/agent/tools.py:handle_file_search",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/agent/tools.py",
+      "target": "function:src/agent/tools.py:handle_file_read",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/agent/tools.py",
+      "target": "function:src/agent/tools.py:handle_file_write",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/agent/tools.py",
+      "target": "function:src/agent/tools.py:handle_file_delete",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/agent/tools.py",
+      "target": "function:src/agent/tools.py:handle_file_copy",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/agent/tools.py",
+      "target": "function:src/agent/tools.py:handle_file_move",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/agent/tools.py",
+      "target": "function:src/agent/tools.py:handle_file_open",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/agent/tools.py",
+      "target": "function:src/agent/tools.py:handle_terminal_command",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/agent/tools.py",
+      "target": "function:src/agent/tools.py:handle_app_open",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/agent/tools.py",
+      "target": "function:src/agent/tools.py:handle_app_close",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/agent/tools.py",
+      "target": "function:src/agent/tools.py:handle_browser_open",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/agent/tools.py",
+      "target": "function:src/agent/tools.py:handle_process_list",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/agent/tools.py",
+      "target": "function:src/agent/tools.py:handle_system_info",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/agent/tools.py",
+      "target": "function:src/agent/tools.py:handle_window_control",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/agent/tools.py",
+      "target": "function:src/agent/tools.py:find_matching_window",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/agent/tools.py",
+      "target": "function:src/agent/tools.py:handle_move_application_window",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/agent/tools.py",
+      "target": "function:src/agent/tools.py:handle_desktop_icon_position",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/agent/tools.py",
+      "target": "function:src/agent/tools.py:handle_code_edit",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/agent/tools.py",
+      "target": "function:src/agent/tools.py:handle_web_fetch",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/agent/tools.py",
+      "target": "function:src/agent/tools.py:handle_system_control",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/agent/tools.py",
+      "target": "function:src/agent/tools.py:handle_youtube_play",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/agent/tools.py",
+      "target": "function:src/agent/tools.py:extract_youtube_video_id",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/agent/tools.py",
+      "target": "function:src/agent/tools.py:fetch_youtube_transcript_text",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/agent/tools.py",
+      "target": "function:src/agent/tools.py:handle_youtube_play_and_summarize",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/agent/tools.py",
+      "target": "function:src/agent/tools.py:handle_create_and_send_pdf",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/agent/tools.py",
+      "target": "function:src/agent/tools.py:handle_send_to_telegram",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/agent/tools.py",
+      "target": "function:src/agent/tools.py:handle_capture_and_inspect_screen",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/agent/tools.py",
+      "target": "function:src/agent/tools.py:_record_clipboard_history",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/agent/tools.py",
+      "target": "function:src/agent/tools.py:_get_clipboard_unicode",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/agent/tools.py",
+      "target": "function:src/agent/tools.py:_set_clipboard_unicode",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/agent/tools.py",
+      "target": "function:src/agent/tools.py:_simulate_keybd",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/agent/tools.py",
+      "target": "function:src/agent/tools.py:handle_clipboard_manager",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/agent/tools.py",
+      "target": "function:src/agent/tools.py:_mouse_click",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/agent/tools.py",
+      "target": "function:src/agent/tools.py:_focus_whatsapp_window",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/agent/tools.py",
+      "target": "function:src/agent/tools.py:_find_contact_element_uia",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/agent/tools.py",
+      "target": "function:src/agent/tools.py:_open_whatsapp_chat",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/agent/tools.py",
+      "target": "function:src/agent/tools.py:handle_whatsapp_send",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/agent/tools.py",
+      "target": "function:src/agent/tools.py:handle_whatsapp_read",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/agent/tools.py",
+      "target": "function:src/agent/tools.py:create_default_registry",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/config/__init__.py",
+      "target": "file:src/config/settings.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:src/config/settings.py",
+      "target": "class:src/config/settings.py:Settings",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/config/settings.py",
+      "target": "function:src/config/settings.py:load_env_file",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/config/settings.py",
+      "target": "function:src/config/settings.py:save_ai_config",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/services/telegram_service.py",
+      "target": "file:src/config/settings.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:src/services/telegram_service.py",
+      "target": "class:src/services/telegram_service.py:TelegramRemoteWorker",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/services/telegram_service.py",
+      "target": "function:src/services/telegram_service.py:chunk_message",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/services/telegram_service.py",
+      "target": "function:src/services/telegram_service.py:send_telegram_message",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/services/telegram_service.py",
+      "target": "function:src/services/telegram_service.py:send_telegram_message_async",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/services/telegram_service.py",
+      "target": "function:src/services/telegram_service.py:send_telegram_document",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/services/telegram_service.py",
+      "target": "function:src/services/telegram_service.py:send_telegram_photo",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/services/telegram_service.py",
+      "target": "function:src/services/telegram_service.py:send_telegram_photo_async",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/ui/settings_window.py",
+      "target": "file:src/agent/tools.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:src/ui/settings_window.py",
+      "target": "file:src/config/__init__.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:src/ui/settings_window.py",
+      "target": "file:src/config/settings.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:src/ui/settings_window.py",
+      "target": "file:src/services/ai_client.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:src/ui/settings_window.py",
+      "target": "file:src/storage/db.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:src/ui/settings_window.py",
+      "target": "class:src/ui/settings_window.py:SettingsWindow",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/ui/settings_window.py",
+      "target": "function:src/ui/settings_window.py:is_windows_startup_enabled",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/ui/settings_window.py",
+      "target": "function:src/ui/settings_window.py:set_windows_startup",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:main.py",
+      "target": "file:src/agent/executor.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:main.py",
+      "target": "file:src/config/__init__.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:main.py",
+      "target": "file:src/services/__init__.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:main.py",
+      "target": "file:src/services/hud_status.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:main.py",
+      "target": "file:src/services/telegram_service.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:main.py",
+      "target": "file:src/services/voice_service.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:main.py",
+      "target": "file:src/storage/db.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:main.py",
+      "target": "file:ui_server.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:main.py",
+      "target": "function:main.py:main",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/services/hud_status.py",
+      "target": "function:src/services/hud_status.py:get_system_metrics",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/services/hud_status.py",
+      "target": "function:src/services/hud_status.py:get_hud_status",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/services/hud_status.py",
+      "target": "function:src/services/hud_status.py:update_hud_status",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/services/hud_status.py",
+      "target": "function:src/services/hud_status.py:clear_hud_logs",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/services/hud_status.py",
+      "target": "function:src/services/hud_status.py:init_hud_status",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/services/voice_service.py",
+      "target": "file:src/services/hud_status.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:src/services/voice_service.py",
+      "target": "class:src/services/voice_service.py:TTSManager",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/services/voice_service.py",
+      "target": "class:src/services/voice_service.py:EnergyVAD",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/services/voice_service.py",
+      "target": "class:src/services/voice_service.py:FastVAD",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/services/voice_service.py",
+      "target": "class:src/services/voice_service.py:SpeechRecognitionWorker",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/services/voice_service.py",
+      "target": "function:src/services/voice_service.py:clean_text_for_speech",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/services/voice_service.py",
+      "target": "function:src/services/voice_service.py:parse_wake_word",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:ui_server.py",
+      "target": "function:ui_server.py:set_command_handler",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:ui_server.py",
+      "target": "function:ui_server.py:set_config_updated_callback",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:ui_server.py",
+      "target": "function:ui_server.py:get_active_config",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:ui_server.py",
+      "target": "function:ui_server.py:_get_default_browser",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:ui_server.py",
+      "target": "function:ui_server.py:open_hud_window",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:ui_server.py",
+      "target": "function:ui_server.py:start_hud_server",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/services/__init__.py",
+      "target": "file:src/services/ai_client.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:src/services/__init__.py",
+      "target": "file:src/services/database.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:src/services/__init__.py",
+      "target": "file:src/services/desktop_icon_service.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:src/services/__init__.py",
+      "target": "file:src/services/omniroute_manager.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:src/services/__init__.py",
+      "target": "file:src/services/telegram_service.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:src/services/__init__.py",
+      "target": "file:src/services/voice_service.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:src/services/ai_client.py",
+      "target": "class:src/services/ai_client.py:ConnectionStatus",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/services/ai_client.py",
+      "target": "class:src/services/ai_client.py:Message",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/services/ai_client.py",
+      "target": "class:src/services/ai_client.py:AIResponse",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/services/ai_client.py",
+      "target": "class:src/services/ai_client.py:AIClient",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/services/ai_client.py",
+      "target": "function:src/services/ai_client.py:_clean_schema_for_gemini",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/services/desktop_icon_service.py",
+      "target": "class:src/services/desktop_icon_service.py:LVITEMW",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/services/desktop_icon_service.py",
+      "target": "function:src/services/desktop_icon_service.py:get_desktop_listview_hwnd",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/services/desktop_icon_service.py",
+      "target": "function:src/services/desktop_icon_service.py:get_screen_dimensions",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/services/desktop_icon_service.py",
+      "target": "function:src/services/desktop_icon_service.py:get_desktop_icons",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/services/desktop_icon_service.py",
+      "target": "function:src/services/desktop_icon_service.py:calculate_screen_coordinates",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/services/desktop_icon_service.py",
+      "target": "function:src/services/desktop_icon_service.py:position_desktop_icon",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/services/omniroute_manager.py",
+      "target": "class:src/services/omniroute_manager.py:OmniRouteManager",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:build_exe.py",
+      "target": "function:build_exe.py:build",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    }
+  ],
+  "layers": [
+    {
+      "id": "layer:core-orchestration",
+      "name": "Core Orchestration",
+      "description": "Application lifecycle entry points, background thread orchestration, and Windows executable packaging.",
+      "nodeIds": [
+        "file:main.py",
+        "file:src/app.py",
+        "file:build_exe.py"
+      ]
+    },
+    {
+      "id": "layer:agent-intelligence",
+      "name": "Agent & Tool Execution",
+      "description": "Autonomous ReAct loop, tool execution handlers, security permission boundaries, and short-term memory.",
+      "nodeIds": [
+        "file:src/agent/executor.py",
+        "file:src/agent/tools.py",
+        "file:src/agent/permissions.py",
+        "file:src/agent/memory.py",
+        "file:src/agent/__init__.py",
+        "file:memory.py"
+      ]
+    },
+    {
+      "id": "layer:services-integration",
+      "name": "Services & Automation",
+      "description": "AI provider clients, voice wake-word & TTS audio pipeline, desktop icon manipulation, and remote Telegram bot.",
+      "nodeIds": [
+        "file:src/services/ai_client.py",
+        "file:src/services/voice_service.py",
+        "file:src/services/desktop_icon_service.py",
+        "file:src/services/telegram_service.py",
+        "file:src/services/omniroute_manager.py",
+        "file:src/services/hud_status.py",
+        "file:src/services/database.py",
+        "file:src/services/__init__.py"
+      ]
+    },
+    {
+      "id": "layer:ui-presentation",
+      "name": "UI & Presentation",
+      "description": "PySide6 floating Dynamic Island capsule, chat window, system tray, settings dialog, and browser HUD server.",
+      "nodeIds": [
+        "file:src/ui/chat_window.py",
+        "file:src/ui/system_tray.py",
+        "file:src/ui/settings_window.py",
+        "file:src/ui/__init__.py",
+        "file:ui_server.py",
+        "file:ui/app.js",
+        "file:ui/index.html",
+        "file:ui/style.css"
+      ]
+    },
+    {
+      "id": "layer:storage-persistence",
+      "name": "Storage & Persistence",
+      "description": "SQLite database storage models, migration logic, conversation history, and persistent agent JSON state.",
+      "nodeIds": [
+        "file:src/storage/db.py",
+        "file:src/storage/__init__.py",
+        "config:memory.json",
+        "config:status.json"
+      ]
+    },
+    {
+      "id": "layer:configuration-environment",
+      "name": "Configuration & Environment",
+      "description": "Runtime settings management, environment variable loading, and package dependency requirements.",
+      "nodeIds": [
+        "file:src/config/settings.py",
+        "file:src/config/__init__.py",
+        "config:.env.example",
+        "config:requirements.txt"
+      ]
+    },
+    {
+      "id": "layer:documentation-prompting",
+      "name": "Documentation & Prompts",
+      "description": "System prompts defining agent persona, repository architectural guidelines, and user documentation.",
+      "nodeIds": [
+        "document:README.md",
+        "document:CLAUDE.md",
+        "document:prompts/system_prompt.txt",
+        "file:src/__init__.py"
+      ]
+    }
+  ],
+  "tour": [
+    {
+      "order": 1,
+      "title": "Project Overview & Dependencies",
+      "description": "Start with the project documentation and dependencies to understand Altron's architecture, prerequisites, and features.",
+      "nodeIds": [
+        "document:README.md",
+        "config:requirements.txt",
+        "document:CLAUDE.md"
+      ]
+    },
+    {
+      "order": 2,
+      "title": "Application Bootstrap & Main Orchestrator",
+      "description": "Examine how main.py launches and coordinates concurrent threads (Flask HUD, voice listener, Telegram worker) with fault isolation.",
+      "nodeIds": [
+        "file:main.py",
+        "file:src/app.py"
+      ]
+    },
+    {
+      "order": 3,
+      "title": "Dynamic Island Capsule UI & Tray",
+      "description": "Explore the PySide6 floating capsule window that smoothly expands for user interaction and collapses when idle, alongside system tray controls.",
+      "nodeIds": [
+        "file:src/ui/chat_window.py",
+        "file:src/ui/system_tray.py"
+      ]
+    },
+    {
+      "order": 4,
+      "title": "Agent Execution Engine & Security",
+      "description": "Understand the autonomous ReAct agent loop, multi-step tool execution, memory retrieval, and the security permission gate.",
+      "nodeIds": [
+        "file:src/agent/executor.py",
+        "file:src/agent/permissions.py",
+        "file:src/agent/memory.py"
+      ]
+    },
+    {
+      "order": 5,
+      "title": "Desktop Automation & Win32 Tools",
+      "description": "Inspect the tool system allowing Altron to control Windows SysListView32 desktop icons, read/write files, and run commands.",
+      "nodeIds": [
+        "file:src/agent/tools.py",
+        "file:src/services/desktop_icon_service.py"
+      ]
+    },
+    {
+      "order": 6,
+      "title": "Voice Wake-Word & Edge-TTS Pipeline",
+      "description": "Learn how ambient listening detects 'Altron' and coordinates speech playback with audio feedback prevention.",
+      "nodeIds": [
+        "file:src/services/voice_service.py",
+        "file:src/services/hud_status.py"
+      ]
+    },
+    {
+      "order": 7,
+      "title": "Remote Telegram Control & Web HUD",
+      "description": "See how users can control Altron remotely from a smartphone via Telegram bot long-polling, and monitor live status on the Flask HUD.",
+      "nodeIds": [
+        "file:src/services/telegram_service.py",
+        "file:ui_server.py",
+        "file:ui/app.js"
+      ]
+    },
+    {
+      "order": 8,
+      "title": "Persistence Engine & Configuration",
+      "description": "Review the SQLite database layer for chat history and settings persistence, alongside environment variable handling.",
+      "nodeIds": [
+        "file:src/storage/db.py",
+        "file:src/config/settings.py",
+        "config:.env.example"
+      ]
+    }
+  ]
+}

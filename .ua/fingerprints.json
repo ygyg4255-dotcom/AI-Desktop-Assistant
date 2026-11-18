@@ -1,0 +1,3209 @@
+{
+  "version": "1.0.0",
+  "gitCommitHash": "090a5f8956716c2a22a4905144348d0e74b43a46",
+  "generatedAt": "2026-11-17T15:06:42.946Z",
+  "files": {
+    ".env.example": {
+      "filePath": ".env.example",
+      "contentHash": "f3d70e5198c8ed55e70d14d58a5ac736152de7f12268db235193f33729934f09",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 39,
+      "hasStructuralAnalysis": false
+    },
+    "CLAUDE.md": {
+      "filePath": "CLAUDE.md",
+      "contentHash": "d867cc964aad3565545f392f0f00c205a129406e503f64bd17c368c9738c88b0",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 19,
+      "hasStructuralAnalysis": false
+    },
+    "README.md": {
+      "filePath": "README.md",
+      "contentHash": "b735b8a9129a7b28dcea3f7c7fdfdcc05da598913ad2c207ac47e6577fa8028f",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 181,
+      "hasStructuralAnalysis": false
+    },
+    "build_exe.py": {
+      "filePath": "build_exe.py",
+      "contentHash": "7356fb87abedbd3521a0ec1a2bc06b16b8f8783d977dd2fc906143a1fc8ae6de",
+      "functions": [
+        {
+          "name": "build",
+          "params": [],
+          "exported": true,
+          "lineCount": 78
+        }
+      ],
+      "classes": [],
+      "imports": [
+        {
+          "source": "sys",
+          "specifiers": [
+            "sys"
+          ]
+        },
+        {
+          "source": "shutil",
+          "specifiers": [
+            "shutil"
+          ]
+        },
+        {
+          "source": "pathlib",
+          "specifiers": [
+            "Path"
+          ]
+        },
+        {
+          "source": "PyInstaller.__main__",
+          "specifiers": [
+            "PyInstaller.__main__"
+          ]
+        }
+      ],
+      "exports": [
+        "build"
+      ],
+      "totalLines": 97,
+      "hasStructuralAnalysis": true
+    },
+    "main.py": {
+      "filePath": "main.py",
+      "contentHash": "899c2a420976118a04e6cbb31c62582e22ca321e66b822656a193d8bf72a0344",
+      "functions": [
+        {
+          "name": "main",
+          "params": [],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 269
+        }
+      ],
+      "classes": [],
+      "imports": [
+        {
+          "source": "os",
+          "specifiers": [
+            "os"
+          ]
+        },
+        {
+          "source": "sys",
+          "specifiers": [
+            "sys"
+          ]
+        },
+        {
+          "source": "time",
+          "specifiers": [
+            "time"
+          ]
+        },
+        {
+          "source": "threading",
+          "specifiers": [
+            "threading"
+          ]
+        },
+        {
+          "source": "pathlib",
+          "specifiers": [
+            "Path"
+          ]
+        },
+        {
+          "source": "PySide6.QtCore",
+          "specifiers": [
+            "QCoreApplication",
+            "Qt"
+          ]
+        },
+        {
+          "source": "src.config",
+          "specifiers": [
+            "Settings"
+          ]
+        },
+        {
+          "source": "src.storage.db",
+          "specifiers": [
+            "Database"
+          ]
+        },
+        {
+          "source": "src.services",
+          "specifiers": [
+            "AIClient",
+            "OmniRouteManager"
+          ]
+        },
+        {
+          "source": "src.agent.executor",
+          "specifiers": [
+            "AgentExecutor"
+          ]
+        },
+        {
+          "source": "src.services.hud_status",
+          "specifiers": [
+            "init_hud_status",
+            "update_hud_status"
+          ]
+        },
+        {
+          "source": "src.services.voice_service",
+          "specifiers": [
+            "TTSManager",
+            "SpeechRecognitionWorker",
+            "is_speaking_event",
+            "parse_wake_word"
+          ]
+        },
+        {
+          "source": "src.services.telegram_service",
+          "specifiers": [
+            "TelegramRemoteWorker",
+            "send_telegram_message_async"
+          ]
+        },
+        {
+          "source": "ui_server",
+          "specifiers": [
+            "start_hud_server"
+          ]
+        }
+      ],
+      "exports": [
+        "main"
+      ],
+      "totalLines": 312,
+      "hasStructuralAnalysis": true
+    },
+    "memory.json": {
+      "filePath": "memory.json",
+      "contentHash": "28a12b7108e732158f56c52dc74f28d0030e3fd8280b2958c55e9f9ce4bf1ad3",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 42,
+      "hasStructuralAnalysis": false
+    },
+    "memory.py": {
+      "filePath": "memory.py",
+      "contentHash": "92d673724238f13a52edb67306ad3b186ba07c53a16a7d765bf0ec7353ce269f",
+      "functions": [],
+      "classes": [],
+      "imports": [
+        {
+          "source": "src.agent.memory",
+          "specifiers": [
+            "ConversationMemory"
+          ]
+        }
+      ],
+      "exports": [],
+      "totalLines": 5,
+      "hasStructuralAnalysis": true
+    },
+    "prompts/system_prompt.txt": {
+      "filePath": "prompts/system_prompt.txt",
+      "contentHash": "460ffba1aedbfb966e940b4f5f4286e996a06ed1ff0628e521a9bee7a8e8f14c",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 3,
+      "hasStructuralAnalysis": false
+    },
+    "requirements.txt": {
+      "filePath": "requirements.txt",
+      "contentHash": "2d6bf6ee63c992442f662ff04678d9fe07d14a6067bddb1a414447e9836952dd",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 14,
+      "hasStructuralAnalysis": false
+    },
+    "src/__init__.py": {
+      "filePath": "src/__init__.py",
+      "contentHash": "c1dea7ee1f34fdbd8589725734db3c76ee219f1e3290740be258445c13362951",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 2,
+      "hasStructuralAnalysis": true
+    },
+    "src/agent/__init__.py": {
+      "filePath": "src/agent/__init__.py",
+      "contentHash": "12e52b58f709d8ea7be6477c75764c015cc529239d531e56287a52e1b4580809",
+      "functions": [],
+      "classes": [],
+      "imports": [
+        {
+          "source": "src.agent.tools",
+          "specifiers": [
+            "ToolRegistry",
+            "Tool",
+            "ToolResult",
+            "ToolCategory",
+            "create_default_registry"
+          ]
+        },
+        {
+          "source": "src.agent.executor",
+          "specifiers": [
+            "AgentExecutor",
+            "AgentState",
+            "AgentStep",
+            "AgentResponse",
+            "PermissionRequest"
+          ]
+        },
+        {
+          "source": "src.agent.permissions",
+          "specifiers": [
+            "PermissionGate",
+            "PermissionLevel"
+          ]
+        },
+        {
+          "source": "src.agent.memory",
+          "specifiers": [
+            "ConversationMemory"
+          ]
+        }
+      ],
+      "exports": [],
+      "totalLines": 12,
+      "hasStructuralAnalysis": true
+    },
+    "src/agent/executor.py": {
+      "filePath": "src/agent/executor.py",
+      "contentHash": "f5ca4a691ee7eab83f35fdbd1f03a23aa6acc899bf3d3e4be9277c27ae87bfe9",
+      "functions": [
+        {
+          "name": "match_local_intent",
+          "params": [
+            "prompt"
+          ],
+          "returnType": "Optional[Dict[str, Any]]",
+          "exported": true,
+          "lineCount": 546
+        },
+        {
+          "name": "clean_tool_confirmation",
+          "params": [
+            "content",
+            "last_tool_name",
+            "last_tool_input",
+            "last_result",
+            "user_message"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 222
+        },
+        {
+          "name": "intercept_raw_code_or_payload",
+          "params": [
+            "text",
+            "user_message",
+            "executor"
+          ],
+          "returnType": "Optional[tuple]",
+          "exported": true,
+          "lineCount": 138
+        },
+        {
+          "name": "sanitize_final_reply",
+          "params": [
+            "content",
+            "user_message"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 60
+        }
+      ],
+      "classes": [
+        {
+          "name": "AgentState",
+          "methods": [],
+          "properties": [],
+          "exported": true,
+          "lineCount": 8
+        },
+        {
+          "name": "AgentStep",
+          "methods": [],
+          "properties": [
+            "step_type",
+            "content",
+            "tool_name",
+            "tool_input",
+            "tool_result",
+            "timestamp"
+          ],
+          "exported": true,
+          "lineCount": 8
+        },
+        {
+          "name": "AgentResponse",
+          "methods": [],
+          "properties": [
+            "content",
+            "steps",
+            "tools_used",
+            "success",
+            "error"
+          ],
+          "exported": true,
+          "lineCount": 7
+        },
+        {
+          "name": "PermissionRequest",
+          "methods": [
+            "__init__",
+            "approve",
+            "reject",
+            "wait",
+            "session_allow",
+            "response"
+          ],
+          "properties": [],
+          "exported": true,
+          "lineCount": 37
+        },
+        {
+          "name": "AgentExecutor",
+          "methods": [
+            "__init__",
+            "_get_system_prompt",
+            "memory",
+            "state",
+            "pending_permission",
+            "tools_schema",
+            "conversation_id",
+            "gate",
+            "registry",
+            "_intercept_raw_code_or_payload",
+            "_sanitize_final_reply",
+            "start_conversation",
+            "load_conversation",
+            "_build_messages_with_tools",
+            "_parse_tool_use",
+            "_execute_tool",
+            "_execute_tool_with_permission",
+            "process",
+            "_process_sync",
+            "_make_tool_request",
+            "respond_to_permission",
+            "cancel",
+            "clear_history"
+          ],
+          "properties": [],
+          "exported": true,
+          "lineCount": 855
+        }
+      ],
+      "imports": [
+        {
+          "source": "json",
+          "specifiers": [
+            "json"
+          ]
+        },
+        {
+          "source": "time",
+          "specifiers": [
+            "time"
+          ]
+        },
+        {
+          "source": "re",
+          "specifiers": [
+            "re"
+          ]
+        },
+        {
+          "source": "difflib",
+          "specifiers": [
+            "difflib"
+          ]
+        },
+        {
+          "source": "threading",
+          "specifiers": [
+            "threading"
+          ]
+        },
+        {
+          "source": "pathlib",
+          "specifiers": [
+            "Path"
+          ]
+        },
+        {
+          "source": "typing",
+          "specifiers": [
+            "Optional",
+            "List",
+            "Dict",
+            "Any",
+            "Callable",
+            "Union"
+          ]
+        },
+        {
+          "source": "dataclasses",
+          "specifiers": [
+            "dataclass",
+            "field"
+          ]
+        },
+        {
+          "source": "enum",
+          "specifiers": [
+            "Enum"
+          ]
+        },
+        {
+          "source": "concurrent.futures",
+          "specifiers": [
+            "Future"
+          ]
+        },
+        {
+          "source": "src.agent.tools",
+          "specifiers": [
+            "ToolRegistry",
+            "ToolResult",
+            "create_default_registry"
+          ]
+        },
+        {
+          "source": "src.agent.permissions",
+          "specifiers": [
+            "PermissionGate",
+            "PermissionLevel"
+          ]
+        },
+        {
+          "source": "src.agent.memory",
+          "specifiers": [
+            "ConversationMemory"
+          ]
+        },
+        {
+          "source": "src.services.ai_client",
+          "specifiers": [
+            "AIClient",
+            "Message"
+          ]
+        },
+        {
+          "source": "src.services.hud_status",
+          "specifiers": [
+            "update_hud_status"
+          ]
+        },
+        {
+          "source": "src.storage.db",
+          "specifiers": [
+            "Database"
+          ]
+        }
+      ],
+      "exports": [
+        "AgentState",
+        "AgentStep",
+        "AgentResponse",
+        "PermissionRequest",
+        "match_local_intent",
+        "clean_tool_confirmation",
+        "intercept_raw_code_or_payload",
+        "sanitize_final_reply",
+        "AgentExecutor"
+      ],
+      "totalLines": 1924,
+      "hasStructuralAnalysis": true
+    },
+    "src/agent/memory.py": {
+      "filePath": "src/agent/memory.py",
+      "contentHash": "4a075693fea88fb660bdf36d9d23d011fb1a583a6e32adaf502465f5b8f38225",
+      "functions": [],
+      "classes": [
+        {
+          "name": "ConversationMemory",
+          "methods": [
+            "__init__",
+            "_ensure_file",
+            "_read_messages",
+            "_write_messages",
+            "add_message",
+            "get_recent_messages",
+            "format_for_prompt",
+            "clear"
+          ],
+          "properties": [],
+          "exported": true,
+          "lineCount": 85
+        }
+      ],
+      "imports": [
+        {
+          "source": "json",
+          "specifiers": [
+            "json"
+          ]
+        },
+        {
+          "source": "threading",
+          "specifiers": [
+            "threading"
+          ]
+        },
+        {
+          "source": "pathlib",
+          "specifiers": [
+            "Path"
+          ]
+        },
+        {
+          "source": "typing",
+          "specifiers": [
+            "List",
+            "Dict",
+            "Any",
+            "Optional",
+            "Union"
+          ]
+        }
+      ],
+      "exports": [
+        "ConversationMemory"
+      ],
+      "totalLines": 93,
+      "hasStructuralAnalysis": true
+    },
+    "src/agent/permissions.py": {
+      "filePath": "src/agent/permissions.py",
+      "contentHash": "0920393af61cd527646083f8abbeb26a139047c74f2329872cbb92e91ca50e2c",
+      "functions": [],
+      "classes": [
+        {
+          "name": "PermissionLevel",
+          "methods": [],
+          "properties": [],
+          "exported": true,
+          "lineCount": 5
+        },
+        {
+          "name": "PermissionRule",
+          "methods": [],
+          "properties": [
+            "tool_name",
+            "level",
+            "conditions"
+          ],
+          "exported": true,
+          "lineCount": 5
+        },
+        {
+          "name": "PermissionGate",
+          "methods": [
+            "__init__",
+            "is_safe",
+            "is_dangerous",
+            "requires_permission",
+            "get_permission_level",
+            "set_session_permission",
+            "clear_session_permissions",
+            "get_permission_message"
+          ],
+          "properties": [],
+          "exported": true,
+          "lineCount": 76
+        }
+      ],
+      "imports": [
+        {
+          "source": "dataclasses",
+          "specifiers": [
+            "dataclass"
+          ]
+        },
+        {
+          "source": "typing",
+          "specifiers": [
+            "Optional"
+          ]
+        },
+        {
+          "source": "enum",
+          "specifiers": [
+            "Enum"
+          ]
+        }
+      ],
+      "exports": [
+        "PermissionLevel",
+        "PermissionRule",
+        "PermissionGate"
+      ],
+      "totalLines": 98,
+      "hasStructuralAnalysis": true
+    },
+    "src/agent/tools.py": {
+      "filePath": "src/agent/tools.py",
+      "contentHash": "d99effe5b00a3b90d7ef97febc55bdd3a81a7f8291c18e6127941827b0f45ea9",
+      "functions": [
+        {
+          "name": "handle_file_search",
+          "params": [
+            "params"
+          ],
+          "returnType": "ToolResult",
+          "exported": true,
+          "lineCount": 32
+        },
+        {
+          "name": "handle_file_read",
+          "params": [
+            "params"
+          ],
+          "returnType": "ToolResult",
+          "exported": true,
+          "lineCount": 39
+        },
+        {
+          "name": "handle_file_write",
+          "params": [
+            "params"
+          ],
+          "returnType": "ToolResult",
+          "exported": true,
+          "lineCount": 31
+        },
+        {
+          "name": "handle_file_delete",
+          "params": [
+            "params"
+          ],
+          "returnType": "ToolResult",
+          "exported": true,
+          "lineCount": 28
+        },
+        {
+          "name": "handle_file_copy",
+          "params": [
+            "params"
+          ],
+          "returnType": "ToolResult",
+          "exported": true,
+          "lineCount": 31
+        },
+        {
+          "name": "handle_file_move",
+          "params": [
+            "params"
+          ],
+          "returnType": "ToolResult",
+          "exported": true,
+          "lineCount": 32
+        },
+        {
+          "name": "handle_file_open",
+          "params": [
+            "params"
+          ],
+          "returnType": "ToolResult",
+          "exported": true,
+          "lineCount": 24
+        },
+        {
+          "name": "handle_terminal_command",
+          "params": [
+            "params"
+          ],
+          "returnType": "ToolResult",
+          "exported": true,
+          "lineCount": 39
+        },
+        {
+          "name": "handle_app_open",
+          "params": [
+            "params"
+          ],
+          "returnType": "ToolResult",
+          "exported": true,
+          "lineCount": 61
+        },
+        {
+          "name": "handle_app_close",
+          "params": [
+            "params"
+          ],
+          "returnType": "ToolResult",
+          "exported": true,
+          "lineCount": 38
+        },
+        {
+          "name": "handle_browser_open",
+          "params": [
+            "params"
+          ],
+          "returnType": "ToolResult",
+          "exported": true,
+          "lineCount": 47
+        },
+        {
+          "name": "handle_process_list",
+          "params": [
+            "params"
+          ],
+          "returnType": "ToolResult",
+          "exported": true,
+          "lineCount": 29
+        },
+        {
+          "name": "handle_system_info",
+          "params": [
+            "params"
+          ],
+          "returnType": "ToolResult",
+          "exported": true,
+          "lineCount": 28
+        },
+        {
+          "name": "handle_window_control",
+          "params": [
+            "params"
+          ],
+          "returnType": "ToolResult",
+          "exported": true,
+          "lineCount": 117
+        },
+        {
+          "name": "find_matching_window",
+          "params": [
+            "query"
+          ],
+          "returnType": "Optional[tuple]",
+          "exported": true,
+          "lineCount": 68
+        },
+        {
+          "name": "handle_move_application_window",
+          "params": [
+            "params"
+          ],
+          "returnType": "ToolResult",
+          "exported": true,
+          "lineCount": 154
+        },
+        {
+          "name": "handle_desktop_icon_position",
+          "params": [
+            "params"
+          ],
+          "returnType": "ToolResult",
+          "exported": true,
+          "lineCount": 27
+        },
+        {
+          "name": "handle_code_edit",
+          "params": [
+            "params"
+          ],
+          "returnType": "ToolResult",
+          "exported": true,
+          "lineCount": 68
+        },
+        {
+          "name": "handle_web_fetch",
+          "params": [
+            "params"
+          ],
+          "returnType": "ToolResult",
+          "exported": true,
+          "lineCount": 80
+        },
+        {
+          "name": "handle_system_control",
+          "params": [
+            "params"
+          ],
+          "returnType": "ToolResult",
+          "exported": true,
+          "lineCount": 140
+        },
+        {
+          "name": "handle_youtube_play",
+          "params": [
+            "params"
+          ],
+          "returnType": "ToolResult",
+          "exported": true,
+          "lineCount": 64
+        },
+        {
+          "name": "extract_youtube_video_id",
+          "params": [
+            "url_or_query"
+          ],
+          "returnType": "Optional[str]",
+          "exported": true,
+          "lineCount": 11
+        },
+        {
+          "name": "fetch_youtube_transcript_text",
+          "params": [
+            "video_id",
+            "languages"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 73
+        },
+        {
+          "name": "handle_youtube_play_and_summarize",
+          "params": [
+            "params"
+          ],
+          "returnType": "ToolResult",
+          "exported": true,
+          "lineCount": 143
+        },
+        {
+          "name": "handle_create_and_send_pdf",
+          "params": [
+            "params"
+          ],
+          "returnType": "ToolResult",
+          "exported": true,
+          "lineCount": 128
+        },
+        {
+          "name": "handle_send_to_telegram",
+          "params": [
+            "params"
+          ],
+          "returnType": "ToolResult",
+          "exported": true,
+          "lineCount": 52
+        },
+        {
+          "name": "handle_capture_and_inspect_screen",
+          "params": [
+            "params"
+          ],
+          "returnType": "ToolResult",
+          "exported": true,
+          "lineCount": 122
+        },
+        {
+          "name": "_record_clipboard_history",
+          "params": [
+            "text"
+          ],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 11
+        },
+        {
+          "name": "_get_clipboard_unicode",
+          "params": [],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 17
+        },
+        {
+          "name": "_set_clipboard_unicode",
+          "params": [
+            "text"
+          ],
+          "returnType": "bool",
+          "exported": true,
+          "lineCount": 14
+        },
+        {
+          "name": "_simulate_keybd",
+          "params": [
+            "vk_key",
+            "ctrl"
+          ],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 15
+        },
+        {
+          "name": "handle_clipboard_manager",
+          "params": [
+            "params"
+          ],
+          "returnType": "ToolResult",
+          "exported": true,
+          "lineCount": 142
+        },
+        {
+          "name": "_is_phone_number",
+          "params": [
+            "val"
+          ],
+          "returnType": "bool",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "_normalize_moroccan_phone",
+          "params": [
+            "val"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 8
+        },
+        {
+          "name": "_mouse_click",
+          "params": [
+            "x",
+            "y"
+          ],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 13
+        },
+        {
+          "name": "_focus_whatsapp_window",
+          "params": [],
+          "returnType": "Optional[tuple[int, tuple[int, int, int, int]]]",
+          "exported": true,
+          "lineCount": 46
+        },
+        {
+          "name": "_find_contact_element_uia",
+          "params": [
+            "hwnd",
+            "win_left",
+            "win_width",
+            "recipient"
+          ],
+          "returnType": "Optional[tuple[int, int]]",
+          "exported": true,
+          "lineCount": 81
+        },
+        {
+          "name": "_open_whatsapp_chat",
+          "params": [
+            "recipient"
+          ],
+          "returnType": "bool",
+          "exported": true,
+          "lineCount": 131
+        },
+        {
+          "name": "handle_whatsapp_send",
+          "params": [
+            "params"
+          ],
+          "returnType": "ToolResult",
+          "exported": true,
+          "lineCount": 87
+        },
+        {
+          "name": "handle_whatsapp_read",
+          "params": [
+            "params",
+            "contact_or_chat",
+            "count",
+            "send_to_telegram",
+            "send_screenshot",
+            "**kwargs"
+          ],
+          "returnType": "ToolResult",
+          "exported": true,
+          "lineCount": 362
+        },
+        {
+          "name": "create_default_registry",
+          "params": [],
+          "returnType": "ToolRegistry",
+          "exported": true,
+          "lineCount": 347
+        }
+      ],
+      "classes": [
+        {
+          "name": "ToolCategory",
+          "methods": [],
+          "properties": [],
+          "exported": true,
+          "lineCount": 8
+        },
+        {
+          "name": "ToolParameter",
+          "methods": [],
+          "properties": [
+            "name",
+            "type",
+            "description",
+            "required",
+            "default",
+            "enum"
+          ],
+          "exported": true,
+          "lineCount": 8
+        },
+        {
+          "name": "ToolResult",
+          "methods": [
+            "__post_init__"
+          ],
+          "properties": [
+            "success",
+            "output",
+            "error",
+            "requires_permission",
+            "permission_message",
+            "is_dangerous",
+            "message"
+          ],
+          "exported": true,
+          "lineCount": 13
+        },
+        {
+          "name": "Tool",
+          "methods": [
+            "to_api_schema"
+          ],
+          "properties": [
+            "name",
+            "description",
+            "category",
+            "parameters",
+            "handler",
+            "requires_permission",
+            "is_dangerous"
+          ],
+          "exported": true,
+          "lineCount": 38
+        },
+        {
+          "name": "ToolRegistry",
+          "methods": [
+            "__init__",
+            "register",
+            "get",
+            "list_tools",
+            "get_tools_schema",
+            "get_tools_by_category",
+            "execute"
+          ],
+          "properties": [],
+          "exported": true,
+          "lineCount": 42
+        }
+      ],
+      "imports": [
+        {
+          "source": "typing",
+          "specifiers": [
+            "Dict",
+            "Any",
+            "List",
+            "Optional",
+            "Callable"
+          ]
+        },
+        {
+          "source": "dataclasses",
+          "specifiers": [
+            "dataclass"
+          ]
+        },
+        {
+          "source": "enum",
+          "specifiers": [
+            "Enum"
+          ]
+        },
+        {
+          "source": "os",
+          "specifiers": [
+            "os"
+          ]
+        },
+        {
+          "source": "shutil",
+          "specifiers": [
+            "shutil"
+          ]
+        },
+        {
+          "source": "subprocess",
+          "specifiers": [
+            "subprocess"
+          ]
+        },
+        {
+          "source": "platform",
+          "specifiers": [
+            "platform"
+          ]
+        },
+        {
+          "source": "re",
+          "specifiers": [
+            "re"
+          ]
+        },
+        {
+          "source": "urllib.request",
+          "specifiers": [
+            "urllib.request"
+          ]
+        },
+        {
+          "source": "urllib.parse",
+          "specifiers": [
+            "urllib.parse"
+          ]
+        },
+        {
+          "source": "pathlib",
+          "specifiers": [
+            "Path"
+          ]
+        },
+        {
+          "source": "html",
+          "specifiers": [
+            "html"
+          ]
+        },
+        {
+          "source": "src.services.telegram_service",
+          "specifiers": [
+            "send_telegram_message",
+            "send_telegram_message_async",
+            "send_telegram_document",
+            "send_telegram_photo_async"
+          ]
+        },
+        {
+          "source": "src.config.settings",
+          "specifiers": [
+            "TELEGRAM_BOT_TOKEN",
+            "TELEGRAM_CHAT_ID"
+          ]
+        }
+      ],
+      "exports": [
+        "ToolCategory",
+        "ToolParameter",
+        "ToolResult",
+        "Tool",
+        "ToolRegistry",
+        "handle_file_search",
+        "handle_file_read",
+        "handle_file_write",
+        "handle_file_delete",
+        "handle_file_copy",
+        "handle_file_move",
+        "handle_file_open",
+        "handle_terminal_command",
+        "handle_app_open",
+        "handle_app_close",
+        "handle_browser_open",
+        "handle_process_list",
+        "handle_system_info",
+        "handle_window_control",
+        "find_matching_window",
+        "handle_move_application_window",
+        "handle_desktop_icon_position",
+        "handle_code_edit",
+        "handle_web_fetch",
+        "handle_system_control",
+        "handle_youtube_play",
+        "extract_youtube_video_id",
+        "fetch_youtube_transcript_text",
+        "handle_youtube_play_and_summarize",
+        "handle_create_and_send_pdf",
+        "handle_send_to_telegram",
+        "handle_capture_and_inspect_screen",
+        "_record_clipboard_history",
+        "_get_clipboard_unicode",
+        "_set_clipboard_unicode",
+        "_simulate_keybd",
+        "handle_clipboard_manager",
+        "_is_phone_number",
+        "_normalize_moroccan_phone",
+        "_mouse_click",
+        "_focus_whatsapp_window",
+        "_find_contact_element_uia",
+        "_open_whatsapp_chat",
+        "handle_whatsapp_send",
+        "handle_whatsapp_read",
+        "create_default_registry"
+      ],
+      "totalLines": 3221,
+      "hasStructuralAnalysis": true
+    },
+    "src/app.py": {
+      "filePath": "src/app.py",
+      "contentHash": "e25c07838a32295f633ea235f60f9e178674aade77ee243ec821bd2b459deefe",
+      "functions": [
+        {
+          "name": "main",
+          "params": [],
+          "returnType": "int",
+          "exported": true,
+          "lineCount": 9
+        }
+      ],
+      "classes": [
+        {
+          "name": "Application",
+          "methods": [
+            "__init__",
+            "initialize",
+            "run",
+            "shutdown",
+            "_on_exit_requested",
+            "_on_settings_requested",
+            "_on_settings_saved",
+            "_on_about_requested",
+            "_on_chat_requested"
+          ],
+          "properties": [],
+          "exported": true,
+          "lineCount": 146
+        }
+      ],
+      "imports": [
+        {
+          "source": "sys",
+          "specifiers": [
+            "sys"
+          ]
+        },
+        {
+          "source": "typing",
+          "specifiers": [
+            "Optional"
+          ]
+        },
+        {
+          "source": "PySide6.QtWidgets",
+          "specifiers": [
+            "QApplication"
+          ]
+        },
+        {
+          "source": "PySide6.QtCore",
+          "specifiers": [
+            "QObject"
+          ]
+        },
+        {
+          "source": "src.config",
+          "specifiers": [
+            "Settings"
+          ]
+        },
+        {
+          "source": "src.services",
+          "specifiers": [
+            "AIClient",
+            "OmniRouteManager"
+          ]
+        },
+        {
+          "source": "src.storage.db",
+          "specifiers": [
+            "Database"
+          ]
+        },
+        {
+          "source": "src.agent.executor",
+          "specifiers": [
+            "AgentExecutor"
+          ]
+        },
+        {
+          "source": "src.ui",
+          "specifiers": [
+            "SystemTrayIcon",
+            "ChatWindow",
+            "SettingsWindow"
+          ]
+        }
+      ],
+      "exports": [
+        "Application",
+        "main"
+      ],
+      "totalLines": 176,
+      "hasStructuralAnalysis": true
+    },
+    "src/config/__init__.py": {
+      "filePath": "src/config/__init__.py",
+      "contentHash": "73e6d503be0bd609e22fe97824614bc76f10757f3b5964c22c484e9ef9a2a7e3",
+      "functions": [],
+      "classes": [],
+      "imports": [
+        {
+          "source": "src.config.settings",
+          "specifiers": [
+            "Settings"
+          ]
+        }
+      ],
+      "exports": [],
+      "totalLines": 5,
+      "hasStructuralAnalysis": true
+    },
+    "src/config/settings.py": {
+      "filePath": "src/config/settings.py",
+      "contentHash": "146cdf077fb0a48633c97e7b5228c9f928d3cd309bd0a7ed855d0bb707837e70",
+      "functions": [
+        {
+          "name": "load_env_file",
+          "params": [
+            "env_path"
+          ],
+          "returnType": "dict",
+          "exported": true,
+          "lineCount": 11
+        },
+        {
+          "name": "is_masked_key",
+          "params": [
+            "key"
+          ],
+          "returnType": "bool",
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "save_ai_config",
+          "params": [
+            "provider",
+            "model",
+            "api_key",
+            "base_url",
+            "language",
+            "env_path"
+          ],
+          "returnType": "Dict[str, str]",
+          "exported": true,
+          "lineCount": 63
+        }
+      ],
+      "classes": [
+        {
+          "name": "Settings",
+          "methods": [
+            "__post_init__",
+            "load_environment",
+            "get_config_dict"
+          ],
+          "properties": [
+            "app_name",
+            "app_version",
+            "app_author",
+            "data_dir",
+            "db_path",
+            "config_path",
+            "env_path",
+            "window_width",
+            "window_height",
+            "ai_provider",
+            "ai_model",
+            "ai_api_key",
+            "ai_base_url",
+            "altron_language",
+            "anthropic_base_url",
+            "anthropic_api_key",
+            "anthropic_model",
+            "max_tokens",
+            "request_timeout",
+            "telegram_bot_token",
+            "telegram_chat_id",
+            "start_with_windows",
+            "show_window_on_start",
+            "enable_tts",
+            "dynamic_notch"
+          ],
+          "exported": true,
+          "lineCount": 127
+        }
+      ],
+      "imports": [
+        {
+          "source": "os",
+          "specifiers": [
+            "os"
+          ]
+        },
+        {
+          "source": "sys",
+          "specifiers": [
+            "sys"
+          ]
+        },
+        {
+          "source": "json",
+          "specifiers": [
+            "json"
+          ]
+        },
+        {
+          "source": "pathlib",
+          "specifiers": [
+            "Path"
+          ]
+        },
+        {
+          "source": "dataclasses",
+          "specifiers": [
+            "dataclass",
+            "field"
+          ]
+        },
+        {
+          "source": "typing",
+          "specifiers": [
+            "Optional",
+            "Dict",
+            "Any"
+          ]
+        },
+        {
+          "source": "dotenv",
+          "specifiers": [
+            "load_dotenv"
+          ]
+        }
+      ],
+      "exports": [
+        "load_env_file",
+        "is_masked_key",
+        "save_ai_config",
+        "Settings"
+      ],
+      "totalLines": 230,
+      "hasStructuralAnalysis": true
+    },
+    "src/services/__init__.py": {
+      "filePath": "src/services/__init__.py",
+      "contentHash": "88100519df6454686e682a1dddaaf1372181470abfdd077304425dc14a8976f8",
+      "functions": [],
+      "classes": [],
+      "imports": [
+        {
+          "source": "src.services.database",
+          "specifiers": [
+            "DatabaseService"
+          ]
+        },
+        {
+          "source": "src.services.ai_client",
+          "specifiers": [
+            "AIClient",
+            "Message",
+            "AIResponse",
+            "ConnectionStatus"
+          ]
+        },
+        {
+          "source": "src.services.omniroute_manager",
+          "specifiers": [
+            "OmniRouteManager"
+          ]
+        },
+        {
+          "source": "src.services.voice_service",
+          "specifiers": [
+            "TTSManager",
+            "SpeechRecognitionWorker",
+            "clean_text_for_speech",
+            "parse_wake_word",
+            "is_speaking_event"
+          ]
+        },
+        {
+          "source": "src.services.desktop_icon_service",
+          "specifiers": [
+            "position_desktop_icon",
+            "get_desktop_icons"
+          ]
+        },
+        {
+          "source": "src.services.telegram_service",
+          "specifiers": [
+            "TelegramRemoteWorker",
+            "send_telegram_message",
+            "send_telegram_message_async",
+            "send_telegram_document",
+            "send_telegram_photo",
+            "send_telegram_photo_async"
+          ]
+        }
+      ],
+      "exports": [],
+      "totalLines": 43,
+      "hasStructuralAnalysis": true
+    },
+    "src/services/ai_client.py": {
+      "filePath": "src/services/ai_client.py",
+      "contentHash": "e18a2eb808efd1d856f8ce67d1025d6530a6fed090e03ff8e7a52cfc6e39b096",
+      "functions": [
+        {
+          "name": "_clean_schema_for_gemini",
+          "params": [
+            "val"
+          ],
+          "returnType": "Any",
+          "exported": true,
+          "lineCount": 12
+        }
+      ],
+      "classes": [
+        {
+          "name": "ConnectionStatus",
+          "methods": [],
+          "properties": [],
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "Message",
+          "methods": [
+            "to_api_format",
+            "to_dict",
+            "from_dict"
+          ],
+          "properties": [
+            "role",
+            "content",
+            "timestamp"
+          ],
+          "exported": true,
+          "lineCount": 29
+        },
+        {
+          "name": "AIResponse",
+          "methods": [],
+          "properties": [
+            "content",
+            "model",
+            "stop_reason",
+            "usage",
+            "raw_response"
+          ],
+          "exported": true,
+          "lineCount": 7
+        },
+        {
+          "name": "AIClient",
+          "methods": [
+            "__init__",
+            "update_config",
+            "_normalize_config",
+            "provider",
+            "status",
+            "last_error",
+            "model",
+            "base_url",
+            "_is_anthropic_wire",
+            "_get_endpoint_url",
+            "_get_headers",
+            "make_tool_request",
+            "_make_gemini_native_request",
+            "_dispatch_http_json",
+            "chat",
+            "send_message",
+            "cancel",
+            "test_connection"
+          ],
+          "properties": [],
+          "exported": true,
+          "lineCount": 472
+        }
+      ],
+      "imports": [
+        {
+          "source": "os",
+          "specifiers": [
+            "os"
+          ]
+        },
+        {
+          "source": "sys",
+          "specifiers": [
+            "sys"
+          ]
+        },
+        {
+          "source": "json",
+          "specifiers": [
+            "json"
+          ]
+        },
+        {
+          "source": "time",
+          "specifiers": [
+            "time"
+          ]
+        },
+        {
+          "source": "socket",
+          "specifiers": [
+            "socket"
+          ]
+        },
+        {
+          "source": "asyncio",
+          "specifiers": [
+            "asyncio"
+          ]
+        },
+        {
+          "source": "urllib.request",
+          "specifiers": [
+            "urllib.request"
+          ]
+        },
+        {
+          "source": "urllib.error",
+          "specifiers": [
+            "urllib.error"
+          ]
+        },
+        {
+          "source": "threading",
+          "specifiers": [
+            "threading"
+          ]
+        },
+        {
+          "source": "concurrent.futures",
+          "specifiers": [
+            "Future"
+          ]
+        },
+        {
+          "source": "dataclasses",
+          "specifiers": [
+            "dataclass",
+            "field"
+          ]
+        },
+        {
+          "source": "enum",
+          "specifiers": [
+            "Enum"
+          ]
+        },
+        {
+          "source": "typing",
+          "specifiers": [
+            "Optional",
+            "List",
+            "Dict",
+            "Any",
+            "Callable",
+            "Union",
+            "Tuple"
+          ]
+        }
+      ],
+      "exports": [
+        "ConnectionStatus",
+        "Message",
+        "AIResponse",
+        "_clean_schema_for_gemini",
+        "AIClient"
+      ],
+      "totalLines": 559,
+      "hasStructuralAnalysis": true
+    },
+    "src/services/database.py": {
+      "filePath": "src/services/database.py",
+      "contentHash": "d711779529e3226e798dd5a2c682c3c03fc56a975822a262afe6594057976f6c",
+      "functions": [],
+      "classes": [
+        {
+          "name": "DatabaseService",
+          "methods": [
+            "__init__"
+          ],
+          "properties": [],
+          "exported": true,
+          "lineCount": 5
+        }
+      ],
+      "imports": [
+        {
+          "source": "pathlib",
+          "specifiers": [
+            "Path"
+          ]
+        },
+        {
+          "source": "src.storage.db",
+          "specifiers": [
+            "Database"
+          ]
+        }
+      ],
+      "exports": [
+        "DatabaseService"
+      ],
+      "totalLines": 11,
+      "hasStructuralAnalysis": true
+    },
+    "src/services/desktop_icon_service.py": {
+      "filePath": "src/services/desktop_icon_service.py",
+      "contentHash": "9a98dd86263b58d826f41e77a73d694a9c1c369450c6468a513b534ae04e9585",
+      "functions": [
+        {
+          "name": "get_desktop_listview_hwnd",
+          "params": [],
+          "returnType": "Optional[int]",
+          "exported": true,
+          "lineCount": 35
+        },
+        {
+          "name": "get_screen_dimensions",
+          "params": [],
+          "returnType": "Tuple[int, int]",
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "get_desktop_icons",
+          "params": [],
+          "returnType": "List[Dict[str, Any]]",
+          "exported": true,
+          "lineCount": 71
+        },
+        {
+          "name": "calculate_screen_coordinates",
+          "params": [
+            "position",
+            "screen_width",
+            "screen_height",
+            "offset_index"
+          ],
+          "returnType": "Tuple[int, int]",
+          "exported": true,
+          "lineCount": 60
+        },
+        {
+          "name": "position_desktop_icon",
+          "params": [
+            "target",
+            "position",
+            "x",
+            "y"
+          ],
+          "returnType": "Dict[str, Any]",
+          "exported": true,
+          "lineCount": 126
+        }
+      ],
+      "classes": [
+        {
+          "name": "LVITEMW",
+          "methods": [],
+          "properties": [],
+          "exported": true,
+          "lineCount": 19
+        }
+      ],
+      "imports": [
+        {
+          "source": "ctypes",
+          "specifiers": [
+            "ctypes"
+          ]
+        },
+        {
+          "source": "ctypes",
+          "specifiers": [
+            "wintypes"
+          ]
+        },
+        {
+          "source": "difflib",
+          "specifiers": [
+            "difflib"
+          ]
+        },
+        {
+          "source": "platform",
+          "specifiers": [
+            "platform"
+          ]
+        },
+        {
+          "source": "re",
+          "specifiers": [
+            "re"
+          ]
+        },
+        {
+          "source": "pathlib",
+          "specifiers": [
+            "Path"
+          ]
+        },
+        {
+          "source": "typing",
+          "specifiers": [
+            "Optional",
+            "List",
+            "Dict",
+            "Any",
+            "Tuple"
+          ]
+        }
+      ],
+      "exports": [
+        "LVITEMW",
+        "get_desktop_listview_hwnd",
+        "get_screen_dimensions",
+        "get_desktop_icons",
+        "calculate_screen_coordinates",
+        "position_desktop_icon"
+      ],
+      "totalLines": 359,
+      "hasStructuralAnalysis": true
+    },
+    "src/services/hud_status.py": {
+      "filePath": "src/services/hud_status.py",
+      "contentHash": "5f175c4de768b3711b2e1a8e873a3f04ec3cd2ec8f67466abbaad0cdbf67f5a0",
+      "functions": [
+        {
+          "name": "get_system_metrics",
+          "params": [],
+          "returnType": "Dict[str, Any]",
+          "exported": true,
+          "lineCount": 44
+        },
+        {
+          "name": "get_hud_status",
+          "params": [],
+          "returnType": "Dict[str, Any]",
+          "exported": true,
+          "lineCount": 20
+        },
+        {
+          "name": "update_hud_status",
+          "params": [
+            "state",
+            "log_entry"
+          ],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 40
+        },
+        {
+          "name": "clear_hud_logs",
+          "params": [],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 24
+        },
+        {
+          "name": "init_hud_status",
+          "params": [],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 16
+        }
+      ],
+      "classes": [],
+      "imports": [
+        {
+          "source": "json",
+          "specifiers": [
+            "json"
+          ]
+        },
+        {
+          "source": "threading",
+          "specifiers": [
+            "threading"
+          ]
+        },
+        {
+          "source": "time",
+          "specifiers": [
+            "time"
+          ]
+        },
+        {
+          "source": "pathlib",
+          "specifiers": [
+            "Path"
+          ]
+        },
+        {
+          "source": "typing",
+          "specifiers": [
+            "Optional",
+            "Dict",
+            "Any",
+            "List"
+          ]
+        },
+        {
+          "source": "psutil",
+          "specifiers": [
+            "psutil"
+          ]
+        }
+      ],
+      "exports": [
+        "get_system_metrics",
+        "get_hud_status",
+        "update_hud_status",
+        "clear_hud_logs",
+        "init_hud_status"
+      ],
+      "totalLines": 169,
+      "hasStructuralAnalysis": true
+    },
+    "src/services/omniroute_manager.py": {
+      "filePath": "src/services/omniroute_manager.py",
+      "contentHash": "74eb5551ad5459c6e0a1e7e2800caea2adeab0a81c599dc67485cad816cb9448",
+      "functions": [],
+      "classes": [
+        {
+          "name": "OmniRouteManager",
+          "methods": [
+            "__init__",
+            "is_running",
+            "start_if_needed",
+            "stop",
+            "spawned_by_us"
+          ],
+          "properties": [],
+          "exported": true,
+          "lineCount": 95
+        }
+      ],
+      "imports": [
+        {
+          "source": "subprocess",
+          "specifiers": [
+            "subprocess"
+          ]
+        },
+        {
+          "source": "time",
+          "specifiers": [
+            "time"
+          ]
+        },
+        {
+          "source": "urllib.request",
+          "specifiers": [
+            "urllib.request"
+          ]
+        },
+        {
+          "source": "urllib.error",
+          "specifiers": [
+            "urllib.error"
+          ]
+        },
+        {
+          "source": "typing",
+          "specifiers": [
+            "Optional"
+          ]
+        }
+      ],
+      "exports": [
+        "OmniRouteManager"
+      ],
+      "totalLines": 107,
+      "hasStructuralAnalysis": true
+    },
+    "src/services/telegram_service.py": {
+      "filePath": "src/services/telegram_service.py",
+      "contentHash": "c5bc92f483003668ddbe71f1472c44abc543468c647af273d39d8491021bbc7f",
+      "functions": [
+        {
+          "name": "chunk_message",
+          "params": [
+            "text",
+            "max_length"
+          ],
+          "returnType": "list[str]",
+          "exported": true,
+          "lineCount": 33
+        },
+        {
+          "name": "send_telegram_message",
+          "params": [
+            "text",
+            "token",
+            "chat_id"
+          ],
+          "returnType": "bool",
+          "exported": true,
+          "lineCount": 48
+        },
+        {
+          "name": "send_telegram_message_async",
+          "params": [
+            "text",
+            "token",
+            "chat_id"
+          ],
+          "returnType": "Optional[threading.Thread]",
+          "exported": true,
+          "lineCount": 13
+        },
+        {
+          "name": "send_telegram_document",
+          "params": [
+            "file_path",
+            "caption",
+            "token",
+            "chat_id"
+          ],
+          "returnType": "bool",
+          "exported": true,
+          "lineCount": 59
+        },
+        {
+          "name": "send_telegram_photo",
+          "params": [
+            "image_path",
+            "caption",
+            "token",
+            "chat_id"
+          ],
+          "returnType": "bool",
+          "exported": true,
+          "lineCount": 62
+        },
+        {
+          "name": "send_telegram_photo_async",
+          "params": [
+            "image_path",
+            "caption",
+            "token",
+            "chat_id"
+          ],
+          "returnType": "Optional[threading.Thread]",
+          "exported": true,
+          "lineCount": 18
+        }
+      ],
+      "classes": [
+        {
+          "name": "TelegramRemoteWorker",
+          "methods": [
+            "__init__",
+            "stop",
+            "run"
+          ],
+          "properties": [],
+          "exported": true,
+          "lineCount": 67
+        }
+      ],
+      "imports": [
+        {
+          "source": "os",
+          "specifiers": [
+            "os"
+          ]
+        },
+        {
+          "source": "json",
+          "specifiers": [
+            "json"
+          ]
+        },
+        {
+          "source": "threading",
+          "specifiers": [
+            "threading"
+          ]
+        },
+        {
+          "source": "urllib.request",
+          "specifiers": [
+            "urllib.request"
+          ]
+        },
+        {
+          "source": "pathlib",
+          "specifiers": [
+            "Path"
+          ]
+        },
+        {
+          "source": "typing",
+          "specifiers": [
+            "Optional"
+          ]
+        },
+        {
+          "source": "PySide6.QtCore",
+          "specifiers": [
+            "QThread",
+            "Signal"
+          ]
+        },
+        {
+          "source": "src.config.settings",
+          "specifiers": [
+            "TELEGRAM_BOT_TOKEN",
+            "TELEGRAM_CHAT_ID"
+          ]
+        }
+      ],
+      "exports": [
+        "chunk_message",
+        "send_telegram_message",
+        "send_telegram_message_async",
+        "send_telegram_document",
+        "send_telegram_photo",
+        "send_telegram_photo_async",
+        "TelegramRemoteWorker"
+      ],
+      "totalLines": 331,
+      "hasStructuralAnalysis": true
+    },
+    "src/services/voice_service.py": {
+      "filePath": "src/services/voice_service.py",
+      "contentHash": "82fd7336a3a4b4bdf82f18cdff5205eaa5f68f71d2d3d35892bac9eb5cfa8d27",
+      "functions": [
+        {
+          "name": "clean_text_for_speech",
+          "params": [
+            "text"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 29
+        },
+        {
+          "name": "parse_wake_word",
+          "params": [
+            "text"
+          ],
+          "returnType": "tuple[bool, str]",
+          "exported": true,
+          "lineCount": 14
+        }
+      ],
+      "classes": [
+        {
+          "name": "TTSManager",
+          "methods": [
+            "__init__",
+            "is_enabled",
+            "is_enabled",
+            "is_muted",
+            "is_muted",
+            "speak",
+            "stop",
+            "_speak_edge_tts",
+            "_speak_piper",
+            "_speak_worker"
+          ],
+          "properties": [],
+          "exported": true,
+          "lineCount": 320
+        },
+        {
+          "name": "EnergyVAD",
+          "methods": [
+            "__init__",
+            "is_speech"
+          ],
+          "properties": [],
+          "exported": true,
+          "lineCount": 25
+        },
+        {
+          "name": "FastVAD",
+          "methods": [
+            "__init__",
+            "is_speech"
+          ],
+          "properties": [],
+          "exported": true,
+          "lineCount": 20
+        },
+        {
+          "name": "SpeechRecognitionWorker",
+          "methods": [
+            "__init__",
+            "abort",
+            "pause",
+            "resume",
+            "is_paused",
+            "run",
+            "_run_legacy_fallback"
+          ],
+          "properties": [],
+          "exported": true,
+          "lineCount": 301
+        }
+      ],
+      "imports": [
+        {
+          "source": "asyncio",
+          "specifiers": [
+            "asyncio"
+          ]
+        },
+        {
+          "source": "collections",
+          "specifiers": [
+            "collections"
+          ]
+        },
+        {
+          "source": "io",
+          "specifiers": [
+            "io"
+          ]
+        },
+        {
+          "source": "os",
+          "specifiers": [
+            "os"
+          ]
+        },
+        {
+          "source": "queue",
+          "specifiers": [
+            "queue"
+          ]
+        },
+        {
+          "source": "re",
+          "specifiers": [
+            "re"
+          ]
+        },
+        {
+          "source": "shutil",
+          "specifiers": [
+            "shutil"
+          ]
+        },
+        {
+          "source": "subprocess",
+          "specifiers": [
+            "subprocess"
+          ]
+        },
+        {
+          "source": "threading",
+          "specifiers": [
+            "threading"
+          ]
+        },
+        {
+          "source": "time",
+          "specifiers": [
+            "time"
+          ]
+        },
+        {
+          "source": "typing",
+          "specifiers": [
+            "Optional",
+            "List"
+          ]
+        },
+        {
+          "source": "numpy",
+          "specifiers": [
+            "np"
+          ]
+        },
+        {
+          "source": "PySide6.QtCore",
+          "specifiers": [
+            "QObject",
+            "QThread",
+            "Signal"
+          ]
+        },
+        {
+          "source": "src.services.hud_status",
+          "specifiers": [
+            "update_hud_status"
+          ]
+        }
+      ],
+      "exports": [
+        "clean_text_for_speech",
+        "parse_wake_word",
+        "TTSManager",
+        "EnergyVAD",
+        "FastVAD",
+        "SpeechRecognitionWorker"
+      ],
+      "totalLines": 748,
+      "hasStructuralAnalysis": true
+    },
+    "src/storage/__init__.py": {
+      "filePath": "src/storage/__init__.py",
+      "contentHash": "4ed44f379c4464528e6516bb59378e69dbe85707e50d61c2e8c688604b580db8",
+      "functions": [],
+      "classes": [],
+      "imports": [
+        {
+          "source": "src.storage.db",
+          "specifiers": [
+            "Database"
+          ]
+        }
+      ],
+      "exports": [],
+      "totalLines": 5,
+      "hasStructuralAnalysis": true
+    },
+    "src/storage/db.py": {
+      "filePath": "src/storage/db.py",
+      "contentHash": "ad62178bb53556061df36d5c690513843f49ae4d0f3c93d33f54834cb5eb736f",
+      "functions": [],
+      "classes": [
+        {
+          "name": "Conversation",
+          "methods": [],
+          "properties": [
+            "id",
+            "title",
+            "created_at",
+            "updated_at"
+          ],
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "ChatMessage",
+          "methods": [],
+          "properties": [
+            "id",
+            "conversation_id",
+            "role",
+            "content",
+            "timestamp",
+            "metadata"
+          ],
+          "exported": true,
+          "lineCount": 8
+        },
+        {
+          "name": "ToolExecution",
+          "methods": [],
+          "properties": [
+            "id",
+            "conversation_id",
+            "tool_name",
+            "tool_input",
+            "tool_output",
+            "status",
+            "created_at"
+          ],
+          "exported": true,
+          "lineCount": 9
+        },
+        {
+          "name": "Database",
+          "methods": [
+            "__init__",
+            "initialize",
+            "_create_tables",
+            "_migrate",
+            "get_setting",
+            "set_setting",
+            "create_conversation",
+            "get_conversation",
+            "list_conversations",
+            "update_conversation",
+            "delete_conversation",
+            "add_message",
+            "get_messages",
+            "log_tool_execution",
+            "update_tool_execution",
+            "get_tool_executions",
+            "get_all_tool_executions",
+            "clear_tool_executions",
+            "get_tool_permission",
+            "set_tool_permission",
+            "get_all_permissions",
+            "close"
+          ],
+          "properties": [],
+          "exported": true,
+          "lineCount": 359
+        }
+      ],
+      "imports": [
+        {
+          "source": "sqlite3",
+          "specifiers": [
+            "sqlite3"
+          ]
+        },
+        {
+          "source": "json",
+          "specifiers": [
+            "json"
+          ]
+        },
+        {
+          "source": "pathlib",
+          "specifiers": [
+            "Path"
+          ]
+        },
+        {
+          "source": "typing",
+          "specifiers": [
+            "Optional",
+            "List",
+            "Dict",
+            "Any"
+          ]
+        },
+        {
+          "source": "datetime",
+          "specifiers": [
+            "datetime"
+          ]
+        },
+        {
+          "source": "dataclasses",
+          "specifiers": [
+            "dataclass",
+            "field"
+          ]
+        }
+      ],
+      "exports": [
+        "Conversation",
+        "ChatMessage",
+        "ToolExecution",
+        "Database"
+      ],
+      "totalLines": 401,
+      "hasStructuralAnalysis": true
+    },
+    "src/ui/__init__.py": {
+      "filePath": "src/ui/__init__.py",
+      "contentHash": "451a0b2fc9f3a9328746f013b64a1374204e47ce5139bb9029b566c3c15f5152",
+      "functions": [],
+      "classes": [],
+      "imports": [
+        {
+          "source": "src.ui.system_tray",
+          "specifiers": [
+            "SystemTrayIcon"
+          ]
+        },
+        {
+          "source": "src.ui.chat_window",
+          "specifiers": [
+            "ChatWindow"
+          ]
+        },
+        {
+          "source": "src.ui.settings_window",
+          "specifiers": [
+            "SettingsWindow"
+          ]
+        }
+      ],
+      "exports": [],
+      "totalLines": 7,
+      "hasStructuralAnalysis": true
+    },
+    "src/ui/chat_window.py": {
+      "filePath": "src/ui/chat_window.py",
+      "contentHash": "50430cb79db48303138a3b70aca7a6d8419749492a8c1a911613ce641d77e734",
+      "functions": [],
+      "classes": [
+        {
+          "name": "AgentBridge",
+          "methods": [],
+          "properties": [],
+          "exported": true,
+          "lineCount": 7
+        },
+        {
+          "name": "MessageBubble",
+          "methods": [
+            "__init__",
+            "_setup_ui"
+          ],
+          "properties": [],
+          "exported": true,
+          "lineCount": 46
+        },
+        {
+          "name": "StepBubble",
+          "methods": [
+            "__init__",
+            "_setup_ui"
+          ],
+          "properties": [],
+          "exported": true,
+          "lineCount": 78
+        },
+        {
+          "name": "PermissionCard",
+          "methods": [
+            "__init__",
+            "_setup_ui",
+            "_disable_buttons",
+            "_on_approve",
+            "_on_allow_session",
+            "_on_reject"
+          ],
+          "properties": [],
+          "exported": true,
+          "lineCount": 141
+        },
+        {
+          "name": "ChatWindow",
+          "methods": [
+            "collapsed_width",
+            "collapsed_height",
+            "collapsed_y",
+            "__init__",
+            "_setup_window_properties",
+            "paintEvent",
+            "resizeEvent",
+            "_check_foreground_app",
+            "_poll_foreground_window",
+            "_is_permission_waiting",
+            "_on_permission_resolved",
+            "_get_target_geometry",
+            "_collapse_notch",
+            "_expand_notch",
+            "_apply_geometry",
+            "_on_animation_finished",
+            "_update_notch_appearance",
+            "_setup_ui",
+            "enterEvent",
+            "leaveEvent",
+            "mousePressEvent",
+            "_schedule_collapse",
+            "_do_auto_collapse",
+            "_check_collapse_after_submit",
+            "_start_always_on_voice",
+            "_on_wake_timeout",
+            "_on_voice_started",
+            "_on_voice_status",
+            "_on_voice_recognized",
+            "_on_voice_error",
+            "_on_tts_started",
+            "_on_tts_finished",
+            "_set_notch_status",
+            "_clear_chat_widgets",
+            "_add_message_bubble",
+            "_add_step_bubble",
+            "_add_permission_card",
+            "_scroll_to_bottom",
+            "_on_telegram_command",
+            "_execute_command",
+            "_send_message",
+            "_cancel_request",
+            "_set_processing_state",
+            "_handle_step",
+            "_handle_permission",
+            "_handle_response",
+            "_handle_error",
+            "update_model_display",
+            "update_settings",
+            "_permanent_quit",
+            "closeEvent"
+          ],
+          "properties": [],
+          "exported": true,
+          "lineCount": 959
+        }
+      ],
+      "imports": [
+        {
+          "source": "json",
+          "specifiers": [
+            "json"
+          ]
+        },
+        {
+          "source": "ctypes",
+          "specifiers": [
+            "ctypes"
+          ]
+        },
+        {
+          "source": "sys",
+          "specifiers": [
+            "sys"
+          ]
+        },
+        {
+          "source": "time",
+          "specifiers": [
+            "time"
+          ]
+        },
+        {
+          "source": "typing",
+          "specifiers": [
+            "Optional",
+            "Union",
+            "Callable"
+          ]
+        },
+        {
+          "source": "PySide6.QtWidgets",
+          "specifiers": [
+            "QWidget",
+            "QVBoxLayout",
+            "QHBoxLayout",
+            "QLineEdit",
+            "QPushButton",
+            "QLabel",
+            "QScrollArea",
+            "QFrame",
+            "QApplication"
+          ]
+        },
+        {
+          "source": "PySide6.QtCore",
+          "specifiers": [
+            "Qt",
+            "Signal",
+            "QObject",
+            "Slot",
+            "QPropertyAnimation",
+            "QRect",
+            "QEasingCurve",
+            "QTimer"
+          ]
+        },
+        {
+          "source": "PySide6.QtGui",
+          "specifiers": [
+            "QFont",
+            "QColor",
+            "QGuiApplication",
+            "QCursor",
+            "QPainter",
+            "QPainterPath",
+            "QPen"
+          ]
+        },
+        {
+          "source": "src.storage.db",
+          "specifiers": [
+            "Database"
+          ]
+        },
+        {
+          "source": "src.agent.executor",
+          "specifiers": [
+            "AgentExecutor",
+            "AgentStep",
+            "AgentResponse",
+            "PermissionRequest",
+            "AgentState"
+          ]
+        },
+        {
+          "source": "src.services.ai_client",
+          "specifiers": [
+            "AIClient"
+          ]
+        },
+        {
+          "source": "src.services.voice_service",
+          "specifiers": [
+            "TTSManager",
+            "SpeechRecognitionWorker",
+            "parse_wake_word"
+          ]
+        },
+        {
+          "source": "src.services.telegram_service",
+          "specifiers": [
+            "TelegramRemoteWorker",
+            "send_telegram_message_async"
+          ]
+        }
+      ],
+      "exports": [
+        "AgentBridge",
+        "MessageBubble",
+        "StepBubble",
+        "PermissionCard",
+        "ChatWindow"
+      ],
+      "totalLines": 1262,
+      "hasStructuralAnalysis": true
+    },
+    "src/ui/settings_window.py": {
+      "filePath": "src/ui/settings_window.py",
+      "contentHash": "d8092f7dd4cb44bf3827d3f3a447bf6145c77a04a67ca4485fc4dff2188bfe00",
+      "functions": [
+        {
+          "name": "is_windows_startup_enabled",
+          "params": [],
+          "returnType": "bool",
+          "exported": true,
+          "lineCount": 11
+        },
+        {
+          "name": "set_windows_startup",
+          "params": [
+            "enabled"
+          ],
+          "returnType": "bool",
+          "exported": true,
+          "lineCount": 23
+        }
+      ],
+      "classes": [
+        {
+          "name": "SettingsWindow",
+          "methods": [
+            "__init__",
+            "_setup_ui",
+            "_create_gateway_tab",
+            "_create_permissions_tab",
+            "_populate_permissions_table",
+            "_reset_permissions_to_default",
+            "_create_system_tab",
+            "_create_audit_tab",
+            "_load_audit_logs",
+            "_clear_audit_logs",
+            "_load_current_values",
+            "_test_connection",
+            "_clear_all_history",
+            "_save_settings"
+          ],
+          "properties": [],
+          "exported": true,
+          "lineCount": 643
+        }
+      ],
+      "imports": [
+        {
+          "source": "os",
+          "specifiers": [
+            "os"
+          ]
+        },
+        {
+          "source": "sys",
+          "specifiers": [
+            "sys"
+          ]
+        },
+        {
+          "source": "json",
+          "specifiers": [
+            "json"
+          ]
+        },
+        {
+          "source": "platform",
+          "specifiers": [
+            "platform"
+          ]
+        },
+        {
+          "source": "pathlib",
+          "specifiers": [
+            "Path"
+          ]
+        },
+        {
+          "source": "typing",
+          "specifiers": [
+            "Optional",
+            "Dict"
+          ]
+        },
+        {
+          "source": "PySide6.QtWidgets",
+          "specifiers": [
+            "QDialog",
+            "QVBoxLayout",
+            "QHBoxLayout",
+            "QLabel",
+            "QLineEdit",
+            "QPushButton",
+            "QTabWidget",
+            "QWidget",
+            "QSpinBox",
+            "QCheckBox",
+            "QTableWidget",
+            "QTableWidgetItem",
+            "QHeaderView",
+            "QComboBox",
+            "QMessageBox",
+            "QFrame"
+          ]
+        },
+        {
+          "source": "PySide6.QtCore",
+          "specifiers": [
+            "Qt",
+            "Signal"
+          ]
+        },
+        {
+          "source": "PySide6.QtGui",
+          "specifiers": [
+            "QFont",
+            "QColor"
+          ]
+        },
+        {
+          "source": "src.config",
+          "specifiers": [
+            "Settings"
+          ]
+        },
+        {
+          "source": "src.config.settings",
+          "specifiers": [
+            "load_env_file"
+          ]
+        },
+        {
+          "source": "src.storage.db",
+          "specifiers": [
+            "Database"
+          ]
+        },
+        {
+          "source": "src.agent.tools",
+          "specifiers": [
+            "create_default_registry",
+            "ToolCategory"
+          ]
+        },
+        {
+          "source": "src.services.ai_client",
+          "specifiers": [
+            "AIClient"
+          ]
+        }
+      ],
+      "exports": [
+        "is_windows_startup_enabled",
+        "set_windows_startup",
+        "SettingsWindow"
+      ],
+      "totalLines": 710,
+      "hasStructuralAnalysis": true
+    },
+    "src/ui/system_tray.py": {
+      "filePath": "src/ui/system_tray.py",
+      "contentHash": "80dc1c88965c46d20c186a8e679a555e427b05e8fb3e64150c2c8caf3a6fa02f",
+      "functions": [],
+      "classes": [
+        {
+          "name": "SystemTrayIcon",
+          "methods": [
+            "__init__",
+            "initialize",
+            "_create_icon",
+            "_on_activated",
+            "_create_menu",
+            "show_message",
+            "hide"
+          ],
+          "properties": [],
+          "exported": true,
+          "lineCount": 74
+        }
+      ],
+      "imports": [
+        {
+          "source": "typing",
+          "specifiers": [
+            "Optional"
+          ]
+        },
+        {
+          "source": "PySide6.QtWidgets",
+          "specifiers": [
+            "QSystemTrayIcon",
+            "QMenu"
+          ]
+        },
+        {
+          "source": "PySide6.QtGui",
+          "specifiers": [
+            "QIcon",
+            "QAction",
+            "QPixmap",
+            "QPainter",
+            "QColor"
+          ]
+        },
+        {
+          "source": "PySide6.QtCore",
+          "specifiers": [
+            "Signal",
+            "QObject"
+          ]
+        }
+      ],
+      "exports": [
+        "SystemTrayIcon"
+      ],
+      "totalLines": 82,
+      "hasStructuralAnalysis": true
+    },
+    "status.json": {
+      "filePath": "status.json",
+      "contentHash": "18e2ec6fb4ed6691342aa5a8784a1f6dde0a294a9b69ec1baac8fc7cb3099c49",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 9,
+      "hasStructuralAnalysis": false
+    },
+    "ui/app.js": {
+      "filePath": "ui/app.js",
+      "contentHash": "bddfeab62f7d99d8cdd5faa852ff8841b17f80d74daec558b98179946cf866e5",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 562,
+      "hasStructuralAnalysis": true
+    },
+    "ui/index.html": {
+      "filePath": "ui/index.html",
+      "contentHash": "838f9ba42bce172ad31c1fcdca2230d5e95feb07b526db11b0b11b248799fb01",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 280,
+      "hasStructuralAnalysis": false
+    },
+    "ui/style.css": {
+      "filePath": "ui/style.css",
+      "contentHash": "d3ffd52b31f5090617d69d295805b03cafb1528b4ead975189f8ad941096663f",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 1007,
+      "hasStructuralAnalysis": false
+    },
+    "ui_server.py": {
+      "filePath": "ui_server.py",
+      "contentHash": "cdd091565982a7fe1fdb02845ca44648e49482af7d7f50cdb393a8c7279d7cfe",
+      "functions": [
+        {
+          "name": "set_command_handler",
+          "params": [
+            "handler"
+          ],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "set_config_updated_callback",
+          "params": [
+            "cb"
+          ],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "get_active_config",
+          "params": [],
+          "returnType": "Dict[str, Any]",
+          "exported": true,
+          "lineCount": 15
+        },
+        {
+          "name": "_get_status_payload_str",
+          "params": [],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 7
+        },
+        {
+          "name": "_get_default_browser",
+          "params": [],
+          "returnType": "tuple[Optional[str], Optional[str]]",
+          "exported": true,
+          "lineCount": 21
+        },
+        {
+          "name": "_is_chromium_browser",
+          "params": [
+            "prog_id",
+            "exe_path"
+          ],
+          "returnType": "bool",
+          "exported": true,
+          "lineCount": 8
+        },
+        {
+          "name": "open_hud_window",
+          "params": [
+            "url"
+          ],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 20
+        },
+        {
+          "name": "_is_port_in_use",
+          "params": [
+            "host",
+            "port"
+          ],
+          "returnType": "bool",
+          "exported": true,
+          "lineCount": 8
+        },
+        {
+          "name": "start_hud_server",
+          "params": [
+            "host",
+            "port",
+            "open_browser",
+            "command_handler",
+            "on_config_updated"
+          ],
+          "returnType": "threading.Thread",
+          "exported": true,
+          "lineCount": 40
+        }
+      ],
+      "classes": [],
+      "imports": [
+        {
+          "source": "os",
+          "specifiers": [
+            "os"
+          ]
+        },
+        {
+          "source": "sys",
+          "specifiers": [
+            "sys"
+          ]
+        },
+        {
+          "source": "json",
+          "specifiers": [
+            "json"
+          ]
+        },
+        {
+          "source": "socket",
+          "specifiers": [
+            "socket"
+          ]
+        },
+        {
+          "source": "shutil",
+          "specifiers": [
+            "shutil"
+          ]
+        },
+        {
+          "source": "subprocess",
+          "specifiers": [
+            "subprocess"
+          ]
+        },
+        {
+          "source": "threading",
+          "specifiers": [
+            "threading"
+          ]
+        },
+        {
+          "source": "time",
+          "specifiers": [
+            "time"
+          ]
+        },
+        {
+          "source": "webbrowser",
+          "specifiers": [
+            "webbrowser"
+          ]
+        },
+        {
+          "source": "pathlib",
+          "specifiers": [
+            "Path"
+          ]
+        },
+        {
+          "source": "typing",
+          "specifiers": [
+            "Optional",
+            "Callable",
+            "Any",
+            "Dict"
+          ]
+        }
+      ],
+      "exports": [
+        "set_command_handler",
+        "set_config_updated_callback",
+        "get_active_config",
+        "_get_status_payload_str",
+        "_get_default_browser",
+        "_is_chromium_browser",
+        "open_hud_window",
+        "_is_port_in_use",
+        "start_hud_server"
+      ],
+      "totalLines": 458,
+      "hasStructuralAnalysis": true
+    }
+  }
+}

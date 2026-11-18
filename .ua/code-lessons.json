@@ -1,0 +1,284 @@
+{
+  "version": 1,
+  "generatedAt": "2026-11-17T15:05:03.993641+00:00",
+  "files": {
+    "src/app.py": {
+      "overview": "Function main() implementing core logic in app.py.",
+      "sections": [
+        {
+          "title": "Qt Application Setup",
+          "lineRange": [
+            15,
+            60
+          ],
+          "explanation": "Configures high-DPI scaling, initializes QApplication with Windows styling, and prepares the event loop."
+        },
+        {
+          "title": "UI Window & Tray Bootstrapping",
+          "lineRange": [
+            61,
+            140
+          ],
+          "explanation": "Instantiates the floating ChatWindow capsule and connects it to the SystemTrayIcon for persistent desktop presence."
+        }
+      ],
+      "tourOrder": 2
+    },
+    "src/services/database.py": {
+      "overview": "DatabaseService class in database.py (methods: __init__).",
+      "sections": []
+    },
+    "src/storage/__init__.py": {
+      "overview": "Storage package exports exposing database models and conversation repositories.",
+      "sections": []
+    },
+    "src/storage/db.py": {
+      "overview": "Database class in db.py (methods: __init__, initialize, _create_tables, _migrate).",
+      "sections": [],
+      "tourOrder": 8
+    },
+    "src/ui/__init__.py": {
+      "overview": "UI module exports exposing capsule chat window and system tray components.",
+      "sections": []
+    },
+    "src/ui/chat_window.py": {
+      "overview": "ChatWindow class in chat_window.py (methods: collapsed_width, collapsed_height, collapsed_y, __init__).",
+      "sections": [
+        {
+          "title": "Dynamic Island Capsule Layout",
+          "lineRange": [
+            200,
+            450
+          ],
+          "explanation": "Draws borderless, translucent floating capsule widget with smooth expansion animations and mouse drag handlers."
+        },
+        {
+          "title": "Message & Step Bubble Rendering",
+          "lineRange": [
+            451,
+            800
+          ],
+          "explanation": "Renders user prompts, markdown AI streaming text, tool execution step cards, and interactive permission prompts."
+        }
+      ],
+      "tourOrder": 3
+    },
+    "src/ui/system_tray.py": {
+      "overview": "SystemTrayIcon class in system_tray.py (methods: __init__, initialize, _create_icon, _on_activated).",
+      "sections": [],
+      "tourOrder": 3
+    },
+    "memory.py": {
+      "overview": "Compatibility bridge module redirecting top-level memory imports to src/agent/memory.py.",
+      "sections": []
+    },
+    "src/agent/__init__.py": {
+      "overview": "Agent package exports exposing AgentExecutor, AgentMemory, and permission classes.",
+      "sections": []
+    },
+    "src/agent/executor.py": {
+      "overview": "Function sanitize_final_reply(content, user_message) implementing core logic in executor.py.",
+      "sections": [
+        {
+          "title": "ReAct Reasoning Loop",
+          "lineRange": [
+            100,
+            450
+          ],
+          "explanation": "Manages conversation turns, formats system prompts with memory, and queries the AI model for thoughts and tool calls."
+        },
+        {
+          "title": "Tool Dispatch & Gatekeeper",
+          "lineRange": [
+            451,
+            850
+          ],
+          "explanation": "Inspects proposed tool calls, verifies security rules against PermissionGate, and executes approved automation actions."
+        }
+      ],
+      "tourOrder": 4
+    },
+    "src/agent/memory.py": {
+      "overview": "ConversationMemory class in memory.py (methods: __init__, _ensure_file, _read_messages, _write_messages).",
+      "sections": [],
+      "tourOrder": 4
+    },
+    "src/agent/permissions.py": {
+      "overview": "PermissionGate class in permissions.py (methods: __init__, is_safe, is_dangerous, requires_permission).",
+      "sections": [],
+      "tourOrder": 4
+    },
+    "src/agent/tools.py": {
+      "overview": "Function create_default_registry() implementing core logic in tools.py.",
+      "sections": [],
+      "tourOrder": 5
+    },
+    "src/config/__init__.py": {
+      "overview": "Configuration module initializer exporting global settings and environment helpers.",
+      "sections": []
+    },
+    "src/config/settings.py": {
+      "overview": "Function save_ai_config(provider, model, api_key) implementing core logic in settings.py.",
+      "sections": [],
+      "tourOrder": 8
+    },
+    "src/services/telegram_service.py": {
+      "overview": "Function send_telegram_photo_async(image_path, caption, token) implementing core logic in telegram_service.py.",
+      "sections": [
+        {
+          "title": "Long-Polling Telegram Worker",
+          "lineRange": [
+            30,
+            180
+          ],
+          "explanation": "Connects to Telegram Bot API, polls for incoming authorized chat messages, and converts them into agent commands."
+        },
+        {
+          "title": "Document & Message Dispatch",
+          "lineRange": [
+            181,
+            330
+          ],
+          "explanation": "Sends formatted Markdown replies and generated files (PDFs, screenshots) back to the user's Telegram chat."
+        }
+      ],
+      "tourOrder": 7
+    },
+    "src/ui/settings_window.py": {
+      "overview": "Function set_windows_startup(enabled) implementing core logic in settings_window.py.",
+      "sections": []
+    },
+    "main.py": {
+      "overview": "Function main() implementing core logic in main.py.",
+      "sections": [
+        {
+          "title": "Subsystem Initialization & Setup",
+          "lineRange": [
+            39,
+            140
+          ],
+          "explanation": "Initializes the Qt instance, database, HUD status, local OmniRoute proxy, and starts the background HUD server thread."
+        },
+        {
+          "title": "Voice Recognition & Telegram Listeners",
+          "lineRange": [
+            141,
+            275
+          ],
+          "explanation": "Spawns concurrent worker threads for ambient speech wake-word detection and remote Telegram command polling."
+        },
+        {
+          "title": "Graceful Teardown",
+          "lineRange": [
+            276,
+            311
+          ],
+          "explanation": "Blocks on shutdown_event and coordinates safe termination of active voice workers, Telegram polling, and agent executors."
+        }
+      ],
+      "tourOrder": 2
+    },
+    "src/services/hud_status.py": {
+      "overview": "Function init_hud_status() implementing core logic in hud_status.py.",
+      "sections": [],
+      "tourOrder": 6
+    },
+    "src/services/voice_service.py": {
+      "overview": "Function parse_wake_word(text) implementing core logic in voice_service.py.",
+      "sections": [
+        {
+          "title": "Wake-Word Detection",
+          "lineRange": [
+            50,
+            250
+          ],
+          "explanation": "Continuous audio recording using SpeechRecognition to listen for 'Altron' or '\u0623\u0644\u062a\u0631\u0648\u0646'."
+        },
+        {
+          "title": "TTS Speech Synthesis",
+          "lineRange": [
+            251,
+            550
+          ],
+          "explanation": "Streams text to Edge-TTS or SAPI while pausing input listening to eliminate microphone feedback loops."
+        }
+      ],
+      "tourOrder": 6
+    },
+    "ui_server.py": {
+      "overview": "Function start_hud_server(host, port, open_browser) implementing core logic in ui_server.py.",
+      "sections": [],
+      "tourOrder": 7
+    },
+    "src/services/__init__.py": {
+      "overview": "Services module initializer exposing AIClient, VoiceService, TelegramWorker, and automation managers.",
+      "sections": []
+    },
+    "src/services/ai_client.py": {
+      "overview": "Function _clean_schema_for_gemini(val) implementing core logic in ai_client.py.",
+      "sections": []
+    },
+    "src/services/desktop_icon_service.py": {
+      "overview": "Function position_desktop_icon(target, position, x) implementing core logic in desktop_icon_service.py.",
+      "sections": [],
+      "tourOrder": 5
+    },
+    "src/services/omniroute_manager.py": {
+      "overview": "OmniRouteManager class in omniroute_manager.py (methods: __init__, is_running, start_if_needed, stop).",
+      "sections": []
+    },
+    ".env.example": {
+      "overview": "Template configuration file defining required environment variables and API keys for Altron services.",
+      "sections": [],
+      "tourOrder": 8
+    },
+    "CLAUDE.md": {
+      "overview": "Project instructions and architectural guidelines for AI coding assistants working in the Altron repository.",
+      "sections": [],
+      "tourOrder": 1
+    },
+    "README.md": {
+      "overview": "Comprehensive project documentation detailing features, setup instructions, architecture, and Telegram bot configuration.",
+      "sections": [],
+      "tourOrder": 1
+    },
+    "memory.json": {
+      "overview": "Persistent JSON storage capturing long-term agent memory facts and user preferences.",
+      "sections": []
+    },
+    "requirements.txt": {
+      "overview": "Python package dependency manifest listing PySide6, Flask, Edge-TTS, and Windows automation libraries.",
+      "sections": [],
+      "tourOrder": 1
+    },
+    "status.json": {
+      "overview": "Runtime status cache capturing current agent activity and voice synthesis state.",
+      "sections": []
+    },
+    "build_exe.py": {
+      "overview": "Function build() implementing core logic in build_exe.py.",
+      "sections": []
+    },
+    "prompts/system_prompt.txt": {
+      "overview": "Core system prompt defining Altron personality, capabilities, tool usage instructions, and safety guardrails.",
+      "sections": []
+    },
+    "src/__init__.py": {
+      "overview": "Top-level source package root initializer.",
+      "sections": []
+    },
+    "ui/app.js": {
+      "overview": "Frontend JavaScript application powering HUD status updates, sound wave animations, and real-time polling.",
+      "sections": [],
+      "tourOrder": 7
+    },
+    "ui/index.html": {
+      "overview": "HTML template for the floating HUD status dashboard displaying system status, microphone wave, and activity log.",
+      "sections": []
+    },
+    "ui/style.css": {
+      "overview": "Dark modern glassmorphism stylesheet for the HUD dashboard with custom keyframe animations and status indicators.",
+      "sections": []
+    }
+  }
+}

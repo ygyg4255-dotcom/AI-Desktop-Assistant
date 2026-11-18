@@ -16,7 +16,9 @@ from concurrent.futures import Future
 
 from src.agent.tools import ToolRegistry, ToolResult, create_default_registry
 from src.agent.permissions import PermissionGate, PermissionLevel
+from src.agent.memory import ConversationMemory
 from src.services.ai_client import AIClient, Message
+from src.services.hud_status import update_hud_status
 from src.storage.db import Database
 
 
@@ -1112,6 +1114,7 @@ IMPORTANT RULES:
 11. For terminal commands, be cautious and explain the command.
 12. If a tool fails, explain the error and suggest alternatives.
 13. After executing any tool, ALWAYS provide a friendly, natural, and concise confirmation message in the user's language (Arabic or English), e.g., '✅ تم نسخ 11,400 ملف إلى مجلد her بنجاح!'. NEVER output raw JSON, '[Tool Result]', Python scripts, or technical data dumps to the user.
+14. CRITICAL VOICE RULE: Your text responses are automatically spoken aloud by your built-in internal voice synthesizer (`TTSManager`). NEVER invoke `terminal_execute` or PowerShell `System.Speech` to speak or demonstrate your voice—simply reply with plain text and your internal voice engine will speak it immediately.
 
 Available tools are provided in the tool definitions. Use them responsibly."""
 
@@ -1120,12 +1123,14 @@ Available tools are provided in the tool definitions. Use them responsibly."""
         ai_client: AIClient,
         database: Optional[Database] = None,
         registry: Optional[ToolRegistry] = None,
-        gate: Optional[PermissionGate] = None
+        gate: Optional[PermissionGate] = None,
+        memory: Optional[ConversationMemory] = None
     ):
         self._ai_client = ai_client
         self._database = database
         self._registry = registry or create_default_registry()
         self._gate = gate or PermissionGate()
+        self._memory = memory or ConversationMemory()
         self._state = AgentState.IDLE
         self._conversation_id: Optional[int] = None
         self._messages: List[Message] = []
@@ -1141,6 +1146,31 @@ Available tools are provided in the tool definitions. Use them responsibly."""
                     tmp_f.unlink()
             except Exception:
                 pass
+
+    def _get_system_prompt(self) -> str:
+        """Dynamically load persona prompt from prompts/system_prompt.txt and prepend to SYSTEM_PROMPT."""
+        persona = ""
+        prompt_paths = [
+            Path("prompts/system_prompt.txt"),
+            Path(__file__).resolve().parent.parent.parent / "prompts" / "system_prompt.txt",
+        ]
+        for p in prompt_paths:
+            if p.exists():
+                try:
+                    persona = p.read_text(encoding="utf-8").strip()
+                    if persona:
+                        break
+                except Exception:
+                    pass
+
+        if persona:
+            return f"{persona}\n\n{self.SYSTEM_PROMPT}"
+        return self.SYSTEM_PROMPT
+
+    @property
+    def memory(self) -> ConversationMemory:
+        """Get the conversation memory instance."""
+        return self._memory
 
     @property
     def state(self) -> AgentState:
@@ -1316,7 +1346,30 @@ Available tools are provided in the tool definitions. Use them responsibly."""
         self._steps = []
 
         def _worker():
+            reminder_timer: Optional[threading.Timer] = None
             try:
+                def _announce_long_task_reminder():
+                    reminder_text = "Sir, this may take a moment. Perhaps you should step away from the keyboard and take a short break."
+                    print(f"\n[Altron Reminder] {reminder_text}\n")
+                    if on_step:
+                        try:
+                            on_step(AgentStep(
+                                step_type="thinking",
+                                content=f"⏳ {reminder_text}"
+                            ))
+                        except Exception:
+                            pass
+                    try:
+                        from src.services.voice_service import TTSManager
+                        tts = TTSManager(enabled=True)
+                        tts.speak(reminder_text)
+                    except Exception as tts_err:
+                        print(f"[Altron Reminder TTS Error] {tts_err}")
+
+                reminder_timer = threading.Timer(60.0, _announce_long_task_reminder)
+                reminder_timer.daemon = True
+                reminder_timer.start()
+
                 response = self._process_sync(
                     user_message,
                     on_step=on_step,
@@ -1336,6 +1389,11 @@ Available tools are provided in the tool definitions. Use them responsibly."""
                     except Exception:
                         pass
             finally:
+                if reminder_timer is not None:
+                    try:
+                        reminder_timer.cancel()
+                    except Exception:
+                        pass
                 # Always reset state to IDLE so subsequent messages can be processed
                 self._state = AgentState.IDLE
 
@@ -1360,8 +1418,16 @@ Available tools are provided in the tool definitions. Use them responsibly."""
 
         tools_used = []
 
-        user_msg = Message(role="user", content=user_message, timestamp=time.time())
-        self._messages.append(user_msg)
+        # Automatically store new user message in short-term conversation memory and update HUD
+        self._memory.add_message("user", user_message)
+        update_hud_status(state="Thinking", log_entry=f"User said: {user_message}")
+
+        # Include last 10 messages from memory.json as conversation context
+        recent = self._memory.get_recent_messages(limit=10)
+        self._messages = [
+            Message(role=m["role"], content=m["content"], timestamp=time.time())
+            for m in recent
+        ]
 
         if self._database and self._conversation_id:
             self._database.add_message(
@@ -1410,6 +1476,7 @@ Available tools are provided in the tool definitions. Use them responsibly."""
 
             assistant_msg = Message(role="assistant", content=final_content, timestamp=time.time())
             self._messages.append(assistant_msg)
+            self._memory.add_message("assistant", final_content)
 
             if self._database and self._conversation_id:
                 self._database.add_message(
@@ -1442,7 +1509,7 @@ Available tools are provided in the tool definitions. Use them responsibly."""
             payload = {
                 "model": self._ai_client._model,
                 "max_tokens": self._ai_client._max_tokens,
-                "system": self.SYSTEM_PROMPT,
+                "system": self._get_system_prompt(),
                 "messages": messages,
                 "tools": self.tools_schema
             }
@@ -1749,6 +1816,7 @@ Available tools are provided in the tool definitions. Use them responsibly."""
                         )
 
                     final_content = sanitize_final_reply(final_content, user_message)
+                    self._memory.add_message("assistant", final_content)
                     self._state = AgentState.IDLE
                     return AgentResponse(
                         content=final_content,
@@ -1768,18 +1836,23 @@ Available tools are provided in the tool definitions. Use them responsibly."""
 
         final_content = sanitize_final_reply(final_content, user_message)
 
+        default_fallback = "✅ تم إكمال العملية المطلوبة بنجاح!" if any('؀' <= char <= 'ۿ' for char in user_message) else "✅ I've completed the requested actions."
+        resp_text = final_content or default_fallback
+        self._memory.add_message("assistant", resp_text)
         self._state = AgentState.IDLE
 
-        default_fallback = "✅ تم إكمال العملية المطلوبة بنجاح!" if any('؀' <= char <= 'ۿ' for char in user_message) else "✅ I've completed the requested actions."
         return AgentResponse(
-            content=final_content or default_fallback,
+            content=resp_text,
             steps=self._steps,
             tools_used=tools_used,
             success=True
         )
 
     def _make_tool_request(self, payload: Dict[str, Any], max_attempts: int = 3, backoff: float = 1.5) -> Dict[str, Any]:
-        """Make a tool-enabled API request with automatic retry on gateway errors and timeouts."""
+        """Make a tool-enabled API request with automatic retry via Universal AIClient."""
+        if hasattr(self._ai_client, "make_tool_request"):
+            return self._ai_client.make_tool_request(payload, max_attempts=max_attempts, backoff=backoff)
+
         import urllib.request
         import urllib.error
         import socket
@@ -1788,7 +1861,7 @@ Available tools are provided in the tool definitions. Use them responsibly."""
         url = f"{self._ai_client._base_url}/v1/messages"
         headers = {
             "Content-Type": "application/json",
-            "x-api-key": self._ai_client._api_key,
+            "x-api-key": getattr(self._ai_client, "_api_key", ""),
             "anthropic-version": "2023-06-01"
         }
 
@@ -1841,3 +1914,4 @@ Available tools are provided in the tool definitions. Use them responsibly."""
         """Clear conversation history."""
         self._messages = []
         self._steps = []
+        self._memory.clear()
