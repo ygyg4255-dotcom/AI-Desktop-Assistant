@@ -1,7 +1,17 @@
-"""Altron Sci-Fi Radar HUD Web Server & Standalone Desktop Window Host."""
+"""Altron Sci-Fi Radar HUD Web Server & Standalone Desktop Window Host.
+
+Security model (audit S1/S2):
+- A random per-launch token is embedded only in the served HUD page and must be
+  sent as X-HUD-Token on every API call (constant-time compared).
+- Host must be 127.0.0.1:<port> / localhost:<port>; Origin, when present, must
+  be the HUD's own origin. No CORS headers are ever sent.
+- State-changing JSON endpoints require Content-Type: application/json.
+"""
 import os
 import sys
+import hmac
 import json
+import secrets
 import socket
 import shutil
 import subprocess
@@ -36,6 +46,16 @@ except Exception:
     def clear_hud_logs():
         pass
 
+# Per-launch secret, delivered only inside the served index.html.
+_HUD_TOKEN: str = secrets.token_urlsafe(32)
+_TOKEN_PLACEHOLDER = "__HUD_TOKEN__"
+# Port the server is bound to; set by start_hud_server (used for Host checks).
+_HUD_PORT: int = 5000
+
+_API_PATHS = {"/status", "/status.json", "/config", "/test_config", "/command", "/clear_logs"}
+_JSON_ONLY_PATHS = {"/command", "/config", "/test_config"}
+_CONFIG_FIELDS = {"api_key", "model", "language"}
+
 # Registered callbacks
 _COMMAND_HANDLER: Optional[Callable[[str], None]] = None
 _CONFIG_UPDATED_CALLBACK: Optional[Callable[[Dict[str, Any]], None]] = None
@@ -61,10 +81,8 @@ def get_active_config() -> Dict[str, Any]:
         except Exception:
             pass
     return {
-        "provider": os.environ.get("AI_PROVIDER", "anthropic"),
-        "model": os.environ.get("AI_MODEL", "claude-3-5-sonnet-20241022"),
-        "base_url": os.environ.get("AI_BASE_URL", "https://api.anthropic.com"),
-        "api_key": "••••••••" if os.environ.get("AI_API_KEY") else "",
+        "model": os.environ.get("AI_MODEL", "claude-sonnet-5-5"),
+        "api_key":"••••••••" if os.environ.get("AI_API_KEY") else "",
         "has_api_key": bool(os.environ.get("AI_API_KEY")),
         "language": os.environ.get("ALTRON_LANGUAGE", "English"),
     }
@@ -134,266 +152,167 @@ def open_hud_window(url: str) -> None:
     webbrowser.open(url)
 
 
-# --- Flask Implementation ---
-try:
-    from flask import Flask, send_from_directory, Response, request, jsonify
+# --- Flask application ---
+# Flask is a hard requirement (requirements.txt). The former http.server
+# fallback was removed so there is exactly one, hardened request path.
+from flask import Flask, send_from_directory, Response, request, jsonify
 
-    flask_app = Flask(__name__, static_folder=str(UI_DIR))
+flask_app = Flask(__name__, static_folder=None)
 
-    @flask_app.route("/")
-    def index():
-        return send_from_directory(UI_DIR, "index.html")
 
-    @flask_app.route("/<path:filename>")
-    def static_files(filename):
-        return send_from_directory(UI_DIR, filename)
+def _allowed_hosts() -> set:
+    return {f"127.0.0.1:{_HUD_PORT}", f"localhost:{_HUD_PORT}"}
 
-    @flask_app.route("/status")
-    @flask_app.route("/status.json")
-    def status_route():
-        payload = _get_status_payload_str()
-        resp = Response(payload, mimetype="application/json")
+
+def _error(code: int, message: str) -> Response:
+    resp = jsonify({"error": message})
+    resp.status_code = code
+    return resp
+
+
+@flask_app.before_request
+def _enforce_hud_security():
+    """Host / Origin / token / content-type gate applied to every request."""
+    host = request.headers.get("Host", "").lower()
+    if host not in _allowed_hosts():
+        return _error(403, "forbidden host")
+
+    origin = request.headers.get("Origin")
+    if origin is not None and origin.lower() != f"http://{host}":
+        return _error(403, "forbidden origin")
+
+    if request.path in _API_PATHS:
+        supplied = request.headers.get("X-HUD-Token", "")
+        if not hmac.compare_digest(supplied.encode("utf-8"), _HUD_TOKEN.encode("utf-8")):
+            return _error(401, "missing or invalid HUD token")
+        if (
+            request.method == "POST"
+            and request.path in _JSON_ONLY_PATHS
+            and request.mimetype != "application/json"
+        ):
+            return _error(415, "Content-Type must be application/json")
+    return None
+
+
+@flask_app.after_request
+def _security_headers(resp: Response) -> Response:
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    resp.headers["Content-Security-Policy"] = "frame-ancestors 'none'"
+    if request.path in _API_PATHS:
         resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
-        resp.headers["Pragma"] = "no-cache"
-        resp.headers["Expires"] = "0"
-        resp.headers["Access-Control-Allow-Origin"] = "*"
-        return resp
+    return resp
 
-    @flask_app.route("/config", methods=["GET", "POST", "OPTIONS"])
-    def config_route():
-        if request.method == "OPTIONS":
-            resp = Response()
-            resp.headers["Access-Control-Allow-Origin"] = "*"
-            resp.headers["Access-Control-Allow-Headers"] = "Content-Type"
-            return resp
 
-        if request.method == "POST":
-            data = request.get_json(silent=True) or {}
-            provider = data.get("provider", "anthropic")
-            model = data.get("model", "")
-            api_key = data.get("api_key", "").strip()
-            base_url = data.get("base_url", "")
-            language = data.get("language", "English")
+def _json_object() -> Optional[Dict[str, Any]]:
+    data = request.get_json(silent=True)
+    return data if isinstance(data, dict) else None
 
-            if save_ai_config:
-                save_ai_config(provider, model, api_key, base_url, language)
 
-            updated = get_active_config()
-            if _CONFIG_UPDATED_CALLBACK:
-                try:
-                    _CONFIG_UPDATED_CALLBACK(updated)
-                except Exception as err:
-                    print(f"[Config Callback Error] {err}")
+def _validate_config_payload(data: Dict[str, Any]) -> Optional[str]:
+    """Return an error message, or None if the payload is acceptable."""
+    unknown = set(data) - _CONFIG_FIELDS
+    if unknown:
+        return f"unsupported field(s): {', '.join(sorted(unknown))}"
+    for key in _CONFIG_FIELDS:
+        value = data.get(key, "")
+        if not isinstance(value, str):
+            return f"{key} must be a string"
+        if "\r" in value or "\n" in value:
+            return f"{key} must not contain line breaks"
+    return None
 
-            resp = jsonify(updated)
-            resp.headers["Access-Control-Allow-Origin"] = "*"
-            return resp
 
-        # GET method
-        resp = jsonify(get_active_config())
-        resp.headers["Access-Control-Allow-Origin"] = "*"
-        return resp
+@flask_app.route("/")
+@flask_app.route("/index.html")
+def index():
+    html = (UI_DIR / "index.html").read_text(encoding="utf-8")
+    resp = Response(html.replace(_TOKEN_PLACEHOLDER, _HUD_TOKEN), mimetype="text/html")
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
 
-    @flask_app.route("/test_config", methods=["POST", "OPTIONS"])
-    def test_config_route():
-        if request.method == "OPTIONS":
-            resp = Response()
-            resp.headers["Access-Control-Allow-Origin"] = "*"
-            resp.headers["Access-Control-Allow-Headers"] = "Content-Type"
-            return resp
 
-        data = request.get_json(silent=True) or {}
-        provider = data.get("provider", "anthropic")
-        model = data.get("model", "")
-        base_url = data.get("base_url", "")
-        api_key = data.get("api_key", "").strip()
+@flask_app.route("/<path:filename>")
+def static_files(filename):
+    return send_from_directory(UI_DIR, filename)
 
-        # If key is masked or empty, look up stored key
-        if not api_key or any(c in api_key for c in ("•", "*")):
-            api_key = os.environ.get("AI_API_KEY") or (Settings().ai_api_key if Settings else "")
 
+@flask_app.route("/status")
+@flask_app.route("/status.json")
+def status_route():
+    return Response(_get_status_payload_str(), mimetype="application/json")
+
+
+@flask_app.route("/config", methods=["GET", "POST"])
+def config_route():
+    if request.method == "GET":
+        return jsonify(get_active_config())
+
+    data = _json_object()
+    if data is None:
+        return _error(400, "body must be a JSON object")
+    problem = _validate_config_payload(data)
+    if problem:
+        return _error(400, problem)
+
+    if save_ai_config:
+        save_ai_config(
+            model=data.get("model", ""),
+            api_key=data.get("api_key", "").strip(),
+            language=data.get("language", "English"),
+        )
+
+    updated = get_active_config()
+    if _CONFIG_UPDATED_CALLBACK:
         try:
-            from src.services.ai_client import AIClient
-            test_client = AIClient(
-                provider=provider,
-                model=model,
-                base_url=base_url,
-                api_key=api_key,
-                timeout=6.0
-            )
-            ok, msg = test_client.test_connection()
-            resp = jsonify({"ok": ok, "message": msg})
-        except Exception as e:
-            resp = jsonify({"ok": False, "message": str(e)})
-
-        resp.headers["Access-Control-Allow-Origin"] = "*"
-        return resp
-
-    @flask_app.route("/command", methods=["POST", "OPTIONS"])
-    def command_route():
-        if request.method == "OPTIONS":
-            resp = Response()
-            resp.headers["Access-Control-Allow-Origin"] = "*"
-            resp.headers["Access-Control-Allow-Headers"] = "Content-Type"
-            return resp
-
-        data = request.get_json(silent=True) or {}
-        cmd = data.get("command", "").strip()
-        if not cmd and request.form:
-            cmd = request.form.get("command", "").strip()
-
-        if cmd and _COMMAND_HANDLER:
-            threading.Thread(target=_COMMAND_HANDLER, args=(cmd,), daemon=True).start()
-
-        resp = jsonify({"status": "ok", "command": cmd})
-        resp.headers["Access-Control-Allow-Origin"] = "*"
-        return resp
-
-    @flask_app.route("/clear_logs", methods=["POST", "OPTIONS"])
-    def clear_logs_route():
-        if request.method == "OPTIONS":
-            resp = Response()
-            resp.headers["Access-Control-Allow-Origin"] = "*"
-            resp.headers["Access-Control-Allow-Headers"] = "Content-Type"
-            return resp
-
-        clear_hud_logs()
-        resp = jsonify({"status": "ok"})
-        resp.headers["Access-Control-Allow-Origin"] = "*"
-        return resp
-
-    _HAS_FLASK = True
-
-except ImportError:
-    _HAS_FLASK = False
-    flask_app = None
+            _CONFIG_UPDATED_CALLBACK(updated)
+        except Exception as err:
+            print(f"[Config Callback Error] {err}")
+    return jsonify(updated)
 
 
-# --- Zero-Dependency http.server Fallback ---
-if not _HAS_FLASK:
-    from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
+@flask_app.route("/test_config", methods=["POST"])
+def test_config_route():
+    data = _json_object()
+    if data is None:
+        return _error(400, "body must be a JSON object")
+    problem = _validate_config_payload(data)
+    if problem:
+        return _error(400, problem)
 
-    class HUDRequestHandler(SimpleHTTPRequestHandler):
-        def __init__(self, *args, **kwargs):
-            super().__init__(*args, directory=str(UI_DIR), **kwargs)
+    model = data.get("model", "")
+    api_key = data.get("api_key", "").strip()
+    # If key is masked or empty, look up stored key
+    if not api_key or any(c in api_key for c in ("•", "*")):
+        api_key = os.environ.get("AI_API_KEY") or (Settings().ai_api_key if Settings else "")
 
-        def _send_json(self, data: Any, code: int = 200):
-            payload = json.dumps(data, ensure_ascii=False).encode("utf-8")
-            self.send_response(code)
-            self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.send_header("Content-Length", str(len(payload)))
-            self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.send_header("Access-Control-Allow-Headers", "Content-Type")
-            self.end_headers()
-            self.wfile.write(payload)
+    try:
+        from src.services.ai_client import AIClient
+        test_client = AIClient(api_key=api_key, model=model, timeout=6.0)
+        ok, msg = test_client.test_connection()
+        return jsonify({"ok": ok, "message": msg})
+    except Exception as e:
+        return jsonify({"ok": False, "message": str(e)})
 
-        def do_OPTIONS(self):
-            self.send_response(200)
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.send_header("Access-Control-Allow-Headers", "Content-Type")
-            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-            self.end_headers()
 
-        def do_GET(self):
-            clean_path = self.path.split("?")[0]
-            if clean_path in ("/status", "/status.json"):
-                payload = _get_status_payload_str().encode("utf-8")
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json; charset=utf-8")
-                self.send_header("Content-Length", str(len(payload)))
-                self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
-                self.send_header("Access-Control-Allow-Origin", "*")
-                self.end_headers()
-                self.wfile.write(payload)
-            elif clean_path == "/config":
-                self._send_json(get_active_config())
-            elif clean_path in ("/", ""):
-                self.path = "/index.html"
-                return super().do_GET()
-            else:
-                return super().do_GET()
+@flask_app.route("/command", methods=["POST"])
+def command_route():
+    data = _json_object()
+    if data is None:
+        return _error(400, "body must be a JSON object")
+    cmd = data.get("command", "")
+    if not isinstance(cmd, str):
+        return _error(400, "command must be a string")
+    cmd = cmd.strip()
 
-        def do_POST(self):
-            clean_path = self.path.split("?")[0]
-            length = int(self.headers.get("Content-Length", 0))
-            body = self.rfile.read(length) if length > 0 else b""
+    if cmd and _COMMAND_HANDLER:
+        threading.Thread(target=_COMMAND_HANDLER, args=(cmd,), daemon=True).start()
+    return jsonify({"status": "ok", "command": cmd})
 
-            if clean_path == "/command":
-                cmd = ""
-                try:
-                    parsed = json.loads(body.decode("utf-8"))
-                    cmd = parsed.get("command", "").strip()
-                except Exception:
-                    pass
 
-                if cmd and _COMMAND_HANDLER:
-                    threading.Thread(target=_COMMAND_HANDLER, args=(cmd,), daemon=True).start()
-
-                self._send_json({"status": "ok", "command": cmd})
-
-            elif clean_path == "/config":
-                data = {}
-                try:
-                    data = json.loads(body.decode("utf-8"))
-                except Exception:
-                    pass
-
-                provider = data.get("provider", "anthropic")
-                model = data.get("model", "")
-                api_key = data.get("api_key", "")
-                base_url = data.get("base_url", "")
-                language = data.get("language", "English")
-
-                if save_ai_config:
-                    save_ai_config(provider, model, api_key, base_url, language)
-
-                updated = get_active_config()
-                if _CONFIG_UPDATED_CALLBACK:
-                    try:
-                        _CONFIG_UPDATED_CALLBACK(updated)
-                    except Exception as err:
-                        print(f"[Config Callback Error] {err}")
-
-                self._send_json(updated)
-
-            elif clean_path == "/test_config":
-                data = {}
-                try:
-                    data = json.loads(body.decode("utf-8"))
-                except Exception:
-                    pass
-
-                provider = data.get("provider", "anthropic")
-                model = data.get("model", "")
-                base_url = data.get("base_url", "")
-                api_key = data.get("api_key", "").strip()
-
-                if not api_key or any(c in api_key for c in ("•", "*")):
-                    api_key = os.environ.get("AI_API_KEY") or (Settings().ai_api_key if Settings else "")
-
-                try:
-                    from src.services.ai_client import AIClient
-                    test_client = AIClient(
-                        provider=provider,
-                        model=model,
-                        base_url=base_url,
-                        api_key=api_key,
-                        timeout=6.0
-                    )
-                    ok, msg = test_client.test_connection()
-                    self._send_json({"ok": ok, "message": msg})
-                except Exception as e:
-                    self._send_json({"ok": False, "message": str(e)})
-
-            elif clean_path == "/clear_logs":
-                clear_hud_logs()
-                self._send_json({"status": "ok"})
-            else:
-                self.send_error(404, "Endpoint not found")
-
-        def log_message(self, format, *args):
-            pass
+@flask_app.route("/clear_logs", methods=["POST"])
+def clear_logs_route():
+    clear_hud_logs()
+    return jsonify({"status": "ok"})
 
 
 def _is_port_in_use(host: str, port: int) -> bool:
@@ -419,21 +338,18 @@ def start_hud_server(
     if on_config_updated:
         set_config_updated_callback(on_config_updated)
 
+    global _HUD_PORT
     actual_port = port
     if _is_port_in_use(host, actual_port):
         fallback_port = actual_port + 1
         print(f"[ALTRON HUD] Port {actual_port} is already in use; falling back to port {fallback_port}")
         actual_port = fallback_port
+    _HUD_PORT = actual_port
 
     def _run():
-        if _HAS_FLASK and flask_app is not None:
-            import logging
-            log = logging.getLogger("werkzeug")
-            log.setLevel(logging.ERROR)
-            flask_app.run(host=host, port=actual_port, debug=False, use_reloader=False)
-        else:
-            server = ThreadingHTTPServer((host, actual_port), HUDRequestHandler)
-            server.serve_forever()
+        import logging
+        logging.getLogger("werkzeug").setLevel(logging.ERROR)
+        flask_app.run(host=host, port=actual_port, debug=False, use_reloader=False)
 
     thread = threading.Thread(target=_run, daemon=True)
     thread.start()

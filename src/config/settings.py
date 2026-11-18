@@ -1,4 +1,4 @@
-"""Application settings and configuration with Multi-Provider AI support."""
+"""Application settings and configuration (Anthropic Claude only)."""
 import os
 import sys
 import json
@@ -11,6 +11,11 @@ load_dotenv(override=True)
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
+
+# The API key is only ever sent here. Deliberately not configurable (audit S2).
+ANTHROPIC_API_URL = "https://api.anthropic.com"
+DEFAULT_MODEL = "claude-sonnet-5-5"
+DEFAULT_FAST_MODEL = "claude-haiku-5-5"
 
 
 def load_env_file(env_path: Path) -> dict:
@@ -35,27 +40,27 @@ def is_masked_key(key: str) -> bool:
 
 
 def save_ai_config(
-    provider: str,
     model: str,
     api_key: str,
-    base_url: str,
     language: str = "English",
     env_path: Optional[Path] = None
 ) -> Dict[str, str]:
-    """Persist AI provider configuration cleanly to .env and system environment."""
+    """Persist Claude model / API key / language to .env and the process environment."""
+    for value in (model, api_key, language):
+        if "\r" in str(value) or "\n" in str(value):
+            raise ValueError("config values must not contain line breaks")
+
     if env_path is None:
         if getattr(sys, "frozen", False):
             env_path = Path(sys.executable).parent / ".env"
         else:
             env_path = Path(__file__).resolve().parent.parent.parent / ".env"
 
+    model = model.strip() or DEFAULT_MODEL
     updates = {
-        "AI_PROVIDER": provider.strip(),
-        "AI_MODEL": model.strip(),
-        "AI_BASE_URL": base_url.strip(),
+        "AI_MODEL": model,
         "ALTRON_LANGUAGE": language.strip(),
-        "ANTHROPIC_MODEL": model.strip(),
-        "ANTHROPIC_BASE_URL": base_url.strip(),
+        "ANTHROPIC_MODEL": model,
     }
     if not is_masked_key(api_key):
         updates["AI_API_KEY"] = api_key.strip()
@@ -117,17 +122,15 @@ class Settings:
     window_width: int = 600
     window_height: int = 700
 
-    # Universal AI Provider settings
-    ai_provider: str = "anthropic"
-    ai_model: str = "claude-3-5-sonnet-20241022"
+    # Claude settings (endpoint is fixed: see ANTHROPIC_API_URL)
+    ai_model: str = DEFAULT_MODEL
+    ai_fast_model: str = DEFAULT_FAST_MODEL
     ai_api_key: str = ""
-    ai_base_url: str = "https://api.anthropic.com"
     altron_language: str = "English"
 
-    # Legacy settings mapped to Universal provider
-    anthropic_base_url: str = "https://api.anthropic.com"
+    # Legacy aliases
     anthropic_api_key: str = ""
-    anthropic_model: str = "claude-3-5-sonnet-20241022"
+    anthropic_model: str = DEFAULT_MODEL
     max_tokens: int = 4096
     request_timeout: float = 120.0
 
@@ -166,24 +169,20 @@ class Settings:
         """Load environment variables from .env file and system env."""
         env_vars = load_env_file(self.env_path)
 
-        self.ai_provider = env_vars.get(
-            "AI_PROVIDER",
-            os.environ.get("AI_PROVIDER", "anthropic")
-        ).lower().strip()
-
-        self.ai_model = env_vars.get(
+        model = env_vars.get(
             "AI_MODEL",
-            env_vars.get("ANTHROPIC_MODEL", os.environ.get("AI_MODEL", os.environ.get("ANTHROPIC_MODEL", "claude-3-5-sonnet-20241022")))
-        )
+            env_vars.get("ANTHROPIC_MODEL", os.environ.get("AI_MODEL", os.environ.get("ANTHROPIC_MODEL", DEFAULT_MODEL)))
+        ).strip()
+        # "serve" was the old OmniRoute proxy placeholder, not a Claude model.
+        self.ai_model = DEFAULT_MODEL if model in ("", "serve") else model
+
+        self.ai_fast_model = env_vars.get(
+            "AI_FAST_MODEL", os.environ.get("AI_FAST_MODEL", DEFAULT_FAST_MODEL)
+        ).strip() or DEFAULT_FAST_MODEL
 
         self.ai_api_key = env_vars.get(
             "AI_API_KEY",
-            env_vars.get("ANTHROPIC_API_KEY", env_vars.get("OPENAI_API_KEY", os.environ.get("AI_API_KEY", os.environ.get("ANTHROPIC_API_KEY", ""))))
-        )
-
-        self.ai_base_url = env_vars.get(
-            "AI_BASE_URL",
-            env_vars.get("ANTHROPIC_BASE_URL", os.environ.get("AI_BASE_URL", os.environ.get("ANTHROPIC_BASE_URL", "https://api.anthropic.com")))
+            env_vars.get("ANTHROPIC_API_KEY", os.environ.get("AI_API_KEY", os.environ.get("ANTHROPIC_API_KEY", "")))
         )
 
         self.altron_language = env_vars.get(
@@ -192,7 +191,6 @@ class Settings:
         )
 
         # Legacy backward-compatibility mapping
-        self.anthropic_base_url = self.ai_base_url
         self.anthropic_api_key = self.ai_api_key
         self.anthropic_model = self.ai_model
 
@@ -209,8 +207,30 @@ class Settings:
         if self.telegram_chat_id:
             os.environ["TELEGRAM_CHAT_ID"] = self.telegram_chat_id
 
+    # Read-only compatibility aliases for callers outside this module
+    # (main.py, src/app.py, settings_window.py). Writes are ignored.
+    @property
+    def ai_provider(self) -> str:
+        return "anthropic"
+
+    @property
+    def ai_base_url(self) -> str:
+        return ANTHROPIC_API_URL
+
+    @ai_base_url.setter
+    def ai_base_url(self, _value: str) -> None:
+        pass
+
+    @property
+    def anthropic_base_url(self) -> str:
+        return ANTHROPIC_API_URL
+
+    @anthropic_base_url.setter
+    def anthropic_base_url(self, _value: str) -> None:
+        pass
+
     def get_config_dict(self) -> Dict[str, Any]:
-        """Return masked dictionary of active AI provider configuration."""
+        """Return masked dictionary of the active Claude configuration."""
         has_key = bool(self.ai_api_key)
         masked_key = ""
         if has_key:
@@ -220,9 +240,7 @@ class Settings:
                 masked_key = "••••••••"
 
         return {
-            "provider": self.ai_provider,
             "model": self.ai_model,
-            "base_url": self.ai_base_url,
             "api_key": masked_key,
             "has_api_key": has_key,
             "language": self.altron_language,

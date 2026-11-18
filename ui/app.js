@@ -2,6 +2,10 @@
 (function () {
   'use strict';
 
+  // Per-launch HUD auth token, injected by ui_server.py into index.html.
+  const tokenMeta = document.querySelector('meta[name="hud-token"]');
+  const HUD_TOKEN = tokenMeta ? tokenMeta.getAttribute('content') : '';
+
   // DOM Elements
   const clockEl = document.getElementById('hud-clock');
   const dateEl = document.getElementById('hud-date');
@@ -87,7 +91,7 @@
     try {
       const response = await fetch('/status?t=' + Date.now(), {
         cache: 'no-store',
-        headers: { Accept: 'application/json' },
+        headers: { Accept: 'application/json', 'X-HUD-Token': HUD_TOKEN },
       });
 
       if (!response.ok) return;
@@ -271,6 +275,7 @@
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
+            'X-HUD-Token': HUD_TOKEN,
           },
           body: JSON.stringify({ command: cmd }),
         });
@@ -292,7 +297,7 @@
   if (btnClearChatEl) {
     btnClearChatEl.addEventListener('click', async function () {
       try {
-        await fetch('/clear_logs', { method: 'POST' });
+        await fetch('/clear_logs', { method: 'POST', headers: { 'X-HUD-Token': HUD_TOKEN } });
         if (chatMessagesEl) {
           chatMessagesEl.innerHTML = `
             <div class="msg-bubble system">
@@ -336,10 +341,8 @@
   const btnCloseModalEl = document.getElementById('btn-close-modal');
   const btnCancelSettingsEl = document.getElementById('btn-cancel-settings');
   const settingsFormEl = document.getElementById('settings-form');
-  const cfgProviderEl = document.getElementById('cfg-provider');
   const cfgModelEl = document.getElementById('cfg-model');
   const cfgApiKeyEl = document.getElementById('cfg-api-key');
-  const cfgBaseUrlEl = document.getElementById('cfg-base-url');
   const cfgLanguageEl = document.getElementById('cfg-language');
   const btnSaveSettingsEl = document.getElementById('btn-save-settings');
   const btnTestSettingsEl = document.getElementById('btn-test-settings');
@@ -347,40 +350,10 @@
   const displayAiEngineEl = document.getElementById('display-ai-engine');
   const displayAiLangEl = document.getElementById('display-ai-lang');
 
-  const PROVIDER_DEFAULTS = {
-    ollama: {
-      model: 'llama3.2',
-      baseUrl: 'http://localhost:11434',
-      keyPlaceholder: 'Not required for local Ollama',
-    },
-    anthropic: {
-      model: 'claude-3-5-sonnet-20241022',
-      baseUrl: 'https://api.anthropic.com',
-      keyPlaceholder: 'sk-ant-...',
-    },
-    openai: {
-      model: 'gpt-4o-mini',
-      baseUrl: 'https://api.openai.com/v1',
-      keyPlaceholder: 'sk-...',
-    },
-    gemini: {
-      model: 'gemini-2.5-flash',
-      baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
-      keyPlaceholder: 'AIzaSy...',
-    },
-    custom: {
-      model: 'serve',
-      baseUrl: 'http://localhost:20128',
-      keyPlaceholder: 'API Key (if required)',
-    },
-  };
-
   function updateAiConfigDisplay(cfg) {
     if (!cfg) return;
     if (displayAiEngineEl) {
-      const p = (cfg.provider || 'Anthropic').toUpperCase();
-      const m = cfg.model || 'Claude';
-      displayAiEngineEl.textContent = `${p} (${m})`;
+      displayAiEngineEl.textContent = `CLAUDE (${cfg.model || 'claude-sonnet-5-5'})`;
     }
     if (displayAiLangEl && cfg.language) {
       displayAiLangEl.textContent = cfg.language;
@@ -396,12 +369,10 @@
     }
 
     try {
-      const resp = await fetch('/config?t=' + Date.now());
+      const resp = await fetch('/config?t=' + Date.now(), { headers: { 'X-HUD-Token': HUD_TOKEN } });
       if (resp.ok) {
         const cfg = await resp.json();
-        if (cfgProviderEl) cfgProviderEl.value = cfg.provider || 'anthropic';
         if (cfgModelEl) cfgModelEl.value = cfg.model || '';
-        if (cfgBaseUrlEl) cfgBaseUrlEl.value = cfg.base_url || '';
         if (cfgLanguageEl) cfgLanguageEl.value = cfg.language || 'English';
 
         if (cfgApiKeyEl) {
@@ -409,8 +380,7 @@
           if (cfg.has_api_key) {
             cfgApiKeyEl.placeholder = 'Key configured (leave blank to keep)';
           } else {
-            const defs = PROVIDER_DEFAULTS[cfg.provider] || PROVIDER_DEFAULTS.anthropic;
-            cfgApiKeyEl.placeholder = defs.keyPlaceholder;
+            cfgApiKeyEl.placeholder = 'sk-ant-...';
           }
         }
       }
@@ -438,31 +408,13 @@
     btnCancelSettingsEl.addEventListener('click', closeSettingsModal);
   }
 
-  // Handle provider dropdown switch with smart defaults
-  if (cfgProviderEl) {
-    cfgProviderEl.addEventListener('change', function () {
-      const p = cfgProviderEl.value;
-      const defs = PROVIDER_DEFAULTS[p];
-      if (defs) {
-        if (cfgModelEl) cfgModelEl.value = defs.model;
-        if (cfgBaseUrlEl) cfgBaseUrlEl.value = defs.baseUrl;
-        if (cfgApiKeyEl) {
-          cfgApiKeyEl.value = '';
-          cfgApiKeyEl.placeholder = defs.keyPlaceholder;
-        }
-      }
-    });
-  }
-
   // Handle saving configuration
   if (settingsFormEl) {
     settingsFormEl.addEventListener('submit', async function (e) {
       e.preventDefault();
 
       const payload = {
-        provider: cfgProviderEl ? cfgProviderEl.value : 'anthropic',
         model: cfgModelEl ? cfgModelEl.value.trim() : '',
-        base_url: cfgBaseUrlEl ? cfgBaseUrlEl.value.trim() : '',
         api_key: cfgApiKeyEl ? cfgApiKeyEl.value.trim() : '',
         language: cfgLanguageEl ? cfgLanguageEl.value : 'English',
       };
@@ -476,7 +428,7 @@
       try {
         const resp = await fetch('/config', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', 'X-HUD-Token': HUD_TOKEN },
           body: JSON.stringify(payload),
         });
 
@@ -511,9 +463,7 @@
   if (btnTestSettingsEl) {
     btnTestSettingsEl.addEventListener('click', async function () {
       const payload = {
-        provider: cfgProviderEl ? cfgProviderEl.value : 'anthropic',
         model: cfgModelEl ? cfgModelEl.value.trim() : '',
-        base_url: cfgBaseUrlEl ? cfgBaseUrlEl.value.trim() : '',
         api_key: cfgApiKeyEl ? cfgApiKeyEl.value.trim() : '',
       };
 
@@ -529,7 +479,7 @@
       try {
         const resp = await fetch('/test_config', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', 'X-HUD-Token': HUD_TOKEN },
           body: JSON.stringify(payload),
         });
 

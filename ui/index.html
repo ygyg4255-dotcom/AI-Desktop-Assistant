@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="hud-token" content="__HUD_TOKEN__" />
   <title>A.L.T.R.O.N // AI DESKTOP ASSISTANT</title>
   <link rel="stylesheet" href="style.css" />
 </head>
@@ -96,14 +97,14 @@
           </div>
         </div>
 
-        <div class="card config-card" id="card-ai-config" title="Click to configure AI Provider & Settings">
+        <div class="card config-card" id="card-ai-config" title="Click to configure Claude & Settings">
           <div class="card-header">
             <span class="card-tag">AI CONFIGURATION</span>
             <span class="settings-hint">⚙️</span>
           </div>
           <div class="config-row">
             <span class="cfg-key">AI Engine</span>
-            <span id="display-ai-engine" class="cfg-val">Claude 3.5 Sonnet</span>
+            <span id="display-ai-engine" class="cfg-val">Claude</span>
           </div>
           <div class="config-row">
             <span class="cfg-key">Language</span>
@@ -229,29 +230,13 @@
       </div>
       <form id="settings-form" class="modal-body">
         <div class="form-group">
-          <label for="cfg-provider">AI Provider</label>
-          <select id="cfg-provider" class="form-control">
-            <option value="ollama">Ollama (Local)</option>
-            <option value="anthropic">Anthropic (Claude)</option>
-            <option value="openai">OpenAI</option>
-            <option value="gemini">Google Gemini</option>
-            <option value="custom">Custom OpenAI-Compatible</option>
-          </select>
-        </div>
-
-        <div class="form-group">
           <label for="cfg-model">Model Name</label>
-          <input type="text" id="cfg-model" class="form-control" placeholder="e.g. claude-3-5-sonnet-20241022" />
+          <input type="text" id="cfg-model" class="form-control" placeholder="e.g. claude-sonnet-5-5" />
         </div>
 
         <div class="form-group">
-          <label for="cfg-api-key">API Key <span class="label-hint">(optional for local Ollama)</span></label>
-          <input type="password" id="cfg-api-key" class="form-control" placeholder="Enter API key" autocomplete="off" />
-        </div>
-
-        <div class="form-group">
-          <label for="cfg-base-url">API Base URL</label>
-          <input type="text" id="cfg-base-url" class="form-control" placeholder="https://api.anthropic.com" />
+          <label for="cfg-api-key">Anthropic API Key</label>
+          <input type="password" id="cfg-api-key" class="form-control" placeholder="sk-ant-..." autocomplete="off" />
         </div>
 
         <div class="form-group">
