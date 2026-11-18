@@ -2,6 +2,7 @@
 import os
 import sys
 import json
+import threading
 from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Optional, Dict, Any
@@ -16,6 +17,40 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 ANTHROPIC_API_URL = "https://api.anthropic.com"
 DEFAULT_MODEL = "claude-sonnet-5-5"
 DEFAULT_FAST_MODEL = "claude-haiku-5-5"
+
+
+# Cached active config for the HUD /status poll (invalidated by save_ai_config or .env mtime).
+_CONFIG_LOCK = threading.Lock()
+_CONFIG_VERSION = 0
+_CONFIG_CACHE: Dict[str, Any] = {"stamp": None, "env_path": None, "value": None}
+
+
+def _env_stamp(env_path: Optional[Path]) -> Any:
+    try:
+        st = env_path.stat() if env_path else None
+        return (st.st_mtime_ns, st.st_size) if st else None
+    except OSError:
+        return None
+
+
+def invalidate_config_cache() -> None:
+    global _CONFIG_VERSION
+    with _CONFIG_LOCK:
+        _CONFIG_VERSION += 1
+
+
+def get_active_config_dict() -> Dict[str, Any]:
+    """Masked active config; re-reads .env only when it changed or was just saved."""
+    with _CONFIG_LOCK:
+        c = _CONFIG_CACHE
+        if (c["value"] is not None
+                and c["stamp"] == (_CONFIG_VERSION, _env_stamp(c["env_path"]))):
+            return dict(c["value"])
+        version = _CONFIG_VERSION
+        s = Settings()
+        value = s.get_config_dict()
+        c.update(stamp=(version, _env_stamp(s.env_path)), env_path=s.env_path, value=value)
+        return dict(value)
 
 
 def _unquote_env_value(value: str) -> str:
@@ -125,6 +160,7 @@ def save_ai_config(
 
     for k, v in updates.items():
         os.environ[k] = str(v)
+    invalidate_config_cache()
 
     return updates
 

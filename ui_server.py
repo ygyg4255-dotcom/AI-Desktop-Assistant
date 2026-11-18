@@ -29,7 +29,7 @@ STATUS_FILE = runtime_file("status.json")
 
 # Import settings and hud helpers
 try:
-    from src.config.settings import Settings, save_ai_config, is_masked_key
+    from src.config.settings import Settings, save_ai_config, is_masked_key, get_active_config_dict
 except Exception:
     Settings = None
     save_ai_config = None
@@ -89,7 +89,7 @@ def get_active_config() -> Dict[str, Any]:
     """Retrieve current AI configuration with masked API key."""
     if Settings is not None:
         try:
-            return Settings().get_config_dict()
+            return get_active_config_dict()
         except Exception:
             pass
     return {
