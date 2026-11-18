@@ -1,7 +1,7 @@
 """Unified Altron Entry Point.
 
 Launches and coordinates all Altron subsystems concurrently with full fault isolation:
-- HUD Web Interface Server (Flask / HTTP fallback on port 5000 / 5001)
+- HUD Web Interface Server (Flask on 127.0.0.1, port 5000 or 5001 if busy)
 - Continuous Voice Listener Loop (FastVAD + faster-whisper + TTS playback)
 - Telegram Remote Control Bot Listener
 """

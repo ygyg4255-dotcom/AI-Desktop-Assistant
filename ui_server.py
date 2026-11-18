@@ -21,33 +21,13 @@ import webbrowser
 from pathlib import Path
 from typing import Optional, Callable, Any, Dict
 
-from src.config.paths import runtime_file
+from flask import Flask, send_from_directory, Response, request, jsonify
+
+from src.config.settings import Settings, save_ai_config, is_masked_key, get_active_config_dict
+from src.services.hud_status import get_hud_status, clear_hud_logs
 
 BASE_DIR = Path(__file__).resolve().parent
 UI_DIR = BASE_DIR / "ui"
-STATUS_FILE = runtime_file("status.json")
-
-# Import settings and hud helpers
-try:
-    from src.config.settings import Settings, save_ai_config, is_masked_key, get_active_config_dict
-except Exception:
-    Settings = None
-    save_ai_config = None
-    is_masked_key = None
-
-try:
-    from src.services.hud_status import get_hud_status, clear_hud_logs
-except Exception:
-    def get_hud_status():
-        if STATUS_FILE.exists():
-            try:
-                return json.loads(STATUS_FILE.read_text(encoding="utf-8"))
-            except Exception:
-                pass
-        return {"state": "Idle", "updated_at": time.time(), "logs": []}
-
-    def clear_hud_logs():
-        pass
 
 # Per-launch secret, delivered only inside the served index.html.
 _HUD_TOKEN: str = secrets.token_urlsafe(32)
@@ -87,17 +67,7 @@ def set_config_updated_callback(cb: Callable[[Dict[str, Any]], None]) -> None:
 
 def get_active_config() -> Dict[str, Any]:
     """Retrieve current AI configuration with masked API key."""
-    if Settings is not None:
-        try:
-            return get_active_config_dict()
-        except Exception:
-            pass
-    return {
-        "model": os.environ.get("AI_MODEL", "claude-sonnet-5-5"),
-        "api_key":"••••••••" if os.environ.get("AI_API_KEY") else "",
-        "has_api_key": bool(os.environ.get("AI_API_KEY")),
-        "language": os.environ.get("ALTRON_LANGUAGE", "English"),
-    }
+    return get_active_config_dict()
 
 
 def _get_status_payload_str() -> str:
@@ -165,10 +135,8 @@ def open_hud_window(url: str) -> None:
 
 
 # --- Flask application ---
-# Flask is a hard requirement (requirements.txt). The former http.server
-# fallback was removed so there is exactly one, hardened request path.
-from flask import Flask, send_from_directory, Response, request, jsonify
-
+# Flask is a hard requirement (requirements.txt): there is exactly one, hardened
+# request path and no http.server fallback.
 flask_app = Flask(__name__, static_folder=None)
 
 
@@ -233,7 +201,7 @@ def _validate_config_payload(data: Dict[str, Any]) -> Optional[str]:
             return f"{key} must not contain line breaks"
     api_key = data.get("api_key", "")
     # Masked/empty values mean "keep the stored key"; anything else must be a real key.
-    if not (is_masked_key(api_key) if is_masked_key else not api_key.strip()):
+    if not is_masked_key(api_key):
         if not api_key.isascii() or any(c.isspace() for c in api_key.strip()):
             return "api_key must contain only ASCII characters and no whitespace"
     return None
@@ -271,15 +239,14 @@ def config_route():
     if problem:
         return _error(400, problem)
 
-    if save_ai_config:
-        try:
-            save_ai_config(
-                model=data.get("model", ""),
-                api_key=data.get("api_key", "").strip(),
-                language=data.get("language", "English"),
-            )
-        except OSError:
-            return _error(500, "could not write settings to .env")
+    try:
+        save_ai_config(
+            model=data.get("model", ""),
+            api_key=data.get("api_key", "").strip(),
+            language=data.get("language", "English"),
+        )
+    except OSError:
+        return _error(500, "could not write settings to .env")
 
     updated = get_active_config()
     if _CONFIG_UPDATED_CALLBACK:
