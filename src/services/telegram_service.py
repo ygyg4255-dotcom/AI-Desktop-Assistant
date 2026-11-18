@@ -3,7 +3,6 @@
 Provides two-way remote control over Telegram long-polling and delivery functions.
 """
 import os
-import re
 import json
 import threading
 import time
@@ -13,20 +12,11 @@ from typing import Callable, Optional
 
 from PySide6.QtCore import QThread, Signal
 from src.config.paths import runtime_file
+from src.config.log import get_logger, redact_secrets  # redact_secrets re-exported (audit S6)
 from src.config.settings import get_config_value
 from src.services.signals import CallbackSignal
 
-_BOT_TOKEN_RE = re.compile(r"bot\d{5,}:[A-Za-z0-9_-]{20,}")
-
-
-def redact_secrets(text: object, *tokens: Optional[str]) -> str:
-    """Strip Telegram bot tokens from text before it is printed or returned (audit S6)."""
-    out = str(text)
-    for token in tokens:
-        if token:
-            out = out.replace(token, "<redacted>")
-    return _BOT_TOKEN_RE.sub("bot<redacted>", out)
-
+logger = get_logger(__name__)
 
 def chunk_message(text: str, max_length: int = 4000) -> list[str]:
     """Split long text into safe chunks under Telegram's 4096-character limit."""
@@ -100,10 +90,10 @@ def send_telegram_message(text: str, token: Optional[str] = None, chat_id: Optio
                     all_ok = False
         except urllib.error.HTTPError as e:
             err_body = e.read().decode("utf-8", errors="ignore")
-            print(f"[Telegram Service] HTTPError {e.code}: {redact_secrets(err_body, bot_token)}")
+            logger.warning("sendMessage HTTPError %s: %s", e.code, redact_secrets(err_body, bot_token))
             all_ok = False
         except Exception as e:
-            print(f"[Telegram Service] Send error: {redact_secrets(e, bot_token)}")
+            logger.warning("sendMessage failed: %s", redact_secrets(e, bot_token))
             all_ok = False
 
     return all_ok
@@ -153,7 +143,7 @@ def _post_file(
     except OSError:
         return False
     if size > max_bytes:
-        print(f"[Telegram Service] {method}: file too large ({size} > {max_bytes} bytes), not sent")
+        logger.warning("%s: file too large (%d > %d bytes), not sent", method, size, max_bytes)
         return False
 
     data = {"chat_id": str(target_chat_id)}
@@ -171,7 +161,7 @@ def _post_file(
             )
         return bool(resp.json().get("ok"))
     except Exception as err:
-        print(f"[Telegram Service] {method} failed: {redact_secrets(err, bot_token)}")
+        logger.warning("%s failed: %s", method, redact_secrets(err, bot_token))
         return False
 
 
@@ -237,7 +227,7 @@ class TelegramBotApi:
             with urllib.request.urlopen(req, timeout=self._timeout) as resp:
                 return json.loads(resp.read().decode("utf-8"))
         except Exception as err:
-            print(f"[Telegram Service] {method} failed: {type(err).__name__}")
+            logger.warning("Bot API %s failed: %s", method, type(err).__name__)
             return {"ok": False}
 
 
@@ -327,7 +317,7 @@ class TelegramApprovalBridge:
         chat_id = str(((cq.get("message") or {}).get("chat") or {}).get("id", ""))
         user_id = str((cq.get("from") or {}).get("id", ""))
         if chat_id != self._chat_id or user_id != self._owner_user_id:
-            print("[Telegram Worker] Rejected approval callback from unauthorized chat/user")
+            logger.warning("Rejected approval callback from unauthorized chat/user")
             self._answer(cq_id, "Not authorized.")
             return "forbidden"
 
@@ -367,8 +357,10 @@ def load_update_offset(token: Optional[str]) -> int:
         data = json.loads(runtime_file(_OFFSET_FILE).read_text(encoding="utf-8"))
         if data.get("bot_id") == _bot_id(token):
             return max(0, int(data.get("offset", 0)))
-    except Exception:
+    except FileNotFoundError:
         pass
+    except Exception as err:
+        logger.warning("Ignoring unreadable Telegram offset file: %s", type(err).__name__)
     return 0
 
 
@@ -380,7 +372,7 @@ def save_update_offset(token: Optional[str], offset: int) -> None:
         tmp.write_text(json.dumps({"bot_id": _bot_id(token), "offset": int(offset)}), encoding="utf-8")
         os.replace(tmp, target)
     except Exception as err:
-        print(f"[Telegram Worker] Could not persist update offset: {type(err).__name__}")
+        logger.warning("Could not persist Telegram update offset: %s", type(err).__name__)
 
 
 class TelegramRemoteListener:
@@ -408,10 +400,10 @@ class TelegramRemoteListener:
     def run(self) -> None:
         """Poll getUpdates and emit remote_command_received for authorized messages."""
         if not self._token or not self._allowed_chat_id:
-            print("[Telegram Worker] Error: Missing bot token or allowed chat ID, polling aborted.")
+            logger.error("Missing bot token or allowed chat ID; Telegram polling aborted")
             return
 
-        print(f"[Telegram Worker] Started polling Telegram getUpdates for chat_id: {self._allowed_chat_id}")
+        logger.info("Started polling Telegram getUpdates for chat_id %s", self._allowed_chat_id)
 
         while self._is_running:
             try:
@@ -443,7 +435,7 @@ class TelegramRemoteListener:
                             try:
                                 self._callback_handler(callback_query)
                             except Exception as cb_err:
-                                print(f"[Telegram Worker] Callback handling error: {redact_secrets(cb_err, self._token)}")
+                                logger.error("Callback handling error: %s", redact_secrets(cb_err, self._token))
                         continue
 
                     message = update.get("message") or update.get("channel_post")
@@ -455,17 +447,17 @@ class TelegramRemoteListener:
 
                     # Strictly enforce authorization check
                     if chat_id_str != self._allowed_chat_id:
-                        print(f"[Telegram Worker] Unauthorized message received from chat_id {chat_id_str} (expected {self._allowed_chat_id})")
+                        logger.warning("Ignored message from unauthorized chat_id %s", chat_id_str)
                         continue
 
                     text = message.get("text", "").strip()
                     if text:
-                        print(f"[Telegram Worker] Incoming remote command from Telegram: {text}")
+                        logger.info("Incoming remote command from Telegram: %s", text)
                         self.remote_command_received.emit(text)
 
             except Exception as e:
                 # On network glitch or timeout, back off briefly
-                print(f"[Telegram Worker] Polling error: {redact_secrets(e, self._token)}")
+                logger.warning("Telegram polling error: %s", redact_secrets(e, self._token))
                 time.sleep(2.0)
 
 

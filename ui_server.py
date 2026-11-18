@@ -11,6 +11,7 @@ import os
 import sys
 import hmac
 import json
+import logging
 import secrets
 import socket
 import shutil
@@ -23,8 +24,11 @@ from typing import Optional, Callable, Any, Dict
 
 from flask import Flask, send_from_directory, Response, request, jsonify
 
+from src.config.log import get_logger, setup_logging
 from src.config.settings import get_active_config_dict, get_config_value, is_masked_key, save_ai_config
 from src.services.hud_status import get_hud_status, clear_hud_logs
+
+logger = get_logger("hud")
 
 BASE_DIR = Path(__file__).resolve().parent
 UI_DIR = BASE_DIR / "ui"
@@ -98,7 +102,8 @@ def _get_default_browser() -> tuple[Optional[str], Optional[str]]:
             parts = shlex.split(cmd, posix=False)
             exe = parts[0].strip('"') if parts else ""
             return prog_id, exe
-    except Exception:
+    except Exception as err:
+        logger.debug("Default browser lookup failed: %s", err)
         return None, None
 
 
@@ -127,8 +132,8 @@ def open_hud_window(url: str) -> None:
                 "--window-name=A.L.T.R.O.N"
             ])
             return
-        except Exception:
-            pass
+        except Exception as err:
+            logger.warning("Could not open HUD in app mode, using default browser: %s", err)
 
     # 3. If not Chromium-based (e.g. Firefox) or resolution fails, open directly in default browser
     webbrowser.open(url)
@@ -252,8 +257,8 @@ def config_route():
     if _CONFIG_UPDATED_CALLBACK:
         try:
             _CONFIG_UPDATED_CALLBACK(updated)
-        except Exception as err:
-            print(f"[Config Callback Error] {err}")
+        except Exception:
+            logger.exception("Config-updated callback failed")
     return jsonify(updated)
 
 
@@ -278,6 +283,7 @@ def test_config_route():
         ok, msg = test_client.test_connection()
         return jsonify({"ok": ok, "message": msg})
     except Exception as e:
+        logger.warning("Connection test failed: %s", e)
         return jsonify({"ok": False, "message": str(e)})
 
 
@@ -341,7 +347,8 @@ def _is_port_in_use(host: str, port: int) -> bool:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.settimeout(0.4)
             return s.connect_ex((host, port)) == 0
-    except Exception:
+    except OSError as err:
+        logger.debug("Port probe %s:%s failed: %s", host, port, err)
         return False
 
 
@@ -365,12 +372,11 @@ def start_hud_server(
     actual_port = port
     if _is_port_in_use(host, actual_port):
         fallback_port = actual_port + 1
-        print(f"[ALTRON HUD] Port {actual_port} is already in use; falling back to port {fallback_port}")
+        logger.warning("Port %d is already in use; falling back to port %d", actual_port, fallback_port)
         actual_port = fallback_port
     _HUD_PORT = actual_port
 
     def _run():
-        import logging
         logging.getLogger("werkzeug").setLevel(logging.ERROR)
         flask_app.run(host=host, port=actual_port, debug=False, use_reloader=False)
 
@@ -383,14 +389,15 @@ def start_hud_server(
             open_hud_window(f"http://{host}:{actual_port}")
         threading.Thread(target=_open, daemon=True).start()
 
-    print(f"[ALTRON HUD] Radar interface online at http://{host}:{actual_port}")
+    logger.info("Radar interface online at http://%s:%d", host, actual_port)
     return thread
 
 
 if __name__ == "__main__":
+    setup_logging()
     server_thread = start_hud_server(host="127.0.0.1", port=5000, open_browser=True)
     try:
         while True:
             time.sleep(1)
     except KeyboardInterrupt:
-        print("\n[ALTRON HUD] Server stopped by user.")
+        logger.info("Server stopped by user")

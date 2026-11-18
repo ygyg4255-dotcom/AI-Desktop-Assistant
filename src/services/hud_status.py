@@ -8,7 +8,10 @@ from typing import Optional, Dict, Any, List
 
 import psutil
 
+from src.config.log import get_logger
 from src.config.paths import runtime_file
+
+logger = get_logger(__name__)
 
 STATUS_FILE = runtime_file("status.json")
 _LOCK = threading.Lock()
@@ -19,6 +22,16 @@ _MAX_LOGS = 50
 
 _METRICS_CACHE: Dict[str, Any] = {}
 _LAST_METRICS_FETCH: float = 0.0
+_WARNED: set = set()
+
+
+def _warn_once(key: str, msg: str, *args: Any) -> None:
+    """WARNING the first time a recurring failure happens, DEBUG afterwards (no log spam)."""
+    if key in _WARNED:
+        logger.debug(msg, *args)
+    else:
+        _WARNED.add(key)
+        logger.warning(msg, *args)
 
 
 def get_system_metrics() -> Dict[str, Any]:
@@ -43,8 +56,8 @@ def get_system_metrics() -> Dict[str, Any]:
                     if entries:
                         cpu_temp = entries[0].current
                         break
-        except Exception:
-            pass
+        except Exception as err:
+            logger.debug("CPU temperature unavailable: %s", err)
 
         _METRICS_CACHE = {
             "cpu_percent": round(cpu, 1),
@@ -60,8 +73,8 @@ def get_system_metrics() -> Dict[str, Any]:
             "battery_plugged": batt.power_plugged if batt else True,
             "net_online": True,
         }
-    except Exception:
-        pass
+    except Exception as err:
+        _warn_once("metrics", "Could not read system metrics: %s", err)
 
     _LAST_METRICS_FETCH = now
     return dict(_METRICS_CACHE)
@@ -80,12 +93,14 @@ def _flush_locked() -> None:
                 return
             except PermissionError:
                 time.sleep(0.01 * (attempt + 1))
+        _warn_once("flush-locked", "status.json is locked; skipped this snapshot")
         tmp.unlink(missing_ok=True)
-    except Exception:
+    except Exception as err:
+        _warn_once("flush", "Could not write status.json: %s", err)
         try:
             tmp.unlink(missing_ok=True)
-        except Exception:
-            pass
+        except OSError as cleanup_err:
+            logger.debug("Could not remove %s: %s", tmp.name, cleanup_err)
 
 
 def get_hud_status() -> Dict[str, Any]:

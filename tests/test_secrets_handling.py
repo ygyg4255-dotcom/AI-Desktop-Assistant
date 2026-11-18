@@ -18,20 +18,22 @@ def test_redact_secrets_removes_explicit_and_embedded_tokens():
     assert "AAEh" not in tg.redact_secrets(msg)  # pattern-based, no explicit token
 
 
-def test_send_error_print_never_contains_token(monkeypatch, capsys):
+def test_send_error_log_never_contains_token(monkeypatch, caplog):
     def boom(*a, **k):
         raise OSError(f"connect failed for https://api.telegram.org/bot{TOKEN}/sendMessage")
     monkeypatch.setattr(tg.urllib.request, "urlopen", boom)
     assert tg.send_telegram_message("hi", token=TOKEN, chat_id="1") is False
-    assert TOKEN not in capsys.readouterr().out
+    assert "sendMessage failed" in caplog.text
+    assert TOKEN not in caplog.text
 
 
-def test_http_error_body_is_redacted(monkeypatch, capsys):
+def test_http_error_body_is_redacted(monkeypatch, caplog):
     def boom(*a, **k):
         raise urllib.error.HTTPError("u", 401, "x", {}, io.BytesIO(f"bad bot{TOKEN}".encode()))
     monkeypatch.setattr(tg.urllib.request, "urlopen", boom)
     tg.send_telegram_message("hi", token=TOKEN, chat_id="1")
-    assert TOKEN not in capsys.readouterr().out
+    assert "HTTPError 401" in caplog.text
+    assert TOKEN not in caplog.text
 
 
 def test_load_env_file_strips_quotes(tmp_path):
@@ -51,7 +53,7 @@ def test_save_ai_config_roundtrips_values_with_spaces(tmp_path, monkeypatch):
     assert v["AI_API_KEY"] == "sk-test-1234567"
 
 
-def test_save_ai_config_surfaces_write_failure_without_leaking_key(tmp_path, monkeypatch, capsys):
+def test_save_ai_config_surfaces_write_failure_without_leaking_key(tmp_path, monkeypatch, caplog):
     env = tmp_path / ".env"
     monkeypatch.setattr(settings.os, "environ", dict(settings.os.environ))
     real_open = open
@@ -63,5 +65,4 @@ def test_save_ai_config_surfaces_write_failure_without_leaking_key(tmp_path, mon
     monkeypatch.setattr("builtins.open", fail_write)
     with pytest.raises(PermissionError):
         settings.save_ai_config("m", "sk-secret-value-123", "English", env_path=env)
-    out = capsys.readouterr().out
-    assert "Failed to write" in out and "sk-secret-value-123" not in out
+    assert "Failed to write" in caplog.text and "sk-secret-value-123" not in caplog.text

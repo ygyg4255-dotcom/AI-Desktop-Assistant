@@ -72,12 +72,13 @@ def test_oversize_file_rejected_before_open(tmp_path, monkeypatch):
     post.assert_not_called()
 
 
-def test_upload_error_is_redacted(tmp_path, capsys):
+def test_upload_error_is_redacted(tmp_path, caplog):
     f = tmp_path / "a.pdf"
     f.write_bytes(b"x")
     with mock.patch("requests.post", side_effect=OSError(f"boom /bot{TOKEN}/sendDocument")):
         assert tg.send_telegram_document(str(f), token=TOKEN, chat_id="5") is False
-    assert TOKEN not in capsys.readouterr().out
+    assert "sendDocument failed" in caplog.text
+    assert TOKEN not in caplog.text
 
 
 def test_long_caption_truncated(tmp_path):

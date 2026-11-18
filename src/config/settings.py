@@ -16,6 +16,10 @@ from dataclasses import dataclass, field
 from typing import Optional, Dict, Any
 from dotenv import load_dotenv
 
+from src.config.log import get_logger
+
+logger = get_logger(__name__)
+
 load_dotenv(override=True)
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
@@ -82,7 +86,8 @@ def read_env_vars(env_path: Optional[Path] = None) -> Dict[str, str]:
             return dict(_ENV_CACHE["vars"])
     try:
         values = load_env_file(path)
-    except (OSError, UnicodeDecodeError):
+    except (OSError, UnicodeDecodeError) as err:
+        logger.warning("Could not read %s, ignoring it: %s", path.name, type(err).__name__)
         values = {}
     with _ENV_LOCK:
         _ENV_CACHE.update(path=path, stamp=stamp, vars=dict(values))
@@ -191,7 +196,7 @@ def save_ai_config(
                 lines = f.readlines()
         except Exception as err:
             # Rebuilding from scratch would drop unrelated settings, so refuse to overwrite.
-            print(f"[Config] Could not read {env_path.name}: {type(err).__name__}")
+            logger.error("Could not read %s: %s", env_path.name, type(err).__name__)
             raise
 
     keys_written = set()
@@ -217,7 +222,7 @@ def save_ai_config(
             f.writelines(new_lines)
     except Exception as err:
         # Never include values (they may hold the API key) in the message.
-        print(f"[Config] Failed to write {env_path.name}: {type(err).__name__}")
+        logger.error("Failed to write %s: %s", env_path.name, type(err).__name__)
         raise
 
     for k, v in updates.items():

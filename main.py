@@ -17,6 +17,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.config import Settings
+from src.config.log import get_logger, setup_logging
 from src.config.settings import get_config_value
 from src.storage.db import Database
 from src.services import AIClient, OmniRouteManager
@@ -42,13 +43,15 @@ from src.services.telegram_service import (
 )
 from ui_server import start_hud_server
 
+logger = get_logger("main")
+
 
 def apply_ai_config(ai_client, cfg: dict) -> None:
     """Hot-reload model/key. The HUD payload only carries a masked key, so the
     real key is always loaded from Settings/.env, never taken from cfg."""
     model = cfg.get("model", "")
     real_key = Settings().ai_api_key or None
-    print(f"[AI Config] Hot-reloading AI model: {model}")
+    logger.info("Hot-reloading AI model: %s", model)
     ai_client.update_config(model=model, api_key=real_key)
 
 
@@ -85,6 +88,9 @@ def make_approval_listener(bridge_ref: list, notify_telegram=send_telegram_messa
 
 def main() -> None:
     """Coordinate and supervise all Altron subsystems concurrently."""
+    log_path = setup_logging()
+    logger.info("Starting Altron (log file: %s)", log_path)
+
     # Initialize shared HUD status
     init_hud_status()
 
@@ -93,8 +99,8 @@ def main() -> None:
     database = Database(settings.db_path)
     try:
         database.initialize()
-    except Exception as db_err:
-        print(f"[Database Error] {db_err}")
+    except Exception:
+        logger.exception("Database initialisation failed")
 
     # Auto-start OmniRoute proxy only if configured for local OmniRoute port
     try:
@@ -103,7 +109,7 @@ def main() -> None:
             omniroute_manager = OmniRouteManager()
             omniroute_manager.start_if_needed(settings.ai_base_url)
     except Exception as omni_err:
-        print(f"[OmniRoute Warning] {omni_err}")
+        logger.warning("OmniRoute auto-start skipped: %s", omni_err)
 
     # Initialize Universal AI client and Agent Executor
     ai_client = AIClient(
@@ -138,12 +144,12 @@ def main() -> None:
         clean_cmd = cmd_text.strip()
         if not clean_cmd:
             return
-        print(f"[HUD Command] Received: \"{clean_cmd}\"")
+        logger.info("HUD command received: %r", clean_cmd)
         update_hud_status(state="Thinking", log_entry=f"User: {clean_cmd}")
 
         def _on_complete(res):
             if res and res.content:
-                print(f"[Altron] {res.content}")
+                logger.info("Altron: %s", res.content)
                 update_hud_status(state="Idle", log_entry=f"Altron: {res.content}")
                 send_telegram_message_async(res.content)
                 if tts_manager.is_enabled and not tts_manager.is_muted:
@@ -158,7 +164,7 @@ def main() -> None:
             ) if getattr(step, "content", None) else None,
             on_complete=_on_complete,
             on_error=lambda err: (
-                print(f"[HUD Command Error] {err}"),
+                logger.error("HUD command failed: %s", err),
                 update_hud_status(state="Idle")
             ),
             origin=CHANNEL_HUD,
@@ -174,8 +180,8 @@ def main() -> None:
                 on_config_updated=_on_ai_config_updated,
                 approval_manager=approvals,
             )
-        except Exception as hud_err:
-            print(f"[HUD Server Subsystem Error] {hud_err}")
+        except Exception:
+            logger.exception("HUD server subsystem failed")
 
     hud_thread = threading.Thread(target=_run_hud, name="AltronHUDThread", daemon=True)
     hud_thread.start()
@@ -205,7 +211,7 @@ def main() -> None:
                     listen_vad = getattr(worker, "last_listen_duration", 0.0)
                     stt_dur = getattr(worker, "last_stt_duration", 0.0)
 
-                    print(f"[Voice] Recognized: \"{clean_text}\"")
+                    logger.info("Voice recognized: %r", clean_text)
                     update_hud_status(state="Thinking", log_entry=f"Voice: {clean_text}")
 
                     t_agent_start = time.perf_counter()
@@ -224,7 +230,7 @@ def main() -> None:
                         agent_time = time.perf_counter() - t_agent_start
 
                         if response and response.content:
-                            print(f"[Altron] {response.content}")
+                            logger.info("Altron: %s", response.content)
                             update_hud_status(log_entry=f"Altron: {response.content}")
                             send_telegram_message_async(response.content)
 
@@ -233,26 +239,24 @@ def main() -> None:
                             tts_init_time = time.perf_counter() - t_tts_start
                     except Exception as proc_err:
                         agent_time = time.perf_counter() - t_agent_start
-                        print(f"[Agent Execution Error] {proc_err}")
+                        logger.error("Agent execution failed for voice command: %s", proc_err)
 
                     total_time = listen_vad + stt_dur + agent_time + tts_init_time
-                    print(
-                        f"[Voice Timing] Listen/VAD: {listen_vad:.2f}s | "
-                        f"STT: {stt_dur:.2f}s | "
-                        f"Agent/LLM: {agent_time:.2f}s | "
-                        f"TTS Init: {tts_init_time:.2f}s | "
-                        f"Total: {total_time:.2f}s"
+                    logger.info(
+                        "Voice timing: listen/VAD %.2fs | STT %.2fs | agent/LLM %.2fs | "
+                        "TTS init %.2fs | total %.2fs",
+                        listen_vad, stt_dur, agent_time, tts_init_time, total_time,
                     )
                     update_hud_status(state="Idle")
 
                 # Plain-Python listener: callbacks run on this thread (no Qt event loop).
                 worker.text_recognized.connect(_on_recognized)
-                worker.error_occurred.connect(lambda err: print(f"[Voice Error] {err}"))
+                worker.error_occurred.connect(lambda err: logger.warning("Voice error: %s", err))
                 worker.run()
                 if not shutdown_event.is_set():
                     shutdown_event.wait(2)  # listener ended on its own: back off before restarting
-            except Exception as voice_err:
-                print(f"[Voice Subsystem Error] {voice_err}")
+            except Exception:
+                logger.exception("Voice subsystem failed; restarting in 2s")
                 time.sleep(2)
 
     voice_thread = threading.Thread(target=_run_voice, name="AltronVoiceThread", daemon=True)
@@ -276,7 +280,7 @@ def main() -> None:
 
     def _run_telegram():
         if not bot_token or not chat_id or str(bot_token).strip() == "" or str(chat_id).strip() == "":
-            print("[Telegram] Warning: Bot token or chat ID is not configured. Telegram listener disabled.")
+            logger.warning("Telegram bot token or chat ID is not configured; Telegram listener disabled")
             return
 
         while not shutdown_event.is_set():
@@ -292,12 +296,12 @@ def main() -> None:
                     if not text or not text.strip():
                         return
                     clean_cmd = text.strip()
-                    print(f"[Telegram Worker] Incoming remote command: \"{clean_cmd}\"")
+                    logger.info("Telegram command received: %r", clean_cmd)
                     update_hud_status(state="Thinking", log_entry=f"Telegram: {clean_cmd}")
 
                     def _on_complete(res):
                         if res and res.content:
-                            print(f"[Telegram Response] {res.content}")
+                            logger.info("Altron (Telegram reply): %s", res.content)
                             update_hud_status(state="Idle", log_entry=f"Altron: {res.content}")
                             send_telegram_message_async(res.content)
                             if tts_manager.is_enabled and not tts_manager.is_muted:
@@ -306,7 +310,7 @@ def main() -> None:
                     executor.process(
                         user_message=clean_cmd,
                         on_complete=_on_complete,
-                        on_error=lambda err: print(f"[Telegram Error] {err}"),
+                        on_error=lambda err: logger.error("Telegram command failed: %s", err),
                         origin=CHANNEL_TELEGRAM,
                     )
 
@@ -314,8 +318,8 @@ def main() -> None:
                 tg_worker.run()
                 if not shutdown_event.is_set():
                     shutdown_event.wait(5)  # listener ended on its own: back off before restarting
-            except Exception as tg_err:
-                print(f"[Telegram Subsystem Error] {tg_err}")
+            except Exception:
+                logger.exception("Telegram subsystem failed; restarting in 5s")
                 time.sleep(5)
 
     tg_thread = threading.Thread(target=_run_telegram, name="AltronTelegramThread", daemon=True)
@@ -325,35 +329,35 @@ def main() -> None:
     # 4. Online Readiness Banner & Main Thread Supervision Loop
     # -------------------------------------------------------------
     update_hud_status(state="Idle")
-    print("Altron is online.", flush=True)
+    logger.info("Altron is online.")
 
     try:
         while not shutdown_event.is_set():
             time.sleep(1)
     except KeyboardInterrupt:
-        print("\n[Altron] Shutting down gracefully...")
+        logger.info("Shutting down gracefully...")
         shutdown_event.set()
         if active_voice_worker[0]:
             try:
                 active_voice_worker[0].abort()
-            except Exception:
-                pass
+            except Exception as err:
+                logger.warning("Voice listener did not stop cleanly: %s", err)
         if active_tg_worker[0]:
             try:
                 active_tg_worker[0].stop()
-            except Exception:
-                pass
+            except Exception as err:
+                logger.warning("Telegram listener did not stop cleanly: %s", err)
         try:
             executor.cancel()
             approvals.stop()
-        except Exception:
-            pass
+        except Exception as err:
+            logger.warning("Executor/approvals did not stop cleanly: %s", err)
         try:
             tts_manager.stop()
-        except Exception:
-            pass
+        except Exception as err:
+            logger.warning("TTS did not stop cleanly: %s", err)
         update_hud_status(state="Offline")
-        print("[Altron] All subsystems stopped cleanly.")
+        logger.info("All subsystems stopped.")
 
 
 if __name__ == "__main__":
