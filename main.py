@@ -22,6 +22,12 @@ from src.config import Settings
 from src.storage.db import Database
 from src.services import AIClient, OmniRouteManager
 from src.agent.executor import AgentExecutor
+from src.agent.approvals import (
+    ApprovalManager,
+    CHANNEL_HUD,
+    CHANNEL_TELEGRAM,
+    CHANNEL_VOICE,
+)
 from src.services.hud_status import init_hud_status, update_hud_status
 from src.services.voice_service import (
     TTSManager,
@@ -30,6 +36,8 @@ from src.services.voice_service import (
     parse_wake_word,
 )
 from src.services.telegram_service import (
+    TelegramApprovalBridge,
+    TelegramBotApi,
     TelegramRemoteWorker,
     send_telegram_message_async,
 )
@@ -43,6 +51,37 @@ def apply_ai_config(ai_client, cfg: dict) -> None:
     real_key = Settings().ai_api_key or None
     print(f"[AI Config] Hot-reloading AI model: {model}")
     ai_client.update_config(model=model, api_key=real_key)
+
+
+def make_approval_listener(bridge_ref: list, notify_telegram=send_telegram_message_async):
+    """Deliver approval events to the HUD log and (when configured) Telegram.
+
+    bridge_ref[0] is the TelegramApprovalBridge, or None if Telegram is disabled.
+    """
+    def _listener(event: str, req) -> None:
+        bridge = bridge_ref[0]
+        if event == "created":
+            update_hud_status(log_entry=f"Approval required: {req.tool_name} — {req.summary} (approve in the HUD panel)")
+            # telegram origin: inline keyboard; voice origin: HUD + Telegram if configured.
+            if bridge is not None and req.channel in (CHANNEL_TELEGRAM, CHANNEL_VOICE):
+                bridge.send_request(req)
+        elif event == "resolved":
+            update_hud_status(log_entry=f"Approval {req.status}: {req.tool_name}")
+            if bridge is not None:
+                bridge.on_resolved(req)
+        elif event == "executed":
+            res = req.result
+            if res is not None and getattr(res, "success", False):
+                out = getattr(res, "output", None)
+                detail = (out.get("message") if isinstance(out, dict) else None) or "done"
+                text = f"✅ {req.tool_name}: {detail}"
+            else:
+                err = getattr(res, "error", None) or req.meta.get("run_error") or "failed"
+                text = f"❌ {req.tool_name} failed: {err}"
+            update_hud_status(log_entry=f"Altron: {text}")
+            if req.channel == CHANNEL_TELEGRAM and bridge is not None:
+                notify_telegram(text)
+    return _listener
 
 
 def main() -> None:
@@ -79,7 +118,13 @@ def main() -> None:
         max_tokens=settings.max_tokens,
         timeout=settings.request_timeout,
     )
-    executor = AgentExecutor(ai_client=ai_client, database=database)
+    # Out-of-band approvals: gated tool calls never block; they wait for the
+    # owner's decision in the HUD panel or a Telegram inline keyboard.
+    approvals = ApprovalManager()
+    executor = AgentExecutor(ai_client=ai_client, database=database, approvals=approvals)
+    tg_bridge = [None]
+    approvals.add_listener(make_approval_listener(tg_bridge))
+    approvals.start_sweeper(interval=5.0)
     tts_manager = TTSManager(enabled=True)
 
     shutdown_event = threading.Event()
@@ -120,6 +165,7 @@ def main() -> None:
                 print(f"[HUD Command Error] {err}"),
                 update_hud_status(state="Idle")
             ),
+            origin=CHANNEL_HUD,
         )
 
     def _run_hud():
@@ -130,6 +176,7 @@ def main() -> None:
                 open_browser=True,
                 command_handler=_on_hud_command,
                 on_config_updated=_on_ai_config_updated,
+                approval_manager=approvals,
             )
         except Exception as hud_err:
             print(f"[HUD Server Subsystem Error] {hud_err}")
@@ -175,6 +222,7 @@ def main() -> None:
                             on_step=lambda step: update_hud_status(
                                 log_entry=f"Step: {step.content}"
                             ) if getattr(step, "content", None) else None,
+                            origin=CHANNEL_VOICE,
                         )
                         response = future.result(timeout=120)
                         agent_time = time.perf_counter() - t_agent_start
@@ -230,6 +278,15 @@ def main() -> None:
         except Exception:
             pass
 
+    # Approval callbacks need BOTH the owner's chat id and user id. In a private
+    # chat they are equal; set TELEGRAM_OWNER_USER_ID when using a group chat.
+    owner_user_id = os.environ.get("TELEGRAM_OWNER_USER_ID") or chat_id
+    if bot_token and chat_id and str(bot_token).strip() and str(chat_id).strip():
+        tg_bridge[0] = TelegramApprovalBridge(
+            approvals, TelegramBotApi(str(bot_token).strip()),
+            chat_id=str(chat_id).strip(), owner_user_id=str(owner_user_id).strip(),
+        )
+
     def _run_telegram():
         if not bot_token or not chat_id or str(bot_token).strip() == "" or str(chat_id).strip() == "":
             print("[Telegram] Warning: Bot token or chat ID is not configured. Telegram listener disabled.")
@@ -237,7 +294,11 @@ def main() -> None:
 
         while not shutdown_event.is_set():
             try:
-                tg_worker = TelegramRemoteWorker(bot_token=bot_token, allowed_chat_id=chat_id)
+                tg_worker = TelegramRemoteWorker(
+                    bot_token=bot_token,
+                    allowed_chat_id=chat_id,
+                    callback_handler=tg_bridge[0].handle_callback_query if tg_bridge[0] else None,
+                )
                 active_tg_worker[0] = tg_worker
 
                 def _on_telegram_command(text: str):
@@ -259,6 +320,7 @@ def main() -> None:
                         user_message=clean_cmd,
                         on_complete=_on_complete,
                         on_error=lambda err: print(f"[Telegram Error] {err}"),
+                        origin=CHANNEL_TELEGRAM,
                     )
 
                 tg_worker.remote_command_received.connect(
@@ -296,6 +358,7 @@ def main() -> None:
                 pass
         try:
             executor.cancel()
+            approvals.stop()
         except Exception:
             pass
         try:

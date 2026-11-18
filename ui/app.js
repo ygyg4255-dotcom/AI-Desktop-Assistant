@@ -505,7 +505,102 @@
     });
   }
 
+  // 10. Pending Tool Approvals Panel
+  // Request data comes from tool args (model/user controlled): render with textContent only.
+  const approvalsCardEl = document.getElementById('approvals-card');
+  const approvalsListEl = document.getElementById('approvals-list');
+  let lastApprovalsSignature = '';
+  const approvalsInFlight = new Set();
+
+  function renderApprovals(pending) {
+    if (!approvalsCardEl || !approvalsListEl) return;
+    const signature = pending.map((p) => `${p.id}:${p.expires_in}`).join('|');
+    if (signature === lastApprovalsSignature) return;
+    lastApprovalsSignature = signature;
+
+    approvalsCardEl.hidden = pending.length === 0;
+    approvalsListEl.replaceChildren();
+
+    pending.forEach((req) => {
+      const item = document.createElement('div');
+      item.className = 'approval-item';
+
+      const title = document.createElement('div');
+      title.className = 'approval-tool';
+      title.textContent = `${req.tool} — via ${req.channel}`;
+
+      const summary = document.createElement('div');
+      summary.className = 'approval-summary';
+      summary.textContent = req.summary;
+
+      const args = document.createElement('pre');
+      args.className = 'approval-args';
+      args.textContent = req.args_preview;
+
+      const footer = document.createElement('div');
+      footer.className = 'approval-actions';
+      const timer = document.createElement('span');
+      timer.className = 'approval-timer';
+      timer.textContent = `expires in ${req.expires_in}s`;
+
+      const approveBtn = document.createElement('button');
+      approveBtn.type = 'button';
+      approveBtn.className = 'header-btn approve-btn';
+      approveBtn.textContent = 'Approve';
+      const denyBtn = document.createElement('button');
+      denyBtn.type = 'button';
+      denyBtn.className = 'header-btn deny-btn';
+      denyBtn.textContent = 'Deny';
+      if (approvalsInFlight.has(req.id)) {
+        approveBtn.disabled = true;
+        denyBtn.disabled = true;
+      }
+      approveBtn.addEventListener('click', () => submitApproval(req, 'approve'));
+      denyBtn.addEventListener('click', () => submitApproval(req, 'deny'));
+
+      footer.append(timer, approveBtn, denyBtn);
+      item.append(title, summary, args, footer);
+      approvalsListEl.appendChild(item);
+    });
+  }
+
+  async function fetchApprovals() {
+    try {
+      const resp = await fetch('/approvals?t=' + Date.now(), {
+        cache: 'no-store',
+        headers: { Accept: 'application/json', 'X-HUD-Token': HUD_TOKEN },
+      });
+      if (!resp.ok) return;
+      const data = await resp.json();
+      renderApprovals(Array.isArray(data.pending) ? data.pending : []);
+    } catch (err) {
+      // Offline / reconnecting
+    }
+  }
+
+  async function submitApproval(req, decision) {
+    if (approvalsInFlight.has(req.id)) return;
+    approvalsInFlight.add(req.id);
+    lastApprovalsSignature = '';
+    try {
+      // args_hash binds the decision to exactly the args shown above.
+      await fetch('/approve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-HUD-Token': HUD_TOKEN },
+        body: JSON.stringify({ id: req.id, decision: decision, args_hash: req.args_hash }),
+      });
+    } catch (err) {
+      console.error('Approval submission error:', err);
+    } finally {
+      approvalsInFlight.delete(req.id);
+      lastApprovalsSignature = '';
+      fetchApprovals();
+    }
+  }
+
   // Initial fetch and 1-second interval polling
   fetchStatus();
+  fetchApprovals();
   setInterval(fetchStatus, 1000);
+  setInterval(fetchApprovals, 1000);
 })();

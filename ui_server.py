@@ -53,13 +53,22 @@ _TOKEN_PLACEHOLDER = "__HUD_TOKEN__"
 # Port the server is bound to; set by start_hud_server (used for Host checks).
 _HUD_PORT: int = 5000
 
-_API_PATHS = {"/status", "/status.json", "/config", "/test_config", "/command", "/clear_logs"}
-_JSON_ONLY_PATHS = {"/command", "/config", "/test_config"}
+_API_PATHS = {"/status", "/status.json", "/config", "/test_config", "/command", "/clear_logs",
+              "/approvals", "/approve"}
+_JSON_ONLY_PATHS = {"/command", "/config", "/test_config", "/approve"}
 _CONFIG_FIELDS = {"api_key", "model", "language"}
 
 # Registered callbacks
 _COMMAND_HANDLER: Optional[Callable[[str], None]] = None
 _CONFIG_UPDATED_CALLBACK: Optional[Callable[[Dict[str, Any]], None]] = None
+# ApprovalManager (src.agent.approvals) used by /approvals and /approve.
+_APPROVAL_MANAGER: Any = None
+
+
+def set_approval_manager(manager: Any) -> None:
+    """Register the ApprovalManager whose pending requests the HUD can resolve."""
+    global _APPROVAL_MANAGER
+    _APPROVAL_MANAGER = manager
 
 
 def set_command_handler(handler: Callable[[str], None]) -> None:
@@ -321,6 +330,39 @@ def clear_logs_route():
     return jsonify({"status": "ok"})
 
 
+@flask_app.route("/approvals", methods=["GET"])
+def approvals_route():
+    pending = _APPROVAL_MANAGER.list_pending() if _APPROVAL_MANAGER is not None else []
+    return jsonify({"pending": pending})
+
+
+# outcome -> HTTP status for POST /approve
+_APPROVE_STATUS = {
+    "approved": 200, "denied": 200,
+    "expired": 409, "already_used": 409,
+    "hash_mismatch": 409, "forbidden_channel": 403, "unknown": 404,
+}
+
+
+@flask_app.route("/approve", methods=["POST"])
+def approve_route():
+    if _APPROVAL_MANAGER is None:
+        return _error(503, "approvals are not available")
+    data = _json_object()
+    if data is None:
+        return _error(400, "body must be a JSON object")
+    if set(data) - {"id", "decision", "args_hash"}:
+        return _error(400, "unsupported field(s)")
+    req_id, decision, digest = data.get("id"), data.get("decision"), data.get("args_hash")
+    if not isinstance(req_id, str) or not isinstance(digest, str) or decision not in ("approve", "deny"):
+        return _error(400, "id and args_hash must be strings; decision must be 'approve' or 'deny'")
+
+    result = _APPROVAL_MANAGER.resolve(req_id, approve=(decision == "approve"), via="hud", expected_hash=digest)
+    resp = jsonify({"status": result.outcome})
+    resp.status_code = _APPROVE_STATUS.get(result.outcome, 400)
+    return resp
+
+
 def _is_port_in_use(host: str, port: int) -> bool:
     """Check if a TCP port is currently in use."""
     try:
@@ -337,10 +379,13 @@ def start_hud_server(
     open_browser: bool = False,
     command_handler: Optional[Callable[[str], None]] = None,
     on_config_updated: Optional[Callable[[Dict[str, Any]], None]] = None,
+    approval_manager: Any = None,
 ) -> threading.Thread:
     """Start the Altron HUD server in a background daemon thread with safe port fallback."""
     if command_handler:
         set_command_handler(command_handler)
+    if approval_manager is not None:
+        set_approval_manager(approval_manager)
     if on_config_updated:
         set_config_updated_callback(on_config_updated)
 

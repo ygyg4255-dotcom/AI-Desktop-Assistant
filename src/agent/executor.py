@@ -14,8 +14,16 @@ from dataclasses import dataclass, field
 from enum import Enum
 from concurrent.futures import Future
 
-from src.agent.tools import ToolRegistry, ToolResult, create_default_registry
+from src.agent.tools import ToolRegistry, ToolResult, create_default_registry, strip_internal_keys
 from src.agent.permissions import PermissionGate, PermissionLevel
+from src.agent.approvals import (
+    ApprovalManager,
+    CHANNEL_HUD,
+    CHANNEL_LOCAL,
+    CHANNEL_TELEGRAM,
+    CHANNEL_VOICE,
+    DEFAULT_TTL,
+)
 from src.agent.memory import ConversationMemory
 from src.services.ai_client import AIClient, Message
 from src.services.hud_status import update_hud_status
@@ -900,6 +908,8 @@ def intercept_raw_code_or_payload(
 
             if isinstance(parsed_args, dict) and executor.registry.get(tool_name):
                 res = executor.registry.execute(tool_name, **parsed_args)
+                if res.requires_permission:
+                    return executor._request_approval(tool_name, parsed_args, res, user_message), res
                 confirmation = clean_tool_confirmation(
                     "",
                     last_tool_name=tool_name,
@@ -943,6 +953,8 @@ def intercept_raw_code_or_payload(
 
                 if tool_name and executor._registry.get(tool_name):
                     res = executor._execute_tool(tool_name, tool_input)
+                    if res.requires_permission:
+                        return executor._request_approval(tool_name, tool_input, res, user_message), res
                     confirmation = clean_tool_confirmation(
                         "",
                         last_tool_name=tool_name,
@@ -1124,9 +1136,16 @@ Available tools are provided in the tool definitions. Use them responsibly."""
         database: Optional[Database] = None,
         registry: Optional[ToolRegistry] = None,
         gate: Optional[PermissionGate] = None,
-        memory: Optional[ConversationMemory] = None
+        memory: Optional[ConversationMemory] = None,
+        approvals: Optional[ApprovalManager] = None,
     ):
         self._ai_client = ai_client
+        # When set, gated tool calls become non-blocking approval requests instead
+        # of an in-process blocking prompt (required for HUD / voice / Telegram).
+        self._approvals: Optional[ApprovalManager] = None
+        self._origin: str = CHANNEL_LOCAL
+        if approvals is not None:
+            self.attach_approvals(approvals)
         self._database = database
         self._registry = registry or create_default_registry()
         self._gate = gate or PermissionGate()
@@ -1273,6 +1292,88 @@ Available tools are provided in the tool definitions. Use them responsibly."""
 
         return tool.run(tool_input, approved=approved)
 
+    # -- out-of-band approvals (audit S5a) -------------------------------------
+    @property
+    def approvals(self) -> Optional[ApprovalManager]:
+        return self._approvals
+
+    def attach_approvals(self, manager: ApprovalManager) -> None:
+        """Route gated tool calls through ``manager``; approved calls run via run_approved."""
+        self._approvals = manager
+        manager.set_runner(self.run_approved)
+
+    def run_approved(self, tool_name: str, tool_input: Dict[str, Any]) -> ToolResult:
+        """Run a tool the user approved out-of-band, with exactly the stored args."""
+        exec_id = None
+        if self._database and self._conversation_id:
+            try:
+                exec_id = self._database.log_tool_execution(self._conversation_id, tool_name, tool_input, "approved")
+            except Exception:
+                exec_id = None
+        result = self._execute_tool(tool_name, tool_input, approved=True)
+        if exec_id:
+            try:
+                self._database.update_tool_execution(
+                    exec_id,
+                    {"output": result.output, "error": result.error},
+                    "success" if result.success else "failed",
+                )
+            except Exception:
+                pass
+        return result
+
+    @staticmethod
+    def approval_wait_message(origin: str, tool_name: str, summary: str, arabic: bool = False) -> str:
+        """User-facing text for a pending approval; depends on where the request came from."""
+        secs = int(DEFAULT_TTL)
+        if origin == CHANNEL_TELEGRAM:
+            where_en, where_ar = "tap Approve or Deny on the Telegram message", "اضغط موافقة أو رفض في رسالة تيليجرام"
+        elif origin == CHANNEL_VOICE:
+            # Voice can never approve: say so out loud and point at the screen.
+            where_en, where_ar = "please approve it on screen in the HUD, not by voice", "يرجى الموافقة على الشاشة في الواجهة، وليس بالصوت"
+        else:
+            where_en, where_ar = "approve or deny it in the HUD approvals panel", "وافق أو ارفض من لوحة الموافقات في الواجهة"
+        if arabic:
+            return f"🔐 بانتظار موافقتك على الشاشة لتنفيذ {tool_name}: {summary}. {where_ar} (تنتهي خلال {secs} ثانية)."
+        return f"🔐 Waiting for your approval on screen to run {tool_name}: {summary}. To continue, {where_en} (expires in {secs}s)."
+
+    def _request_approval(self, tool_name: str, tool_input: Dict[str, Any], result: ToolResult,
+                          user_message: str = "") -> str:
+        """Turn a gated ToolResult into a visible message (never drop it silently).
+
+        With an ApprovalManager attached this creates a normal approval request
+        bound to the exact args the handler saw; without one, it explains that
+        the action was not run.
+        """
+        summary = result.permission_message or f"Run {tool_name}"
+        arabic = any('؀' <= c <= 'ۿ' for c in (user_message or ""))
+        self._pending_permission = None
+        if self._approvals is None:
+            return (f"⚠️ يتطلب هذا الإجراء موافقة ولم يتم تنفيذه: {summary}" if arabic
+                    else f"⚠️ This action needs approval and was not run: {summary}")
+        self._approvals.create_request(
+            tool_name, strip_internal_keys(tool_input), channel=self._origin, summary=summary
+        )
+        update_hud_status(log_entry=f"Approval pending: {tool_name} — {summary}")
+        return self.approval_wait_message(self._origin, tool_name, summary, arabic)
+
+    def _approval_response(self, tool_name: str, tool_input: Dict[str, Any], result: ToolResult,
+                           user_message: str, tools_used: List[str]) -> AgentResponse:
+        """End the turn with a pending-approval message (persisted like any reply)."""
+        content = self._request_approval(tool_name, tool_input, result, user_message)
+        self._messages.append(Message(role="assistant", content=content, timestamp=time.time()))
+        self._memory.add_message("assistant", content)
+        if self._database and self._conversation_id:
+            self._database.add_message(self._conversation_id, "assistant", content)
+        self._state = AgentState.IDLE
+        return AgentResponse(
+            content=content,
+            steps=self._steps,
+            tools_used=tools_used,
+            success=False,
+            error="awaiting approval",
+        )
+
     def _execute_tool_with_permission(
         self,
         tool_name: str,
@@ -1339,9 +1440,14 @@ Available tools are provided in the tool definitions. Use them responsibly."""
         on_step: Optional[Callable[[AgentStep], None]] = None,
         on_permission: Optional[Callable[[PermissionRequest], None]] = None,
         on_complete: Optional[Callable[[AgentResponse], None]] = None,
-        on_error: Optional[Callable[[Exception], None]] = None
+        on_error: Optional[Callable[[Exception], None]] = None,
+        origin: str = CHANNEL_LOCAL,
     ) -> Future:
-        """Process a user message asynchronously."""
+        """Process a user message asynchronously.
+
+        ``origin`` is the channel the message came from (local / hud / voice /
+        telegram); it decides where approval requests are delivered.
+        """
         future: Future = Future()
         self._cancel_flag = False
         self._state = AgentState.THINKING
@@ -1375,7 +1481,8 @@ Available tools are provided in the tool definitions. Use them responsibly."""
                 response = self._process_sync(
                     user_message,
                     on_step=on_step,
-                    on_permission=on_permission
+                    on_permission=on_permission,
+                    origin=origin,
                 )
                 if not future.done():
                     future.set_result(response)
@@ -1407,9 +1514,11 @@ Available tools are provided in the tool definitions. Use them responsibly."""
         self,
         user_message: str,
         on_step: Optional[Callable[[AgentStep], None]] = None,
-        on_permission: Optional[Callable[[PermissionRequest], None]] = None
+        on_permission: Optional[Callable[[PermissionRequest], None]] = None,
+        origin: str = CHANNEL_LOCAL,
     ) -> AgentResponse:
         """Synchronous processing logic with fast local intent bypass."""
+        self._origin = origin
         # Clean up any temporary inspect_wa.ps1 if present in root directory
         try:
             wa_script = Path("inspect_wa.ps1")
@@ -1457,6 +1566,10 @@ Available tools are provided in the tool definitions. Use them responsibly."""
                 on_step(tool_step)
 
             result = self._execute_tool(tool_name, tool_input)
+
+            if result.requires_permission:
+                # Gated input (e.g. app_open with a full path): ask, never drop silently.
+                return self._approval_response(tool_name, tool_input, result, user_message, tools_used)
 
             result_step = AgentStep(
                 step_type="tool_result",
@@ -1564,6 +1677,8 @@ Available tools are provided in the tool definitions. Use them responsibly."""
                                 on_step(tool_step)
 
                             res = self.registry.execute(tool_name, **tool_input)
+                            if res.requires_permission:
+                                return self._approval_response(tool_name, tool_input, res, user_message, tools_used)
                             last_tool_result = res
                             tools_used.append(tool_name)
 
@@ -1718,8 +1833,14 @@ Available tools are provided in the tool definitions. Use them responsibly."""
                     permission_callback=on_permission
                 )
 
+                if result.requires_permission and self._approvals is not None:
+                    # Non-blocking: create an approval request and end the turn. The
+                    # approved call later runs via run_approved with the stored args.
+                    return self._approval_response(tool_name, tool_input, result, user_message, tools_used)
+
                 if result.requires_permission and self._pending_permission:
-                    approved = self._pending_permission.wait(timeout=300)
+                    # Legacy in-process prompt (desktop chat window, no ApprovalManager).
+                    approved = self._pending_permission.wait(timeout=DEFAULT_TTL)
 
                     if approved:
                         self._state = AgentState.EXECUTING

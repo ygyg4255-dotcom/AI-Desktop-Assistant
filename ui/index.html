@@ -158,6 +158,14 @@
 
       <!-- RIGHT COLUMN: CONVERSATION, TODAY'S EVENTS, REMINDERS -->
       <aside class="panel right-panel">
+        <!-- Pending tool approvals (hidden when there are none) -->
+        <div id="approvals-card" class="card approvals-card" hidden>
+          <div class="card-header">
+            <span class="card-tag">APPROVAL REQUIRED</span>
+          </div>
+          <div id="approvals-list" class="approvals-list" aria-live="polite"></div>
+        </div>
+
         <div class="card conv-card">
           <div class="card-header">
             <span class="card-tag">CONVERSATION</span>

@@ -7,7 +7,7 @@ import json
 import threading
 import urllib.request
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 from PySide6.QtCore import QThread, Signal
 from src.config.settings import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
@@ -261,17 +261,158 @@ def send_telegram_photo_async(
     return thread
 
 
+class TelegramBotApi:
+    """Minimal JSON Bot API caller. Injectable so tests never touch the network.
+
+    The token is part of the URL, so URLs are never logged.
+    """
+
+    def __init__(self, bot_token: str, timeout: float = 15.0):
+        self._token = bot_token
+        self._timeout = timeout
+
+    def call(self, method: str, payload: dict) -> dict:
+        req = urllib.request.Request(
+            f"https://api.telegram.org/bot{self._token}/{method}",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=self._timeout) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except Exception as err:
+            print(f"[Telegram Service] {method} failed: {type(err).__name__}")
+            return {"ok": False}
+
+
+_STATUS_LABELS = {
+    "approved": "✅ Approved",
+    "denied": "❌ Denied",
+    "expired": "⌛ Expired (denied)",
+}
+
+
+def _background(fn: Callable[[], None]) -> None:
+    threading.Thread(target=fn, name="AltronTelegramApproval", daemon=True).start()
+
+
+class TelegramApprovalBridge:
+    """Delivers approval requests as inline keyboards and handles the callbacks.
+
+    A callback is honoured only if the chat id AND the sender user id are the
+    owner's, and the nonce + args-hash prefix match a live, unused request.
+    Bot API replies are sent via ``dispatch`` (a background thread by default)
+    so the polling listener never waits on them.
+    """
+
+    def __init__(self, manager, api, chat_id: str, owner_user_id: Optional[str] = None,
+                 dispatch: Callable[[Callable[[], None]], None] = _background):
+        self._manager = manager
+        self._api = api
+        self._chat_id = str(chat_id)
+        # In a private chat with the bot, chat.id == the owner's user id.
+        self._owner_user_id = str(owner_user_id or chat_id)
+        self._dispatch = dispatch
+        self._lock = threading.Lock()
+        self._messages: dict = {}  # request id -> (message_id, text)
+
+    @staticmethod
+    def request_text(req) -> str:
+        args = req.meta.get("args_preview")
+        if args is None:
+            from src.agent.approvals import summarize_args
+            args = summarize_args(req.args, limit=300)
+        return (
+            "🔐 Approval needed\n"
+            f"Tool: {req.tool_name}\n"
+            f"Action: {req.summary[:300]}\n"
+            f"Args: {args}\n"
+            f"Requested via: {req.channel}\n"
+            f"Expires in {int(req.expires_at - req.created_at)}s"
+        )
+
+    def send_request(self, req) -> None:
+        text = self.request_text(req)
+        h = req.args_hash[:16]
+        markup = {"inline_keyboard": [[
+            {"text": "✅ Approve", "callback_data": f"ap:a:{req.id}:{h}"},
+            {"text": "❌ Deny", "callback_data": f"ap:d:{req.id}:{h}"},
+        ]]}
+
+        def _send():
+            res = self._api.call("sendMessage", {"chat_id": self._chat_id, "text": text, "reply_markup": markup})
+            msg_id = ((res or {}).get("result") or {}).get("message_id")
+            if msg_id is not None:
+                with self._lock:
+                    self._messages[req.id] = (msg_id, text)
+
+        self._dispatch(_send)
+
+    def on_resolved(self, req) -> None:
+        """Edit the original message to its final status (also for HUD/expiry)."""
+        with self._lock:
+            entry = self._messages.pop(req.id, None)
+        label = _STATUS_LABELS.get(req.status)
+        if not entry or not label:
+            return
+        msg_id, text = entry
+        self._dispatch(lambda: self._api.call("editMessageText", {
+            "chat_id": self._chat_id, "message_id": msg_id, "text": f"{text}\n\n{label}",
+        }))
+
+    def _answer(self, cq_id, text: str) -> None:
+        if cq_id is not None:
+            self._dispatch(lambda: self._api.call("answerCallbackQuery", {"callback_query_id": cq_id, "text": text}))
+
+    def handle_callback_query(self, cq: dict) -> str:
+        """Process one callback_query update. Returns the outcome string."""
+        cq = cq or {}
+        cq_id = cq.get("id")
+        chat_id = str(((cq.get("message") or {}).get("chat") or {}).get("id", ""))
+        user_id = str((cq.get("from") or {}).get("id", ""))
+        if chat_id != self._chat_id or user_id != self._owner_user_id:
+            print("[Telegram Worker] Rejected approval callback from unauthorized chat/user")
+            self._answer(cq_id, "Not authorized.")
+            return "forbidden"
+
+        parts = str(cq.get("data", "")).split(":")
+        if len(parts) != 4 or parts[0] != "ap" or parts[1] not in ("a", "d"):
+            self._answer(cq_id, "Unknown action.")
+            return "unknown"
+        _, action, request_id, hash_prefix = parts
+
+        result = self._manager.resolve(request_id, approve=(action == "a"), via="telegram",
+                                       expected_hash=hash_prefix)
+        replies = {
+            "approved": "Approved — running now.",
+            "denied": "Denied.",
+            "expired": "This request has expired.",
+            "already_used": "This request was already handled.",
+            "hash_mismatch": "Request did not match; denied.",
+            "forbidden_channel": "This request cannot be approved from Telegram.",
+            "unknown": "Unknown or expired request.",
+        }
+        self._answer(cq_id, replies.get(result.outcome, "Not processed."))
+        if result.outcome == "expired" and result.request is not None:
+            self.on_resolved(result.request)  # make sure the message shows Expired
+        return result.outcome
+
+
 class TelegramRemoteWorker(QThread):
     """Background worker that long-polls Telegram getUpdates for phone remote control."""
 
     remote_command_received = Signal(str)
 
-    def __init__(self, bot_token: Optional[str] = None, allowed_chat_id: Optional[str] = None, parent=None):
+    def __init__(self, bot_token: Optional[str] = None, allowed_chat_id: Optional[str] = None, parent=None,
+                 callback_handler: Optional[Callable[[dict], object]] = None):
         super().__init__(parent)
         self._token = bot_token or os.environ.get("TELEGRAM_BOT_TOKEN") or DEFAULT_BOT_TOKEN
         self._allowed_chat_id = str(allowed_chat_id or os.environ.get("TELEGRAM_CHAT_ID") or DEFAULT_CHAT_ID)
         self._is_running = True
         self._offset = 0
+        # Handles inline-keyboard callback_query updates (approval buttons). It must
+        # return quickly; the approval bridge does its network I/O off this thread.
+        self._callback_handler = callback_handler
 
     def stop(self) -> None:
         """Cleanly stop long polling."""
@@ -306,6 +447,15 @@ class TelegramRemoteWorker(QThread):
                     update_id = update.get("update_id", 0)
                     if update_id >= self._offset:
                         self._offset = update_id + 1
+
+                    callback_query = update.get("callback_query")
+                    if callback_query is not None:
+                        if self._callback_handler is not None:
+                            try:
+                                self._callback_handler(callback_query)
+                            except Exception as cb_err:
+                                print(f"[Telegram Worker] Callback handling error: {cb_err}")
+                        continue
 
                     message = update.get("message") or update.get("channel_post")
                     if not message:
