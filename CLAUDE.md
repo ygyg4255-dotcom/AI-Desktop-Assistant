@@ -1,16 +1,89 @@
 # Altron AI Desktop Assistant
 
 ## Project Overview
-Altron is an autonomous Windows desktop assistant featuring a floating dynamic capsule UI (PySide6), voice wake-word detection, conditional speech synthesis (TTS), desktop icon control, and remote Telegram control.
+Altron is an autonomous Windows desktop assistant: a headless Python orchestrator with a
+local Flask "radar" HUD in the browser, always-on voice (wake word, VAD, faster-whisper STT,
+TTS), desktop/file/app automation tools behind a permission gate, and remote control plus
+approvals over Telegram. It talks only to the Anthropic Claude API.
 
-## Guidelines
-- Launch entry point: `python main.py` or `python -m src.app`
-- Core subsystems:
-  - `main.py`: Central orchestrator
-  - `ui_server.py`: HUD server and WebSockets
-  - `src/agent/`: Agent executor, permissions, tools, and memory
-  - `src/services/`: AI clients, audio/TTS, and desktop automation
-  - `src/ui/`: PySide6 desktop interface
+## Architecture (official runtime path)
+- Launch: `python main.py`. This is the only supported entry point.
+- `main.py`: orchestrator. It calls `setup_logging()`, then starts the HUD server, the voice
+  listener and the Telegram listener on **plain `threading.Thread`s** and supervises them.
+  It must not import PySide6.
+- `ui_server.py`: Flask HUD server on `127.0.0.1:5000` (falls back to 5001), serving `ui/`
+  and the JSON API (`/status`, `/config`, `/test_config`, `/command`, `/clear_logs`,
+  `/approvals`, `/approve`). Flask is required: there is no `http.server` fallback.
+- `src/agent/`: `executor.py` (agent loop), `tools.py` (tool registry and handlers),
+  `permissions.py` (tiers), `approvals.py` (out-of-band approvals), `memory.py`
+  (conversation memory). Root `memory.py` only re-exports `src.agent.memory`.
+- `src/services/`: `ai_client.py` (Claude Messages API), `voice_service.py`
+  (`SpeechRecognitionListener`, `TTSManager`), `telegram_service.py`
+  (`TelegramRemoteListener`, `TelegramApprovalBridge`, send helpers), `hud_status.py`
+  (in-memory HUD state, flushed atomically to `status.json`), `signals.py` (Qt-free
+  `CallbackSignal`), plus desktop icon and OmniRoute helpers.
+- `src/config/`: `settings.py` (configuration), `paths.py` (runtime dir), `log.py`
+  (logging).
+
+### Legacy (deprecated, do not extend)
+`src/app.py` and `src/ui/` (PySide6 capsule UI, tray, settings window) are kept only so old
+imports keep working. `SpeechRecognitionWorker` and `TelegramRemoteWorker` are thin `QThread`
+wrappers over the listeners above, kept for that UI only. Start them with `.start()`; never
+call `.run()` on a QThread from a Python thread. Root `test_app.py`, `test_chat_ui.py`,
+`test_step3_final.py` and `test_ui_integration.py` are manual GUI scripts, not pytest suites.
+
+## Configuration
+- Use `src.config.settings.get_config_value(*keys, default=...)` (or `Settings()`, which
+  uses it). Do not read `os.environ` or `.env` directly.
+- Precedence, everywhere: explicit argument > `.env` (`resolve_env_path()`) > process
+  environment > default.
+- Default models live only in `settings.py`: `DEFAULT_MODEL = "claude-sonnet-5-5"` and
+  `DEFAULT_FAST_MODEL = "claude-haiku-5-5"`.
+- Never read, print or edit `.env`. A PreToolUse hook blocks edits to it; use `.env.example`.
+
+## Runtime directory
+Runtime state lives in `~/.ai-desktop-assistant/` (override with `ALTRON_DATA_DIR`), never in
+the OneDrive-synced project folder. It holds `memory.json`, `status.json`,
+`telegram_offset.json`, `assistant.db` and `altron.log` (rotating: 1 MB x 3). Use
+`src.config.paths.runtime_file(name)` for new files.
+
+## Logging
+- `from src.config.log import get_logger; logger = get_logger(__name__)`.
+- Do not use `print()`, and do not write silent `except Exception: pass` blocks: log at
+  least at DEBUG.
+- Every handler formats through `RedactingFormatter` (`redact_secrets`), which removes bot
+  tokens and `sk-ant-` keys. Still pass known secrets explicitly:
+  `redact_secrets(err, token)`.
+- `ALTRON_LOG_LEVEL` sets the level (default INFO).
+
+## Security design (audit S1–S8): keep these invariants
+- **S1 HUD auth:** a per-launch random token is injected into `index.html` and must be sent
+  as `X-HUD-Token` (constant-time compare). The Host header must be
+  `127.0.0.1:<port>`/`localhost:<port>`, and any Origin must match. No CORS headers.
+- **S2 Claude-only, JSON-only:** the API endpoint is hard-coded to `api.anthropic.com`, and
+  `base_url`/`provider` are rejected. State-changing endpoints require
+  `Content-Type: application/json`. Config values cannot contain line breaks.
+- **S3 approval cannot be forged:** `Tool.run` strips every `_`-prefixed key from model input.
+  Approval arrives only as the executor's `approved=` kwarg.
+- **S4 tiers:** SAFE (auto), CONDITIONAL (per-call `needs_approval_*` check, no blanket
+  allow), DANGEROUS (always ask). New tools default to DANGEROUS. See the
+  `permission-gate-review` skill.
+- **S5 approvals:** non-blocking `ApprovalManager`, resolved from the HUD (token) or a
+  Telegram inline keyboard (owner chat and user only). Bound to an args hash, single use,
+  expiring. Voice can never approve.
+- **S6 secrets:** never log or return tokens or keys (`redact_secrets`). `.env` values are
+  quoted on write. A failed `.env` write raises an error and is never swallowed.
+- **S7 command execution:** no `shell=True`. Resolve executables with `shutil.which` and
+  pass argument lists.
+- **S8 runtime files:** everything mutable goes in `~/.ai-desktop-assistant/` (see above).
+
+## Tests
+- Run `pytest -p no:cacheprovider` from the project root. `pytest.ini` limits collection to
+  `tests/` and `test_agent.py` and disables the cache provider, so no `.pytest_cache/`
+  lands in OneDrive.
+- Tests must set `ALTRON_DATA_DIR` to a temp dir when they touch runtime files. They must
+  never touch the real `.env`, network or data dir. Check log output with `caplog`,
+  not `capsys`.
 
 ## Understand Anything Knowledge Graph
 This project maintains a codebase knowledge graph at `.ua/knowledge-graph.json` generated by Understand Anything.
