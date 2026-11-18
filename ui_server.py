@@ -21,9 +21,11 @@ import webbrowser
 from pathlib import Path
 from typing import Optional, Callable, Any, Dict
 
+from src.config.paths import runtime_file
+
 BASE_DIR = Path(__file__).resolve().parent
 UI_DIR = BASE_DIR / "ui"
-STATUS_FILE = BASE_DIR / "status.json"
+STATUS_FILE = runtime_file("status.json")
 
 # Import settings and hud helpers
 try:

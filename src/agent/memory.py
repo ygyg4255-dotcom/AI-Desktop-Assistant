@@ -4,18 +4,15 @@ import threading
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Union
 
+from src.config.paths import runtime_file
+
 
 class ConversationMemory:
     """Thread-safe short-term conversation memory storing the last N messages."""
 
     def __init__(self, memory_file: Optional[Union[str, Path]] = None, max_messages: int = 10):
         if memory_file is None:
-            default_path = Path("memory.json")
-            if not default_path.is_absolute():
-                base_dir = Path(__file__).resolve().parent.parent.parent
-                self._file_path = base_dir / "memory.json"
-            else:
-                self._file_path = default_path
+            self._file_path = runtime_file("memory.json")
         else:
             self._file_path = Path(memory_file)
 

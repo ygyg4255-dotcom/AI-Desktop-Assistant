@@ -7,7 +7,9 @@ from typing import Optional, Dict, Any, List
 
 import psutil
 
-STATUS_FILE = Path(__file__).resolve().parent.parent.parent / "status.json"
+from src.config.paths import runtime_file
+
+STATUS_FILE = runtime_file("status.json")
 _LOCK = threading.Lock()
 
 _METRICS_CACHE: Dict[str, Any] = {}
