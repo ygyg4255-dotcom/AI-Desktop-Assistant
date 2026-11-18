@@ -36,6 +36,15 @@ from src.services.telegram_service import (
 from ui_server import start_hud_server
 
 
+def apply_ai_config(ai_client, cfg: dict) -> None:
+    """Hot-reload model/key. The HUD payload only carries a masked key, so the
+    real key is always loaded from Settings/.env, never taken from cfg."""
+    model = cfg.get("model", "")
+    real_key = Settings().ai_api_key or None
+    print(f"[AI Config] Hot-reloading AI model: {model}")
+    ai_client.update_config(model=model, api_key=real_key)
+
+
 def main() -> None:
     """Coordinate and supervise all Altron subsystems concurrently."""
     # Ensure headless Qt core application is initialized for signals/events
@@ -81,18 +90,8 @@ def main() -> None:
     # 1. HUD Server Subsystem Thread
     # -------------------------------------------------------------
     def _on_ai_config_updated(cfg: dict):
-        """Hot-reload AI Provider, Model, and Endpoint at runtime."""
-        provider = cfg.get("provider", "anthropic")
-        model = cfg.get("model", "")
-        base_url = cfg.get("base_url", "")
-        api_key = cfg.get("api_key", "")
-        print(f"[AI Config] Hot-reloading AI provider: {provider} ({model}) at {base_url}")
-        ai_client.update_config(
-            provider=provider,
-            model=model,
-            base_url=base_url,
-            api_key=api_key if api_key and not api_key.startswith("•") else None,
-        )
+        """Hot-reload AI model and API key at runtime."""
+        apply_ai_config(ai_client, cfg)
 
     def _on_hud_command(cmd_text: str):
         clean_cmd = cmd_text.strip()

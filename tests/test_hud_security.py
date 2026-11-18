@@ -185,3 +185,44 @@ def test_ai_client_ignores_base_url_and_provider():
     c.update_config(provider="custom", base_url="http://evil.example", model="claude-haiku-5-5")
     assert c._get_endpoint_url() == ANTHROPIC_MESSAGES_URL
     assert c.model == "claude-haiku-5-5"
+
+
+# --- API key handling (masked key bug) -------------------------------------
+
+def _post_key(client, key):
+    return client.post("/config", base_url=BASE, headers=auth(),
+                       json={"model": "claude-sonnet-5-5", "api_key": key, "language": "English"})
+
+
+@pytest.mark.parametrize("key", ["", "sk-a\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022", "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"])
+def test_masked_or_empty_key_keeps_stored_key(tmp_path, monkeypatch, key):
+    env = tmp_path / ".env"
+    env.write_text("AI_API_KEY=sk-real-key-123\nANTHROPIC_API_KEY=sk-real-key-123\n", encoding="utf-8")
+    monkeypatch.delenv("AI_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    real_save = settings_mod.save_ai_config
+    monkeypatch.setattr(ui_server, "_HUD_PORT", PORT)
+    monkeypatch.setattr(ui_server, "save_ai_config",
+                        lambda **kw: real_save(env_path=env, **kw))
+    monkeypatch.setattr(ui_server, "_CONFIG_UPDATED_CALLBACK", None)
+    c = ui_server.flask_app.test_client()
+    assert _post_key(c, key).status_code == 200
+    text = env.read_text(encoding="utf-8")
+    assert "AI_API_KEY=sk-real-key-123" in text
+    assert "\u2022" not in text
+
+
+@pytest.mark.parametrize("key", ["sk-\u00e9\u00e8\u00e0", "sk ant", "sk\tant"])
+def test_invalid_key_400_and_not_echoed(client, key):
+    resp = _post_key(client, key)
+    assert resp.status_code == 400
+    assert key not in resp.get_data(as_text=True)
+    client.saved.assert_not_called()
+
+
+def test_hot_reload_uses_real_key_not_payload(monkeypatch):
+    import main
+    monkeypatch.setattr(main, "Settings", lambda: MagicMock(ai_api_key="sk-real-key-123"))
+    ai = MagicMock()
+    main.apply_ai_config(ai, {"model": "claude-sonnet-5-5", "api_key": "sk-a\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"})
+    ai.update_config.assert_called_once_with(model="claude-sonnet-5-5", api_key="sk-real-key-123")

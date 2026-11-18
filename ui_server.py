@@ -27,10 +27,11 @@ STATUS_FILE = BASE_DIR / "status.json"
 
 # Import settings and hud helpers
 try:
-    from src.config.settings import Settings, save_ai_config
+    from src.config.settings import Settings, save_ai_config, is_masked_key
 except Exception:
     Settings = None
     save_ai_config = None
+    is_masked_key = None
 
 try:
     from src.services.hud_status import get_hud_status, clear_hud_logs
@@ -219,6 +220,11 @@ def _validate_config_payload(data: Dict[str, Any]) -> Optional[str]:
             return f"{key} must be a string"
         if "\r" in value or "\n" in value:
             return f"{key} must not contain line breaks"
+    api_key = data.get("api_key", "")
+    # Masked/empty values mean "keep the stored key"; anything else must be a real key.
+    if not (is_masked_key(api_key) if is_masked_key else not api_key.strip()):
+        if not api_key.isascii() or any(c.isspace() for c in api_key.strip()):
+            return "api_key must contain only ASCII characters and no whitespace"
     return None
 
 
