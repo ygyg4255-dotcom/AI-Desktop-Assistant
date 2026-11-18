@@ -3,6 +3,7 @@
 Provides two-way remote control over Telegram long-polling and delivery functions.
 """
 import os
+import re
 import json
 import threading
 import urllib.request
@@ -14,6 +15,17 @@ from src.config.settings import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 
 DEFAULT_BOT_TOKEN = TELEGRAM_BOT_TOKEN
 DEFAULT_CHAT_ID = TELEGRAM_CHAT_ID
+
+_BOT_TOKEN_RE = re.compile(r"bot\d{5,}:[A-Za-z0-9_-]{20,}")
+
+
+def redact_secrets(text: object, *tokens: Optional[str]) -> str:
+    """Strip Telegram bot tokens from text before it is printed or returned (audit S6)."""
+    out = str(text)
+    for token in tokens:
+        if token:
+            out = out.replace(token, "<redacted>")
+    return _BOT_TOKEN_RE.sub("bot<redacted>", out)
 
 
 def chunk_message(text: str, max_length: int = 4000) -> list[str]:
@@ -92,10 +104,10 @@ def send_telegram_message(text: str, token: Optional[str] = None, chat_id: Optio
                     all_ok = False
         except urllib.error.HTTPError as e:
             err_body = e.read().decode("utf-8", errors="ignore")
-            print(f"[Telegram Service] HTTPError {e.code}: {err_body}")
+            print(f"[Telegram Service] HTTPError {e.code}: {redact_secrets(err_body, bot_token)}")
             all_ok = False
         except Exception as e:
-            print(f"[Telegram Service] Send error: {e}")
+            print(f"[Telegram Service] Send error: {redact_secrets(e, bot_token)}")
             all_ok = False
 
     return all_ok
@@ -454,7 +466,7 @@ class TelegramRemoteWorker(QThread):
                             try:
                                 self._callback_handler(callback_query)
                             except Exception as cb_err:
-                                print(f"[Telegram Worker] Callback handling error: {cb_err}")
+                                print(f"[Telegram Worker] Callback handling error: {redact_secrets(cb_err, self._token)}")
                         continue
 
                     message = update.get("message") or update.get("channel_post")
@@ -476,5 +488,5 @@ class TelegramRemoteWorker(QThread):
 
             except Exception as e:
                 # On network glitch or timeout, back off briefly
-                print(f"[Telegram Worker] Polling error: {e}")
+                print(f"[Telegram Worker] Polling error: {redact_secrets(e, self._token)}")
                 self.msleep(2000)

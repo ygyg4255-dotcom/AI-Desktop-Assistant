@@ -270,11 +270,14 @@ def config_route():
         return _error(400, problem)
 
     if save_ai_config:
-        save_ai_config(
-            model=data.get("model", ""),
-            api_key=data.get("api_key", "").strip(),
-            language=data.get("language", "English"),
-        )
+        try:
+            save_ai_config(
+                model=data.get("model", ""),
+                api_key=data.get("api_key", "").strip(),
+                language=data.get("language", "English"),
+            )
+        except OSError:
+            return _error(500, "could not write settings to .env")
 
     updated = get_active_config()
     if _CONFIG_UPDATED_CALLBACK:

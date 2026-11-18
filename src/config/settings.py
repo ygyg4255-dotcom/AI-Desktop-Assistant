@@ -18,6 +18,27 @@ DEFAULT_MODEL = "claude-sonnet-5-5"
 DEFAULT_FAST_MODEL = "claude-haiku-5-5"
 
 
+def _unquote_env_value(value: str) -> str:
+    """Strip whitespace and one pair of matching surrounding quotes from a .env value."""
+    value = value.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+        return value[1:-1]
+    return value
+
+
+def _format_env_value(value: str) -> str:
+    """Quote a value for .env when it would not round-trip unquoted."""
+    value = str(value)
+    if value and (value != value.strip() or any(c in value for c in " #\"'")):
+        # load_env_file only strips one matching pair (no escapes), so pick a quote
+        # character the value does not contain.
+        if '"' not in value:
+            return f'"{value}"'
+        if "'" not in value:
+            return f"'{value}'"
+    return value
+
+
 def load_env_file(env_path: Path) -> dict:
     """Load environment variables from .env file."""
     env_vars = {}
@@ -27,7 +48,7 @@ def load_env_file(env_path: Path) -> dict:
                 line = line.strip()
                 if line and not line.startswith("#") and "=" in line:
                     key, value = line.split("=", 1)
-                    env_vars[key.strip()] = value.strip()
+                    env_vars[key.strip()] = _unquote_env_value(value)
     return env_vars
 
 
@@ -71,8 +92,10 @@ def save_ai_config(
         try:
             with open(env_path, "r", encoding="utf-8") as f:
                 lines = f.readlines()
-        except Exception:
-            lines = []
+        except Exception as err:
+            # Rebuilding from scratch would drop unrelated settings, so refuse to overwrite.
+            print(f"[Config] Could not read {env_path.name}: {type(err).__name__}")
+            raise
 
     keys_written = set()
     new_lines = []
@@ -95,8 +118,10 @@ def save_ai_config(
         env_path.parent.mkdir(parents=True, exist_ok=True)
         with open(env_path, "w", encoding="utf-8") as f:
             f.writelines(new_lines)
-    except Exception:
-        pass
+    except Exception as err:
+        # Never include values (they may hold the API key) in the message.
+        print(f"[Config] Failed to write {env_path.name}: {type(err).__name__}")
+        raise
 
     for k, v in updates.items():
         os.environ[k] = str(v)
