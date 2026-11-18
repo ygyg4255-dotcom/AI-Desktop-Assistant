@@ -57,3 +57,7 @@ floorplan/
 .claude/
 status.json
 memory.json
+
+# Generated knowledge graph & editor state
+graphify-out/
+.obsidian/
