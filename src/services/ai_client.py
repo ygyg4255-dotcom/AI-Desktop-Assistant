@@ -16,8 +16,8 @@ from typing import Optional, List, Dict, Any, Callable, Union, Tuple
 
 ANTHROPIC_MESSAGES_URL = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_VERSION = "2023-06-01"
-DEFAULT_MODEL = "claude-sonnet-5-5"
-DEFAULT_FAST_MODEL = "claude-haiku-5-5"
+# Single source of truth for the default model IDs.
+from src.config.settings import DEFAULT_MODEL, DEFAULT_FAST_MODEL  # noqa: E402
 
 
 class ConnectionStatus(Enum):

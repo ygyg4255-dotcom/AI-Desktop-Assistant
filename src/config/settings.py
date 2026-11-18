@@ -1,4 +1,12 @@
-"""Application settings and configuration (Anthropic Claude only)."""
+"""Application settings and configuration (Anthropic Claude only).
+
+Config precedence (the only order used anywhere in Altron; see get_config_value):
+    1. the .env file at resolve_env_path()
+    2. the process environment
+    3. the built-in default
+Explicit function arguments (e.g. a token passed to send_telegram_message) always
+win over all three.
+"""
 import os
 import sys
 import json
@@ -17,6 +25,9 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 ANTHROPIC_API_URL = "https://api.anthropic.com"
 DEFAULT_MODEL = "claude-sonnet-5-5"
 DEFAULT_FAST_MODEL = "claude-haiku-5-5"
+
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+_DEFAULT_DATA_DIR = Path.home() / ".ai-desktop-assistant"
 
 
 # Cached active config for the HUD /status poll (invalidated by save_ai_config or .env mtime).
@@ -37,6 +48,60 @@ def invalidate_config_cache() -> None:
     global _CONFIG_VERSION
     with _CONFIG_LOCK:
         _CONFIG_VERSION += 1
+    with _ENV_LOCK:
+        _ENV_CACHE.update(path=None, stamp=None, vars={})
+
+
+def resolve_env_path(data_dir: Optional[Path] = None) -> Path:
+    """The single .env location shared by every reader and writer.
+
+    Source checkout: <project root>/.env. Frozen build: next to the exe, or
+    <data dir>/.env when only that one exists.
+    """
+    if getattr(sys, "frozen", False):
+        exe_env = Path(sys.executable).parent / ".env"
+        data_env = (data_dir or _DEFAULT_DATA_DIR) / ".env"
+        if not exe_env.exists() and data_env.exists():
+            return data_env
+        return exe_env
+    return _PROJECT_ROOT / ".env"
+
+
+# Parsed .env cache keyed on (path, mtime, size) so hot paths (Telegram sends,
+# HUD polls) do not re-read the file on every call.
+_ENV_LOCK = threading.Lock()
+_ENV_CACHE: Dict[str, Any] = {"path": None, "stamp": None, "vars": {}}
+
+
+def read_env_vars(env_path: Optional[Path] = None) -> Dict[str, str]:
+    """Parsed key/values of the .env file (empty dict if it is missing or unreadable)."""
+    path = Path(env_path) if env_path is not None else resolve_env_path()
+    stamp = _env_stamp(path)
+    with _ENV_LOCK:
+        if stamp is not None and _ENV_CACHE["path"] == path and _ENV_CACHE["stamp"] == stamp:
+            return dict(_ENV_CACHE["vars"])
+    try:
+        values = load_env_file(path)
+    except (OSError, UnicodeDecodeError):
+        values = {}
+    with _ENV_LOCK:
+        _ENV_CACHE.update(path=path, stamp=stamp, vars=dict(values))
+    return values
+
+
+def get_config_value(*keys: str, default: str = "", env_path: Optional[Path] = None) -> str:
+    """Canonical config lookup: .env file, then process environment, then default.
+
+    Within each source the keys are tried in order (aliases such as
+    "AI_API_KEY", "ANTHROPIC_API_KEY") and the first non-empty value wins.
+    """
+    file_vars = read_env_vars(env_path)
+    for source in (file_vars, os.environ):
+        for key in keys:
+            value = source.get(key)
+            if value is not None and str(value).strip():
+                return str(value).strip()
+    return default
 
 
 def get_active_config_dict() -> Dict[str, Any]:
@@ -107,10 +172,7 @@ def save_ai_config(
             raise ValueError("config values must not contain line breaks")
 
     if env_path is None:
-        if getattr(sys, "frozen", False):
-            env_path = Path(sys.executable).parent / ".env"
-        else:
-            env_path = Path(__file__).resolve().parent.parent.parent / ".env"
+        env_path = resolve_env_path()
 
     model = model.strip() or DEFAULT_MODEL
     updates = {
@@ -213,56 +275,28 @@ class Settings:
         self.db_path = self.data_dir / "assistant.db"
         self.config_path = self.data_dir / "config.json"
 
-        if getattr(sys, "frozen", False):
-            exe_dir = Path(sys.executable).parent
-            if (exe_dir / ".env").exists():
-                self.env_path = exe_dir / ".env"
-            elif (self.data_dir / ".env").exists():
-                self.env_path = self.data_dir / ".env"
-            else:
-                self.env_path = exe_dir / ".env"
-        else:
-            self.env_path = Path(__file__).resolve().parent.parent.parent / ".env"
-
+        self.env_path = resolve_env_path(self.data_dir)
         self.load_environment()
 
     def load_environment(self):
-        """Load environment variables from .env file and system env."""
-        env_vars = load_env_file(self.env_path)
+        """Resolve every setting through get_config_value (.env > environment > default)."""
+        def cfg(*keys: str, default: str = "") -> str:
+            return get_config_value(*keys, default=default, env_path=self.env_path)
 
-        model = env_vars.get(
-            "AI_MODEL",
-            env_vars.get("ANTHROPIC_MODEL", os.environ.get("AI_MODEL", os.environ.get("ANTHROPIC_MODEL", DEFAULT_MODEL)))
-        ).strip()
+        model = cfg("AI_MODEL", "ANTHROPIC_MODEL", default=DEFAULT_MODEL)
         # "serve" was the old OmniRoute proxy placeholder, not a Claude model.
-        self.ai_model = DEFAULT_MODEL if model in ("", "serve") else model
-
-        self.ai_fast_model = env_vars.get(
-            "AI_FAST_MODEL", os.environ.get("AI_FAST_MODEL", DEFAULT_FAST_MODEL)
-        ).strip() or DEFAULT_FAST_MODEL
-
-        self.ai_api_key = env_vars.get(
-            "AI_API_KEY",
-            env_vars.get("ANTHROPIC_API_KEY", os.environ.get("AI_API_KEY", os.environ.get("ANTHROPIC_API_KEY", "")))
-        )
-
-        self.altron_language = env_vars.get(
-            "ALTRON_LANGUAGE",
-            os.environ.get("ALTRON_LANGUAGE", "English")
-        )
+        self.ai_model = DEFAULT_MODEL if model == "serve" else model
+        self.ai_fast_model = cfg("AI_FAST_MODEL", default=DEFAULT_FAST_MODEL)
+        self.ai_api_key = cfg("AI_API_KEY", "ANTHROPIC_API_KEY")
+        self.altron_language = cfg("ALTRON_LANGUAGE", default="English")
 
         # Legacy backward-compatibility mapping
         self.anthropic_api_key = self.ai_api_key
         self.anthropic_model = self.ai_model
 
-        self.telegram_bot_token = env_vars.get(
-            "TELEGRAM_BOT_TOKEN",
-            os.environ.get("TELEGRAM_BOT_TOKEN", self.telegram_bot_token)
-        )
-        self.telegram_chat_id = env_vars.get(
-            "TELEGRAM_CHAT_ID",
-            os.environ.get("TELEGRAM_CHAT_ID", self.telegram_chat_id)
-        )
+        self.telegram_bot_token = cfg("TELEGRAM_BOT_TOKEN")
+        self.telegram_chat_id = cfg("TELEGRAM_CHAT_ID")
+        # Legacy readers (src/agent/tools.py) still look at os.environ.
         if self.telegram_bot_token:
             os.environ["TELEGRAM_BOT_TOKEN"] = self.telegram_bot_token
         if self.telegram_chat_id:

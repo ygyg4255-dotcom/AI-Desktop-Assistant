@@ -19,6 +19,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from PySide6.QtCore import QCoreApplication, Qt
 
 from src.config import Settings
+from src.config.settings import get_config_value
 from src.storage.db import Database
 from src.services import AIClient, OmniRouteManager
 from src.agent.executor import AgentExecutor
@@ -265,22 +266,13 @@ def main() -> None:
     # -------------------------------------------------------------
     # 3. Telegram Bot Subsystem Thread
     # -------------------------------------------------------------
-    bot_token = os.environ.get("TELEGRAM_BOT_TOKEN") or getattr(settings, "telegram_bot_token", None)
-    chat_id = os.environ.get("TELEGRAM_CHAT_ID") or getattr(settings, "telegram_chat_id", None)
-    if not bot_token or not chat_id:
-        try:
-            from src.config.settings import load_env_file
-            env_file = PROJECT_ROOT / ".env"
-            if env_file.exists():
-                vars_ = load_env_file(env_file)
-                bot_token = bot_token or vars_.get("TELEGRAM_BOT_TOKEN")
-                chat_id = chat_id or vars_.get("TELEGRAM_CHAT_ID")
-        except Exception:
-            pass
+    # Settings already applies the canonical precedence (.env > environment > default).
+    bot_token = settings.telegram_bot_token
+    chat_id = settings.telegram_chat_id
 
     # Approval callbacks need BOTH the owner's chat id and user id. In a private
     # chat they are equal; set TELEGRAM_OWNER_USER_ID when using a group chat.
-    owner_user_id = os.environ.get("TELEGRAM_OWNER_USER_ID") or chat_id
+    owner_user_id = get_config_value("TELEGRAM_OWNER_USER_ID") or chat_id
     if bot_token and chat_id and str(bot_token).strip() and str(chat_id).strip():
         tg_bridge[0] = TelegramApprovalBridge(
             approvals, TelegramBotApi(str(bot_token).strip()),

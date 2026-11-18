@@ -12,10 +12,7 @@ from typing import Callable, Optional
 
 from PySide6.QtCore import QThread, Signal
 from src.config.paths import runtime_file
-from src.config.settings import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
-
-DEFAULT_BOT_TOKEN = TELEGRAM_BOT_TOKEN
-DEFAULT_CHAT_ID = TELEGRAM_CHAT_ID
+from src.config.settings import get_config_value
 
 _BOT_TOKEN_RE = re.compile(r"bot\d{5,}:[A-Za-z0-9_-]{20,}")
 
@@ -64,21 +61,17 @@ def chunk_message(text: str, max_length: int = 4000) -> list[str]:
     return chunks
 
 
+def resolve_credentials(token: Optional[str] = None, chat_id: Optional[str] = None) -> tuple[str, str]:
+    """Bot token and chat id: explicit arguments, else the canonical settings lookup."""
+    return (
+        str(token or get_config_value("TELEGRAM_BOT_TOKEN")).strip(),
+        str(chat_id or get_config_value("TELEGRAM_CHAT_ID")).strip(),
+    )
+
+
 def send_telegram_message(text: str, token: Optional[str] = None, chat_id: Optional[str] = None) -> bool:
     """Send text message to Telegram chat via Bot API, automatically splitting long messages into safe chunks."""
-    bot_token = token or os.environ.get("TELEGRAM_BOT_TOKEN") or DEFAULT_BOT_TOKEN
-    target_chat_id = chat_id or os.environ.get("TELEGRAM_CHAT_ID") or DEFAULT_CHAT_ID
-
-    if not bot_token or not target_chat_id:
-        try:
-            from src.config.settings import load_env_file
-            env_path = Path(__file__).resolve().parent.parent.parent / ".env"
-            if env_path.exists():
-                env_vars = load_env_file(env_path)
-                bot_token = bot_token or env_vars.get("TELEGRAM_BOT_TOKEN")
-                target_chat_id = target_chat_id or env_vars.get("TELEGRAM_CHAT_ID")
-        except Exception:
-            pass
+    bot_token, target_chat_id = resolve_credentials(token, chat_id)
 
     if not bot_token or not target_chat_id or not text or not str(text).strip():
         return False
@@ -148,8 +141,7 @@ def _post_file(
     """Upload a local file with a streamed multipart POST (never reads it into memory)."""
     import requests
 
-    bot_token = token or os.environ.get("TELEGRAM_BOT_TOKEN") or DEFAULT_BOT_TOKEN
-    target_chat_id = chat_id or os.environ.get("TELEGRAM_CHAT_ID") or DEFAULT_CHAT_ID
+    bot_token, target_chat_id = resolve_credentials(token, chat_id)
 
     path = Path(file_path).expanduser().resolve()
     if not path.is_file() or not bot_token or not target_chat_id:
@@ -397,8 +389,7 @@ class TelegramRemoteWorker(QThread):
     def __init__(self, bot_token: Optional[str] = None, allowed_chat_id: Optional[str] = None, parent=None,
                  callback_handler: Optional[Callable[[dict], object]] = None):
         super().__init__(parent)
-        self._token = bot_token or os.environ.get("TELEGRAM_BOT_TOKEN") or DEFAULT_BOT_TOKEN
-        self._allowed_chat_id = str(allowed_chat_id or os.environ.get("TELEGRAM_CHAT_ID") or DEFAULT_CHAT_ID)
+        self._token, self._allowed_chat_id = resolve_credentials(bot_token, allowed_chat_id)
         self._is_running = True
         self._offset = load_update_offset(self._token)
         # Handles inline-keyboard callback_query updates (approval buttons). It must

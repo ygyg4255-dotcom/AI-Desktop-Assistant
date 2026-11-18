@@ -23,7 +23,7 @@ from typing import Optional, Callable, Any, Dict
 
 from flask import Flask, send_from_directory, Response, request, jsonify
 
-from src.config.settings import Settings, save_ai_config, is_masked_key, get_active_config_dict
+from src.config.settings import get_active_config_dict, get_config_value, is_masked_key, save_ai_config
 from src.services.hud_status import get_hud_status, clear_hud_logs
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -268,9 +268,9 @@ def test_config_route():
 
     model = data.get("model", "")
     api_key = data.get("api_key", "").strip()
-    # If key is masked or empty, look up stored key
-    if not api_key or any(c in api_key for c in ("•", "*")):
-        api_key = os.environ.get("AI_API_KEY") or (Settings().ai_api_key if Settings else "")
+    # Masked or empty key: test the stored one (canonical precedence, settings.py).
+    if is_masked_key(api_key):
+        api_key = get_config_value("AI_API_KEY", "ANTHROPIC_API_KEY")
 
     try:
         from src.services.ai_client import AIClient
