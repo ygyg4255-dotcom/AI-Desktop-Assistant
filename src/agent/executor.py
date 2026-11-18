@@ -1301,7 +1301,7 @@ Available tools are provided in the tool definitions. Use them responsibly."""
         # Check database for saved permission
         if self._database:
             saved_permission = self._database.get_tool_permission(tool_name)
-            if saved_permission == "allow":
+            if saved_permission == "allow" and not self._gate.is_conditional(tool_name):
                 return tool.run(tool_input, approved=True)
             elif saved_permission == "deny":
                 return ToolResult(
@@ -1328,6 +1328,8 @@ Available tools are provided in the tool definitions. Use them responsibly."""
                     permission_callback(permission)
 
                 return result
+
+            return result  # no approval needed for this input; do not run the handler twice
 
         return tool.run(tool_input)
 

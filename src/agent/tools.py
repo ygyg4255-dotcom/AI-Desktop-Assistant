@@ -12,11 +12,20 @@ import platform
 import re
 import urllib.request
 import urllib.parse
+import urllib.error
+import ipaddress
+import socket
+import http.client
 from pathlib import Path
 import html
 import inspect
 from src.services.telegram_service import send_telegram_message, send_telegram_message_async, send_telegram_document, send_telegram_photo_async
 from src.config.settings import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+from src.agent.permissions import (
+    needs_approval_app_open,
+    needs_approval_file_open,
+    needs_approval_file_read,
+)
 
 
 class ToolCategory(Enum):
@@ -203,10 +212,19 @@ def handle_file_search(params: Dict[str, Any]) -> ToolResult:
         )
 
 
-def handle_file_read(params: Dict[str, Any]) -> ToolResult:
-    """Handle file read tool."""
+def handle_file_read(params: Dict[str, Any], approved: bool = False) -> ToolResult:
+    """Handle file read tool - sensitive paths (secrets, keys, browser data) need approval."""
     file_path = params.get("path", "")
     max_lines = params.get("max_lines", 100)
+
+    if not approved and needs_approval_file_read(file_path):
+        return ToolResult(
+            success=False,
+            output=None,
+            requires_permission=True,
+            is_dangerous=True,
+            permission_message=f"Read sensitive file: {file_path}"
+        )
 
     try:
         path = Path(file_path).expanduser()
@@ -307,13 +325,22 @@ def handle_file_delete(params: Dict[str, Any], approved: bool = False) -> ToolRe
         return ToolResult(success=False, output=None, error=str(e))
 
 
-def handle_file_copy(params: Dict[str, Any]) -> ToolResult:
-    """Handle file or directory copy."""
+def handle_file_copy(params: Dict[str, Any], approved: bool = False) -> ToolResult:
+    """Handle file or directory copy - requires permission (can overwrite files)."""
     src_str = params.get("source", "")
     dst_str = params.get("destination", "")
 
     if not src_str or not dst_str:
         return ToolResult(success=False, output=None, error="Both 'source' and 'destination' are required")
+
+    if not approved:
+        return ToolResult(
+            success=False,
+            output=None,
+            requires_permission=True,
+            is_dangerous=True,
+            permission_message=f"Copy: {src_str} -> {dst_str} (existing files may be overwritten)"
+        )
 
     src = Path(src_str).expanduser()
     dst = Path(dst_str).expanduser()
@@ -374,11 +401,20 @@ def handle_file_move(params: Dict[str, Any], approved: bool = False) -> ToolResu
         return ToolResult(success=False, output=None, error=str(e))
 
 
-def handle_file_open(params: Dict[str, Any]) -> ToolResult:
-    """Open a file with its default Windows application."""
+def handle_file_open(params: Dict[str, Any], approved: bool = False) -> ToolResult:
+    """Open a file with its default Windows application (executable types need approval)."""
     path_str = params.get("path", "")
     if not path_str:
         return ToolResult(success=False, output=None, error="Path is required")
+
+    if not approved and needs_approval_file_open(path_str):
+        return ToolResult(
+            success=False,
+            output=None,
+            requires_permission=True,
+            is_dangerous=True,
+            permission_message=f"Open executable/script file: {path_str}"
+        )
 
     path = Path(path_str).expanduser()
     if not path.exists():
@@ -441,8 +477,8 @@ def handle_terminal_command(params: Dict[str, Any], approved: bool = False) -> T
         return ToolResult(success=False, output=None, error=str(e))
 
 
-def handle_app_open(params: Dict[str, Any]) -> ToolResult:
-    """Handle application open tool (non-blocking)."""
+def handle_app_open(params: Dict[str, Any], approved: bool = False) -> ToolResult:
+    """Handle application open tool (non-blocking). Only plain app names auto-run."""
     app_name = params.get("app_name", "").strip()
     app_path = params.get("path", "").strip()
 
@@ -451,6 +487,15 @@ def handle_app_open(params: Dict[str, Any]) -> ToolResult:
             success=False,
             output=None,
             error="Either app_name or path is required"
+        )
+
+    if not approved and needs_approval_app_open(app_name, app_path):
+        return ToolResult(
+            success=False,
+            output=None,
+            requires_permission=True,
+            is_dangerous=True,
+            permission_message=f"Launch: {app_path or app_name}"
         )
 
     try:
@@ -1098,6 +1143,95 @@ def handle_code_edit(params: Dict[str, Any], approved: bool = False) -> ToolResu
         return ToolResult(success=False, output=None, error=f"Failed to write changes: {e}")
 
 
+WEB_FETCH_MAX_BYTES = 2 * 1024 * 1024
+_WEB_FETCH_MAX_REDIRECTS = 5
+
+
+def _ip_is_public(addr: str) -> bool:
+    """False for loopback, private, link-local, unique-local, unspecified, multicast, reserved."""
+    ip = ipaddress.ip_address(addr.split("%")[0])
+    if ip.version == 6 and ip.ipv4_mapped:
+        ip = ip.ipv4_mapped
+    return ip.is_global and not (ip.is_multicast or ip.is_unspecified)
+
+
+def _resolve_public(host: str, port: int) -> list:
+    """Resolve ``host`` and return its addresses; raise ValueError unless ALL are public."""
+    try:
+        infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+    except socket.gaierror as e:
+        raise ValueError(f"Cannot resolve host '{host}': {e}")
+    if not infos:
+        raise ValueError(f"Cannot resolve host '{host}'")
+    for info in infos:
+        if not _ip_is_public(info[4][0]):
+            raise ValueError(f"Blocked: '{host}' resolves to a non-public address ({info[4][0]})")
+    return infos
+
+
+def _check_fetch_url(url: str) -> None:
+    """Raise ValueError unless ``url`` is http(s) and its host resolves only to public addresses."""
+    parts = urllib.parse.urlsplit(url)
+    if parts.scheme not in ("http", "https"):
+        raise ValueError("Only http and https URLs are allowed")
+    if not parts.hostname:
+        raise ValueError("URL has no host")
+    _resolve_public(parts.hostname, parts.port or (443 if parts.scheme == "https" else 80))
+
+
+def _connect_public(host: str, port: int, timeout) -> socket.socket:
+    """Connect to a validated public address (closes the DNS-rebinding gap between check and use)."""
+    last_err: Optional[Exception] = None
+    for family, socktype, proto, _canon, sockaddr in _resolve_public(host, port):
+        try:
+            sock = socket.socket(family, socktype, proto)
+            sock.settimeout(timeout)
+            sock.connect(sockaddr)
+            return sock
+        except OSError as e:
+            last_err = e
+    raise last_err or OSError(f"Could not connect to {host}")
+
+
+class _PublicHTTPConnection(http.client.HTTPConnection):
+    def connect(self):
+        self.sock = _connect_public(self.host, self.port, self.timeout)
+
+
+class _PublicHTTPSConnection(http.client.HTTPSConnection):
+    def connect(self):
+        sock = _connect_public(self.host, self.port, self.timeout)
+        self.sock = self._context.wrap_socket(sock, server_hostname=self.host)
+
+
+class _PublicHTTPHandler(urllib.request.HTTPHandler):
+    def http_open(self, req):
+        return self.do_open(_PublicHTTPConnection, req)
+
+
+class _PublicHTTPSHandler(urllib.request.HTTPSHandler):
+    def https_open(self, req):
+        return self.do_open(_PublicHTTPSConnection, req, context=self._context)
+
+
+class _CheckedRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Re-validates scheme and resolved address of every redirect target."""
+    max_redirections = _WEB_FETCH_MAX_REDIRECTS
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        _check_fetch_url(urllib.parse.urljoin(req.full_url, newurl))
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def _build_public_opener() -> urllib.request.OpenerDirector:
+    return urllib.request.build_opener(
+        urllib.request.ProxyHandler({}),  # a proxy would resolve hosts where we cannot check
+        _PublicHTTPHandler,
+        _PublicHTTPSHandler,
+        _CheckedRedirectHandler,
+    )
+
+
 def handle_web_fetch(params: Dict[str, Any]) -> ToolResult:
     """Fetch and extract clean readable text from a URL."""
     import urllib.request
@@ -1110,9 +1244,14 @@ def handle_web_fetch(params: Dict[str, Any]) -> ToolResult:
     if not url:
         return ToolResult(success=False, output=None, error="URL is required")
 
-    # If it doesn't have scheme, default to https
-    if not url.startswith("http://") and not url.startswith("https://"):
+    # No scheme -> default to https; any explicit non-http(s) scheme is rejected below.
+    if "://" not in url:
         url = "https://" + url
+
+    try:
+        _check_fetch_url(url)
+    except ValueError as e:
+        return ToolResult(success=False, output=None, error=f"Web fetch refused for '{url}': {e}")
 
     headers = {
         "User-Agent": (
@@ -1126,9 +1265,9 @@ def handle_web_fetch(params: Dict[str, Any]) -> ToolResult:
 
     try:
         req = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(req, timeout=15) as response:
+        with _build_public_opener().open(req, timeout=15) as response:
             content_type = response.headers.get("Content-Type", "")
-            raw_bytes = response.read()
+            raw_bytes = response.read(WEB_FETCH_MAX_BYTES)
 
             charset = "utf-8"
             if "charset=" in content_type:
@@ -1751,8 +1890,8 @@ def handle_create_and_send_pdf(params: Dict[str, Any]) -> ToolResult:
         )
 
 
-def handle_send_to_telegram(params: Dict[str, Any]) -> ToolResult:
-    """Send text messages or documents directly to the authorized Telegram chat."""
+def handle_send_to_telegram(params: Dict[str, Any], approved: bool = False) -> ToolResult:
+    """Send text messages (auto) or local files (requires permission) to the authorized Telegram chat."""
     bot_token = TELEGRAM_BOT_TOKEN or os.environ.get("TELEGRAM_BOT_TOKEN", "")
     chat_id = TELEGRAM_CHAT_ID or os.environ.get("TELEGRAM_CHAT_ID", "")
 
@@ -1775,6 +1914,15 @@ def handle_send_to_telegram(params: Dict[str, Any]) -> ToolResult:
 
     doc_sent = False
     msg_sent = False
+
+    if file_path and not approved:
+        return ToolResult(
+            success=False,
+            output=None,
+            requires_permission=True,
+            is_dangerous=True,
+            permission_message=f"Send local file to Telegram (leaves this machine): {file_path}"
+        )
 
     if file_path:
         doc_sent = send_telegram_document(file_path=file_path, caption=message, token=bot_token, chat_id=chat_id)
@@ -2924,7 +3072,7 @@ def create_default_registry() -> ToolRegistry:
             ToolParameter("max_lines", "number", "Maximum lines to read", required=False, default=100)
         ],
         handler=handle_file_read,
-        requires_permission=False
+        requires_permission=True
     ))
 
     registry.register(Tool(
@@ -2961,7 +3109,7 @@ def create_default_registry() -> ToolRegistry:
             ToolParameter("destination", "string", "Destination file or directory path")
         ],
         handler=handle_file_copy,
-        requires_permission=False
+        requires_permission=True
     ))
 
     registry.register(Tool(
@@ -2985,7 +3133,7 @@ def create_default_registry() -> ToolRegistry:
             ToolParameter("path", "string", "Path to the file to open")
         ],
         handler=handle_file_open,
-        requires_permission=False
+        requires_permission=True
     ))
 
     # Terminal Tools
@@ -3012,7 +3160,7 @@ def create_default_registry() -> ToolRegistry:
             ToolParameter("path", "string", "Path to the application executable", required=False)
         ],
         handler=handle_app_open,
-        requires_permission=False
+        requires_permission=True
     ))
 
     registry.register(Tool(
@@ -3185,7 +3333,7 @@ def create_default_registry() -> ToolRegistry:
             ToolParameter("file_path", "string", "Path to a local file to send as a document", required=False, default="")
         ],
         handler=handle_send_to_telegram,
-        requires_permission=False
+        requires_permission=True
     ))
 
     # Screen Capture & Vision Tools
