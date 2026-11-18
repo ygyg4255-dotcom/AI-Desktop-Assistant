@@ -11,3 +11,12 @@ youtube-transcript-api>=0.6.0
 edge-tts>=7.0.0
 pygame>=2.5.0
 flask>=3.0.0
+requests>=2.31.0
+Pillow>=10.0.0
+pyautogui>=0.9.54
+numpy>=1.26.0
+sounddevice>=0.4.6
+faster-whisper>=1.0.0
+# Prebuilt wheels of webrtcvad (the module is still imported as 'webrtcvad'); optional, voice VAD
+webrtcvad-wheels>=2.0.14; sys_platform == 'win32'
+webrtcvad>=2.0.10; sys_platform != 'win32'
