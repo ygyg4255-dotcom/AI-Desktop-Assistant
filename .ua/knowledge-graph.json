@@ -3136,15 +3136,14 @@
       "type": "config",
       "name": ".env.example",
       "filePath": ".env.example",
-      "summary": "Committed environment template listing the Anthropic API settings (base URL, API key, model) and the Telegram bot token and owner chat ID used for remote control, with placeholder values.",
+      "summary": "Committed environment template with placeholders for the Anthropic API key and the Telegram bot token and owner chat ID. The endpoint is fixed to api.anthropic.com and the model defaults in settings.py, so neither is set here.",
       "tags": [
         "configuration",
         "environment",
         "secrets-template",
         "telegram"
       ],
-      "complexity": "simple",
-      "languageNotes": "The template still ships ANTHROPIC_BASE_URL pointing at a local OmniRoute proxy and ANTHROPIC_MODEL=serve, which conflicts with the documented S2 invariant that base_url/provider are rejected and models default in settings.py."
+      "complexity": "simple"
     },
     {
       "id": "document:CLAUDE.md",

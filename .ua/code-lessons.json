@@ -325,15 +325,15 @@
       ]
     },
     ".env.example": {
-      "overview": "The committed template for local configuration. It is copied to `.env` and filled in by the user. It lists the Claude API key and model settings together with the Telegram bot token and chat ID, and the app also reads a language setting through `Settings`. The real `.env` is never committed or read by tooling.",
+      "overview": "The committed template for local configuration. It is copied to `.env` and filled in by the user. It lists the Claude API key together with the Telegram bot token and chat ID, and the app also reads a language setting through `Settings`. The real `.env` is never committed or read by tooling.",
       "sections": [
         {
-          "title": "AI provider settings",
+          "title": "Anthropic API key",
           "lineRange": [
             1,
             4
           ],
-          "explanation": "The first block holds the AI provider section: a placeholder API key and model entries. `Settings.load_environment` reads these through `get_config_value`, accepting both the `AI_*` and `ANTHROPIC_*` aliases. The endpoint itself is not meant to be set here, because it is fixed in code to `api.anthropic.com` (audit S2).",
+          "explanation": "The first block holds a placeholder API key (`ANTHROPIC_API_KEY`, also accepted as `AI_API_KEY`), read through `get_config_value`. The endpoint is not configurable: it is fixed in code to `api.anthropic.com` (audit S2), and the model defaults to `DEFAULT_MODEL` in `settings.py`.",
           "tourOrder": 3
         },
         {
