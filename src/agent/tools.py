@@ -21,6 +21,9 @@ import html
 import inspect
 from src.services.telegram_service import send_telegram_message, send_telegram_message_async, send_telegram_document, send_telegram_photo_async
 from src.config.settings import get_config_value
+from src.config.log import get_logger
+
+logger = get_logger(__name__)
 from src.agent.permissions import (
     needs_approval_app_open,
     needs_approval_file_open,
@@ -482,6 +485,76 @@ def handle_terminal_command(params: Dict[str, Any], approved: bool = False) -> T
         return ToolResult(success=False, output=None, error=str(e))
 
 
+# Windows Store (UWP/MSIX) apps have no .exe on PATH; launch them via URI protocol.
+APP_URI_MAP: Dict[str, str] = {
+    "whatsapp": "whatsapp:",
+    "spotify": "spotify:",
+    "calculator": "calculator:",
+    "calc": "calculator:",
+    "settings": "ms-settings:",
+    "store": "ms-windows-store:",
+    "microsoft store": "ms-windows-store:",
+    "mail": "mailto:",
+    "calendar": "outlookcal:",
+    "photos": "ms-photos:",
+    "camera": "microsoft.windows.camera:",
+    "clock": "ms-clock:",
+    "maps": "bingmaps:",
+    "xbox": "xbox:",
+}
+
+_APPID_SAFE = re.compile(r"^[\w.!\-{}\\ ]+$")
+
+
+def _lookup_start_app(app_name: str) -> Optional[str]:
+    """Resolve an app name to its Start menu AppID via Get-StartApps (no shell)."""
+    import json
+
+    ps = shutil.which("powershell.exe") or shutil.which("powershell")
+    if not ps:
+        return None
+    try:
+        proc = subprocess.run(
+            [ps, "-NoProfile", "-NonInteractive", "-Command",
+             "Get-StartApps | ConvertTo-Json -Compress"],
+            capture_output=True, text=True, timeout=15,
+        )
+        if proc.returncode != 0 or not proc.stdout.strip():
+            return None
+        apps = json.loads(proc.stdout)
+    except Exception as exc:
+        logger.debug("Get-StartApps lookup failed: %s", exc)
+        return None
+    if isinstance(apps, dict):
+        apps = [apps]
+    wanted = app_name.strip().lower()
+    exact = [a for a in apps if str(a.get("Name", "")).lower() == wanted]
+    partial = [a for a in apps if wanted and wanted in str(a.get("Name", "")).lower()]
+    for entry in exact + partial:
+        app_id = str(entry.get("AppID", ""))
+        if app_id and _APPID_SAFE.match(app_id):
+            return app_id
+    return None
+
+
+def _open_windows_app(app_name: str) -> bool:
+    """Open a Windows Store / URI-protocol app. Returns True if launched."""
+    uri = APP_URI_MAP.get(app_name.strip().lower())
+    if uri:
+        os.startfile(uri)
+        return True
+    return False
+
+
+def _open_start_app(app_name: str) -> bool:
+    """Last resort: resolve via Windows Start Apps and launch shell:AppsFolder."""
+    app_id = _lookup_start_app(app_name)
+    if app_id:
+        os.startfile("shell:AppsFolder\\" + app_id)
+        return True
+    return False
+
+
 def handle_app_open(params: Dict[str, Any], approved: bool = False) -> ToolResult:
     """Handle application open tool (non-blocking). Only plain app names auto-run."""
     app_name = params.get("app_name", "").strip()
@@ -506,12 +579,22 @@ def handle_app_open(params: Dict[str, Any], approved: bool = False) -> ToolResul
     try:
         target = app_path or app_name
         if platform.system() == "Windows":
+            if not app_path and _open_windows_app(app_name):
+                return ToolResult(
+                    success=True,
+                    output={"message": f"Opened: {app_name}"}
+                )
             try:
                 os.startfile(target)
             except Exception:
                 # No shell: an argument list cannot be quote-injected.
                 exe = app_path or shutil.which(app_name)
                 if not exe:
+                    if not app_path and _open_start_app(app_name):
+                        return ToolResult(
+                            success=True,
+                            output={"message": f"Opened: {app_name}"}
+                        )
                     raise FileNotFoundError(f"Application not found: {app_name}")
                 subprocess.Popen(
                     [exe],

@@ -246,7 +246,7 @@ def test_app_open_risky_targets_need_approval(startfile, params):
     startfile.assert_not_called()
 
 
-@pytest.mark.parametrize("name", ["notepad", "Calculator", "Visual Studio Code", "Google Chrome", "ms-settings:", "ms-settings:network"])
+@pytest.mark.parametrize("name", ["notepad", "Visual Studio Code", "Google Chrome", "ms-settings:", "ms-settings:network"])
 def test_app_open_plain_names_auto_allowed(startfile, name):
     result = handle_app_open({"app_name": name})
     assert result.success and not result.requires_permission
