@@ -22,7 +22,7 @@ import inspect
 from src.services.telegram_service import send_telegram_message, send_telegram_message_async, send_telegram_document, send_telegram_photo_async
 from src.config.settings import get_config_value
 from src.config.log import get_logger, redact_secrets
-from src.agent.vision import compress_image_file, image_block
+from src.agent.vision import CameraError, capture_camera_jpeg, compress_image_file, image_block
 
 logger = get_logger(__name__)
 from src.agent.permissions import (
@@ -71,6 +71,7 @@ class ToolResult:
     # Transient multimodal payload (Anthropic base64 image block) for the model to see.
     # Kept out of ``output`` and ``repr`` so it is never JSON-serialised, logged or stored.
     image: Optional[Dict[str, Any]] = field(default=None, repr=False)
+    image_kind: str = "screenshot"  # "screenshot" or "camera": picks the text placeholder
 
     def __post_init__(self):
         if self.message and isinstance(self.output, dict) and "message" not in self.output:
@@ -2172,8 +2173,26 @@ def handle_capture_and_inspect_screen(params: Dict[str, Any]) -> ToolResult:
     )
 
 
+def handle_capture_camera(params: Dict[str, Any]) -> ToolResult:
+    """Capture a single webcam frame (released immediately) and attach it for the model to see."""
+    try:
+        jpeg = capture_camera_jpeg()
+    except CameraError as e:
+        logger.info("Camera capture failed: %s", e)
+        return ToolResult(success=False, output=None, error=str(e))
+    return ToolResult(
+        success=True,
+        output={
+            "image_attached": True,
+            "message": "Camera photo captured. The image is attached for you to look at.",
+        },
+        image=image_block(jpeg),
+        image_kind="camera",
+    )
+
+
 # ---------------------------------------------------------------------------
-# GUI automation (pyautogui). Every tool here is DANGEROUS (S4): the handler only
+# GUI automation (pyautogui). gui_type / gui_hotkey are DANGEROUS (S4): the handler only
 # acts when the executor passes ``approved=True`` out-of-band after the user approved
 # the exact arguments. Input is validated *before* asking, so bad calls never prompt.
 # ---------------------------------------------------------------------------
@@ -2231,7 +2250,7 @@ def _run_gui(action) -> ToolResult:
         return ToolResult(success=False, output=None, error=f"GUI action failed: {e}")
 
 
-def handle_gui_click(params: Dict[str, Any], approved: bool = False) -> ToolResult:
+def handle_gui_click(params: Dict[str, Any]) -> ToolResult:
     try:
         x, y = int(params.get("x")), int(params.get("y"))
         clicks = int(params.get("clicks", 1) or 1)
@@ -2244,9 +2263,6 @@ def handle_gui_click(params: Dict[str, Any], approved: bool = False) -> ToolResu
         return ToolResult(success=False, output=None, error="clicks must be 1, 2 or 3.")
     if x < 0 or y < 0:
         return ToolResult(success=False, output=None, error="x and y must be non-negative screen coordinates.")
-
-    if not approved:
-        return _gui_needs_approval("gui_click", f"Click {button} x{clicks} at ({x}, {y})")
 
     def _do(pg):
         width, height = pg.size()
@@ -2315,16 +2331,13 @@ def handle_gui_hotkey(params: Dict[str, Any], approved: bool = False) -> ToolRes
     return _run_gui(_do)
 
 
-def handle_gui_scroll(params: Dict[str, Any], approved: bool = False) -> ToolResult:
+def handle_gui_scroll(params: Dict[str, Any]) -> ToolResult:
     try:
         amount = int(params.get("amount"))
     except (TypeError, ValueError):
         return ToolResult(success=False, output=None, error="gui_scroll needs an integer amount.")
     if amount == 0 or abs(amount) > GUI_MAX_SCROLL:
         return ToolResult(success=False, output=None, error=f"amount must be non-zero and within ±{GUI_MAX_SCROLL}.")
-
-    if not approved:
-        return _gui_needs_approval("gui_scroll", f"Scroll {'up' if amount > 0 else 'down'} by {abs(amount)}")
 
     def _do(pg):
         pg.scroll(amount)
@@ -3607,7 +3620,7 @@ def create_default_registry() -> ToolRegistry:
     # GUI automation: DANGEROUS (S4), approved per call; see GUI_TOOLS in permissions.py
     registry.register(Tool(
         name="gui_click",
-        description="Click the mouse at screen pixel coordinates (use capture_and_inspect_screen first to find them). Requires user approval every time.",
+        description="Click the mouse at screen pixel coordinates (use capture_and_inspect_screen first to find them). Runs immediately when the user asks.",
         category=ToolCategory.SYSTEM,
         parameters=[
             ToolParameter("x", "number", "X pixel coordinate on the full-resolution screen"),
@@ -3616,8 +3629,7 @@ def create_default_registry() -> ToolRegistry:
             ToolParameter("clicks", "number", "Number of clicks, 1-3 (default 1)", required=False, default=1),
         ],
         handler=handle_gui_click,
-        requires_permission=True,
-        is_dangerous=True,
+        requires_permission=False,
     ))
     registry.register(Tool(
         name="gui_type",
@@ -3644,14 +3656,22 @@ def create_default_registry() -> ToolRegistry:
     ))
     registry.register(Tool(
         name="gui_scroll",
-        description="Scroll the mouse wheel in the window under the cursor (positive = up, negative = down). Requires user approval every time.",
+        description="Scroll the mouse wheel in the window under the cursor (positive = up, negative = down). Runs immediately when the user asks.",
         category=ToolCategory.SYSTEM,
         parameters=[
             ToolParameter("amount", "number", "Scroll clicks; positive up, negative down (max ±1000)"),
         ],
         handler=handle_gui_scroll,
-        requires_permission=True,
-        is_dangerous=True,
+        requires_permission=False,
+    ))
+
+    registry.register(Tool(
+        name="capture_camera",
+        description="Take one photo with the user's webcam and attach it as an image so you can see what is in front of the camera. The camera is released immediately. Use when the user asks you to look through the camera.",
+        category=ToolCategory.SYSTEM,
+        parameters=[],
+        handler=handle_capture_camera,
+        requires_permission=False,
     ))
 
     # Windows Clipboard Manager Tool

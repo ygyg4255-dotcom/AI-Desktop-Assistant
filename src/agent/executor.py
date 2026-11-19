@@ -25,7 +25,7 @@ from src.agent.approvals import (
     DEFAULT_TTL,
 )
 from src.agent.history import HISTORY_FILENAME, PersistentHistory
-from src.agent.vision import strip_image_data
+from src.agent.vision import CAMERA_PLACEHOLDER, SCREENSHOT_PLACEHOLDER, strip_image_data
 from src.agent.memory import ConversationMemory
 from src.agent.tool_prompts import strip_action_tag, tag_reply, tool_result_prompt
 from src.services.ai_client import AIClient, Message
@@ -1139,8 +1139,11 @@ SCREEN VISION & CAPABILITIES:
 - When asked if you can see the screen, what is on the screen, to read an error, or to inspect the user's workspace, NEVER say "No" or claim that you lack vision or eyes. ALWAYS use `capture_and_inspect_screen`, then describe what you really see in the image. Never invent screen content you have not captured.
 - `capture_and_inspect_screen` also delivers the screenshot to the user's Telegram chat when requested (set send_to_telegram=false if the user only wants you to look).
 
-GUI AUTOMATION (APPROVAL REQUIRED):
-- You CAN operate the mouse and keyboard with `gui_click`, `gui_type`, `gui_hotkey` and `gui_scroll`. Every call is shown to the user for approval first; if it is declined or pending, say so and do NOT claim it happened.
+WEBCAM VISION:
+- You CAN see through the user's webcam: `capture_camera` takes one photo (the camera is released immediately) and attaches it as an image. When the user asks you to look through the camera, see them, or identify/describe something they are holding or showing, ALWAYS call it, then describe what you really see. Never claim you have no camera access, and only use it when the user asks.
+
+GUI AUTOMATION:
+- You CAN operate the mouse and keyboard. `gui_click` and `gui_scroll` run immediately when the user asks. `gui_type` and `gui_hotkey` are shown to the user for approval first; if declined or pending, say so and do NOT claim it happened.
 - Look first: capture the screen, pick click coordinates from the screenshot (the image may be downscaled to 1280px wide, so scale coordinates back to the real screen resolution), act, then capture again to verify the result.
 - NEVER type into password, PIN, passcode or other credential fields, never type secrets, API keys or tokens, and never handle credentials: if a sign-in or password prompt appears, stop and ask the user to enter it themselves.
 - Prefer dedicated tools (app_open, whatsapp_send, ...) over GUI automation when one exists.
@@ -1164,7 +1167,7 @@ WHATSAPP DESKTOP AUTOMATION:
 IMPORTANT RULES:
 1. When asked to move, snap, position, maximize, or minimize an open APPLICATION WINDOW or BROWSER (نافذة أو متصفح أو برنامج), ALWAYS use the `move_application_window` tool.
 2. When asked to visually move or position desktop shortcut icons or files on the Windows Desktop wallpaper background, use the `desktop_icon_position` tool.
-3. When asked if you can see the screen, what is open/visible, what an error says, or to capture/take a screenshot, ALWAYS use the `capture_and_inspect_screen` tool. For clicking, typing, hotkeys or scrolling on screen use the `gui_*` tools (approval required; never for credentials).
+3. When asked if you can see the screen, what is open/visible, what an error says, or to capture/take a screenshot, ALWAYS use the `capture_and_inspect_screen` tool. For clicking, typing, hotkeys or scrolling on screen use the `gui_*` tools (typing/hotkeys need approval; never for credentials). When asked to look through the camera/webcam, use `capture_camera`.
 4. When asked to adjust volume (volume_up, volume_down, volume_mute, set_volume), screen brightness (brightness_up, brightness_down, set_brightness), or open Windows settings, ALWAYS use the `system_control` tool for instant execution. NEVER use terminal_execute or PowerShell for volume or brightness.
 5. When asked to summarize or explain a YouTube video, use `youtube_play_and_summarize` with `play=False` (unless the user explicitly asks to play/open it). When asked ONLY to play music or a video without summarization, use `youtube_play`.
 6. When asked to send a WhatsApp message, use `whatsapp_send`. When asked to read or check WhatsApp messages, use `whatsapp_read`.
@@ -1258,9 +1261,13 @@ Available tools are provided in the tool definitions. Use them responsibly."""
         """
         text = tool_result_prompt(tool_name, result_repr, result.success)
         if result.success and result.image:
+            kinds = self.__dict__.setdefault("_image_kinds", {})  # id(message) -> "camera" | "screenshot"
             for msg in self._messages:
-                msg.content = strip_image_data(msg.content)
-            self._messages.append(Message(role="user", content=[result.image, {"type": "text", "text": text}]))
+                placeholder = CAMERA_PLACEHOLDER if kinds.get(id(msg)) == "camera" else SCREENSHOT_PLACEHOLDER
+                msg.content = strip_image_data(msg.content, placeholder)
+            new_msg = Message(role="user", content=[result.image, {"type": "text", "text": text}])
+            kinds[id(new_msg)] = result.image_kind
+            self._messages.append(new_msg)
         else:
             self._messages.append(Message(role="user", content=text))
 
@@ -1802,6 +1809,7 @@ Available tools are provided in the tool definitions. Use them responsibly."""
                                 "desktop_icon_position",
                                 "move_application_window",
                                 "capture_and_inspect_screen",
+                                "capture_camera",
                                 "whatsapp_send",
                                 "whatsapp_read",
                                 "clipboard_manager"
@@ -1901,6 +1909,7 @@ Available tools are provided in the tool definitions. Use them responsibly."""
                 "desktop_icon_position",
                 "move_application_window",
                 "capture_and_inspect_screen",
+                "capture_camera",
                 "whatsapp_send",
                 "whatsapp_read",
                 "clipboard_manager"

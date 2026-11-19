@@ -36,6 +36,11 @@ class PermissionGate:
         "system_control",
         "youtube_play",
         "create_and_send_pdf",
+        # The user's explicit request is the authorization for basic UI interaction and
+        # for looking through the webcam; the handlers still validate their input.
+        "gui_click",
+        "gui_scroll",
+        "capture_camera",
     }
 
     # Tools that auto-run only for low-risk inputs; the handler decides per call
@@ -58,16 +63,15 @@ class PermissionGate:
         "terminal_execute",
         "app_close",
         "code_edit",
-        # GUI automation: every call is approved individually (see GUI_TOOLS)
-        "gui_click",
+        # GUI automation that types: every call is approved individually (see GUI_TOOLS)
         "gui_type",
         "gui_hotkey",
-        "gui_scroll",
     }
 
-    # Mouse/keyboard automation. Always DANGEROUS, and a blanket "allow" (session or
-    # remembered) is refused so each click/keystroke batch needs its own approval.
-    GUI_TOOLS = {"gui_click", "gui_type", "gui_hotkey", "gui_scroll"}
+    # Keyboard automation. Always DANGEROUS, and a blanket "allow" (session or
+    # remembered) is refused so each keystroke batch needs its own approval.
+    # (gui_click / gui_scroll are SAFE: see SAFE_TOOLS.)
+    GUI_TOOLS = {"gui_type", "gui_hotkey"}
 
     def __init__(self):
         self._session_rules: dict[str, PermissionLevel] = {}
@@ -123,10 +127,8 @@ class PermissionGate:
             "terminal_execute": f"Run command: {tool_input.get('command', 'unknown')[:100]}",
             "app_close": f"Close application: {tool_input.get('app_name', 'unknown')}",
             "code_edit": f"Edit file: {tool_input.get('path', 'unknown')} (targeted replace)",
-            "gui_click": f"Click {tool_input.get('button', 'left')} at ({tool_input.get('x', '?')}, {tool_input.get('y', '?')})",
             "gui_type": f"Type text: {str(tool_input.get('text', ''))[:60]!r}",
             "gui_hotkey": f"Press hotkey: {tool_input.get('keys', 'unknown')}",
-            "gui_scroll": f"Scroll by {tool_input.get('amount', '?')}",
         }
         return messages.get(tool_name, f"Execute tool: {tool_name}")
 

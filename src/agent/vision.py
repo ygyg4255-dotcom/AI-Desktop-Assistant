@@ -12,9 +12,14 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List, Union
 
+from src.config.log import get_logger
+
+logger = get_logger(__name__)
+
 MAX_WIDTH = 1280
 JPEG_QUALITY = 75
 SCREENSHOT_PLACEHOLDER = "[Screenshot captured]"
+CAMERA_PLACEHOLDER = "[Camera photo captured]"
 
 # Any long unbroken base64-looking run (a screenshot is tens of KB; prose never has this).
 _BASE64_BLOB = re.compile(r"[A-Za-z0-9+/]{1000,}={0,2}")
@@ -56,12 +61,14 @@ def is_image_block(block: Any) -> bool:
     return isinstance(block, dict) and block.get("type") == "image"
 
 
-def strip_image_data(content: Union[str, List[Dict[str, Any]]]) -> Union[str, List[Dict[str, Any]]]:
+def strip_image_data(
+    content: Union[str, List[Dict[str, Any]]], placeholder: str = SCREENSHOT_PLACEHOLDER
+) -> Union[str, List[Dict[str, Any]]]:
     """Replace image blocks in a message content list with a text placeholder."""
     if not isinstance(content, list):
         return content
     return [
-        {"type": "text", "text": SCREENSHOT_PLACEHOLDER} if is_image_block(b) else b
+        {"type": "text", "text": placeholder} if is_image_block(b) else b
         for b in content
     ]
 
@@ -71,3 +78,51 @@ def scrub_image_data(text: str) -> str:
     if not isinstance(text, str):
         return text
     return _BASE64_BLOB.sub(SCREENSHOT_PLACEHOLDER, text)
+
+
+class CameraError(RuntimeError):
+    """The webcam could not be used (no cv2, no camera, busy, or no frame)."""
+
+
+CAMERA_WARMUP_FRAMES = 5  # discard the first frames so auto-exposure can settle
+
+
+def capture_camera_jpeg(index: int = 0, max_width: int = MAX_WIDTH, quality: int = JPEG_QUALITY) -> bytes:
+    """Grab one frame from the default webcam and return it as compressed JPEG bytes.
+
+    The camera is always released before returning (the LED turns off immediately),
+    including when reading fails. Raises ``CameraError`` with a user-readable message.
+    """
+    try:
+        import cv2
+    except ImportError as e:
+        raise CameraError("Camera support needs opencv-python (pip install opencv-python).") from e
+
+    cap = None
+    try:
+        backend = getattr(cv2, "CAP_DSHOW", 0)  # DirectShow opens faster and releases cleanly on Windows
+        cap = cv2.VideoCapture(index, backend)
+        if not cap.isOpened():
+            raise CameraError("No camera found, or it is in use by another app or blocked by Windows privacy settings.")
+        frame = None
+        for _ in range(CAMERA_WARMUP_FRAMES):
+            ok, grabbed = cap.read()
+            if ok and grabbed is not None:
+                frame = grabbed
+        if frame is None:
+            raise CameraError("The camera opened but returned no image.")
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    except CameraError:
+        raise
+    except Exception as e:
+        raise CameraError(f"Camera capture failed: {e}") from e
+    finally:
+        if cap is not None:
+            try:
+                cap.release()
+            except Exception as e:  # never mask the real result
+                logger.debug("Camera release failed: %s", e)
+
+    from PIL import Image
+
+    return compress_image(Image.fromarray(rgb), max_width=max_width, quality=quality)

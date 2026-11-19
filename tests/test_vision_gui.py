@@ -17,6 +17,8 @@ from src.agent.permissions import PermissionGate, PermissionLevel
 from src.agent.tools import ToolResult, create_default_registry
 
 GUI_TOOLS = ("gui_click", "gui_type", "gui_hotkey", "gui_scroll")
+APPROVED_GUI = ("gui_type", "gui_hotkey")  # still S4-gated
+FREE_GUI = ("gui_click", "gui_scroll")  # the user's request is the authorization
 
 
 # ---------------------------------------------------------------- compression
@@ -178,11 +180,36 @@ def pg(monkeypatch):
 
 
 GUI_CALLS = [
-    ("gui_click", {"x": 100, "y": 200}),
     ("gui_type", {"text": "hello"}),
     ("gui_hotkey", {"keys": ["ctrl", "c"]}),
+]
+FREE_CALLS = [
+    ("gui_click", {"x": 100, "y": 200}),
     ("gui_scroll", {"amount": -3}),
 ]
+
+
+@pytest.mark.parametrize("name, args", FREE_CALLS)
+def test_click_and_scroll_run_immediately_without_approval(pg, name, args):
+    gate = PermissionGate()
+    tool = create_default_registry().get(name)
+    assert gate.is_safe(name) and not gate.is_dangerous(name)
+    assert not tool.requires_permission and not tool.is_dangerous
+    assert gate.get_permission_level(name) == PermissionLevel.ALLOW
+
+    result = tool.run(args)  # approved=False, as the executor calls non-gated tools
+
+    assert result.success and not result.requires_permission
+    assert pg.FAILSAFE is True and pg.PAUSE == 0.1
+
+
+def test_executor_runs_click_without_prompting(pg, tmp_path):
+    ex, _, _ = _executor(tmp_path)
+    callback = MagicMock()
+    result = ex._execute_tool_with_permission("gui_click", {"x": 5, "y": 5}, callback)
+    assert result.success
+    callback.assert_not_called()
+    pg.click.assert_called_once_with(x=5, y=5, button="left", clicks=1)
 
 
 @pytest.mark.parametrize("name, args", GUI_CALLS)
@@ -224,18 +251,18 @@ def test_blanket_allow_is_refused_for_gui_tools(name, args):
 def test_executor_gates_gui_tool_through_permission_flow(pg, tmp_path):
     ex, _, _ = _executor(tmp_path)
     callback = MagicMock()
-    result = ex._execute_tool_with_permission("gui_click", {"x": 5, "y": 5, "_approved": True}, callback)
+    result = ex._execute_tool_with_permission("gui_type", {"text": "hi", "_approved": True}, callback)
 
     assert result.requires_permission
     callback.assert_called_once()
-    pg.click.assert_not_called()
+    pg.write.assert_not_called()
 
 
 def test_approved_calls_execute_with_failsafe_and_pause(pg):
     reg = create_default_registry()
     assert pg.FAILSAFE is False
 
-    assert reg.get("gui_click").run({"x": 100, "y": 200, "button": "right", "clicks": 2}, approved=True).success
+    assert reg.get("gui_click").run({"x": 100, "y": 200, "button": "right", "clicks": 2}).success
     pg.click.assert_called_once_with(x=100, y=200, button="right", clicks=2)
     assert pg.FAILSAFE is True and pg.PAUSE == 0.1
 
@@ -246,7 +273,7 @@ def test_approved_calls_execute_with_failsafe_and_pause(pg):
     assert reg.get("gui_hotkey").run({"keys": ["Ctrl", "C"]}, approved=True).success
     pg.hotkey.assert_called_once_with("ctrl", "c")
 
-    assert reg.get("gui_scroll").run({"amount": -5}, approved=True).success
+    assert reg.get("gui_scroll").run({"amount": -5}).success
     pg.scroll.assert_called_once_with(-5)
 
 
@@ -255,7 +282,7 @@ def test_failsafe_exception_is_reported_not_raised(pg):
         pass
     pg.click.side_effect = FailSafeException("corner")
 
-    result = create_default_registry().get("gui_click").run({"x": 1, "y": 1}, approved=True)
+    result = create_default_registry().get("gui_click").run({"x": 1, "y": 1})
     assert not result.success and "fail-safe" in result.error
 
 
@@ -273,12 +300,12 @@ def test_failsafe_exception_is_reported_not_raised(pg):
     ("gui_scroll", {"amount": 99999}),
 ])
 def test_invalid_gui_input_fails_without_prompting(pg, name, args):
-    result = create_default_registry().get(name).run(args, approved=True)
+    result = create_default_registry().get(name).run(args, approved=True)  # approved is ignored by free tools
     assert not result.success and not result.requires_permission and result.error
 
 
 def test_click_outside_screen_is_rejected(pg):
-    result = create_default_registry().get("gui_click").run({"x": 5000, "y": 10}, approved=True)
+    result = create_default_registry().get("gui_click").run({"x": 5000, "y": 10})
     assert not result.success and "outside" in result.error
     pg.click.assert_not_called()
 
@@ -302,3 +329,123 @@ def test_system_prompt_lists_vision_gui_and_forbids_credentials():
     for name in ("capture_and_inspect_screen", *GUI_TOOLS):
         assert name in prompt
     assert "NEVER type into password" in prompt and "approval" in prompt.lower()
+
+
+def test_system_prompt_lists_camera_and_free_gui():
+    prompt = AgentExecutor.SYSTEM_PROMPT
+    assert "capture_camera" in prompt and "WEBCAM" in prompt
+
+
+# ----------------------------------------------------------------- webcam
+
+import numpy as np
+
+
+class _FakeCap:
+    def __init__(self, opened=True, frames=None, raise_on_read=False):
+        self._opened, self.released = opened, False
+        self._frames = frames if frames is not None else [np.full((1080, 1920, 3), 90, np.uint8)] * 10
+        self._raise = raise_on_read
+        self.reads = 0
+
+    def isOpened(self):
+        return self._opened
+
+    def read(self):
+        self.reads += 1
+        if self._raise:
+            raise RuntimeError("driver crashed")
+        if not self._frames:
+            return False, None
+        return True, self._frames[min(self.reads - 1, len(self._frames) - 1)]
+
+    def release(self):
+        self.released = True
+
+
+@pytest.fixture
+def fake_cv2(monkeypatch):
+    import sys
+    cv2 = MagicMock()
+    cv2.CAP_DSHOW = 700
+    cv2.COLOR_BGR2RGB = 4
+    cv2.cvtColor.side_effect = lambda f, code: f[:, :, ::-1].copy()
+    cv2.cap = _FakeCap()
+    cv2.VideoCapture.side_effect = lambda *a, **k: cv2.cap
+    monkeypatch.setitem(sys.modules, "cv2", cv2)
+    return cv2
+
+
+def test_camera_tool_is_safe_no_approval_and_registered():
+    gate = PermissionGate()
+    tool = create_default_registry().get("capture_camera")
+    assert tool is not None and not tool.requires_permission
+    assert gate.is_safe("capture_camera") and gate.get_permission_level("capture_camera") == PermissionLevel.ALLOW
+
+
+def test_camera_frame_is_compressed_and_returned_as_image(fake_cv2):
+    result = create_default_registry().get("capture_camera").run({})
+
+    assert result.success and result.image_kind == "camera"
+    img = _decode(result.image)
+    assert img.format == "JPEG" and img.width == 1280 and img.height == 720
+    assert result.image["source"]["data"] not in json.dumps(result.output)
+    fake_cv2.VideoCapture.assert_called_once_with(0, 700)
+
+
+def test_camera_is_released_right_after_capture(fake_cv2):
+    create_default_registry().get("capture_camera").run({})
+    assert fake_cv2.cap.released is True
+
+
+def test_camera_is_released_even_when_reading_fails(fake_cv2):
+    fake_cv2.cap = _FakeCap(raise_on_read=True)
+    result = create_default_registry().get("capture_camera").run({})
+    assert not result.success and "Camera capture failed" in result.error
+    assert fake_cv2.cap.released is True
+
+
+def test_camera_with_no_frames_fails_clearly_and_releases(fake_cv2):
+    fake_cv2.cap = _FakeCap(frames=[])
+    result = create_default_registry().get("capture_camera").run({})
+    assert not result.success and "no image" in result.error and result.image is None
+    assert fake_cv2.cap.released is True
+
+
+def test_missing_camera_gives_clear_error(fake_cv2):
+    fake_cv2.cap = _FakeCap(opened=False)
+    result = create_default_registry().get("capture_camera").run({})
+    assert not result.success and "No camera found" in result.error
+    assert fake_cv2.cap.released is True
+
+
+def test_missing_cv2_gives_clear_error(monkeypatch):
+    import sys
+    monkeypatch.setitem(sys.modules, "cv2", None)  # import raises ImportError
+    result = create_default_registry().get("capture_camera").run({})
+    assert not result.success and "opencv-python" in result.error
+
+
+def test_camera_photo_never_persisted_and_only_latest_image_kept(tmp_path, fake_cv2):
+    ex, memory, history = _executor(tmp_path)
+    cam = create_default_registry().get("capture_camera").run({})
+    b64 = cam.image["source"]["data"]
+
+    ex._append_tool_feedback("capture_camera", "{}", cam)
+    ex._append_tool_feedback("capture_and_inspect_screen", "{}", _shot_result())
+
+    images = [b for m in ex._messages if isinstance(m.content, list) for b in m.content if b["type"] == "image"]
+    assert len(images) == 1  # only the newest image stays live
+    assert ex._messages[0].content[0] == {"type": "text", "text": vision.CAMERA_PLACEHOLDER}
+
+    memory.add_message("assistant", f"I saw: {b64}")
+    history.append("assistant", f"I saw: {b64}")
+    for path in (memory.path, history.path):
+        text = path.read_text(encoding="utf-8")
+        assert b64[:200] not in text and vision.SCREENSHOT_PLACEHOLDER in text  # generic blob backstop
+
+
+def test_strip_image_data_accepts_camera_placeholder():
+    blocks = [vision.image_block(b"abc")]
+    assert vision.strip_image_data(blocks, vision.CAMERA_PLACEHOLDER) == [
+        {"type": "text", "text": "[Camera photo captured]"}]
