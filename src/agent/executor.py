@@ -31,7 +31,9 @@ from src.agent.tool_prompts import strip_action_tag, tag_reply, tool_result_prom
 from src.services.ai_client import AIClient, Message
 from src.services.hud_status import update_hud_status
 from src.services.sentence_chunker import SentenceChunker
-from src.config.log import get_logger
+from src.config.log import get_logger, redact_secrets
+
+APPROVED_OUTCOME_MAX_CHARS = 300
 
 logger = get_logger(__name__)
 from src.storage.db import Database
@@ -1404,7 +1406,11 @@ Available tools are provided in the tool definitions. Use them responsibly."""
                 exec_id = self._database.log_tool_execution(self._conversation_id, tool_name, tool_input, "approved")
             except Exception:
                 exec_id = None
-        result = self._execute_tool(tool_name, tool_input, approved=True)
+        try:
+            result = self._execute_tool(tool_name, tool_input, approved=True)
+        except Exception as err:
+            result = ToolResult(success=False, output=None, error=str(err) or type(err).__name__)
+            logger.exception("Approved tool %s raised", tool_name)
         if exec_id:
             try:
                 self._database.update_tool_execution(
@@ -1413,8 +1419,32 @@ Available tools are provided in the tool definitions. Use them responsibly."""
                     "success" if result.success else "failed",
                 )
             except Exception:
-                pass
+                logger.debug("Could not update tool execution record", exc_info=True)
+        self._record_approved_outcome(tool_name, result)
         return result
+
+    def _record_approved_outcome(self, tool_name: str, result: ToolResult) -> None:
+        """Tell the conversation an approved tool finished, so "did you do it?" is answered truthfully.
+
+        The approval wait leaves "waiting for approval" as the last assistant turn; without this
+        note the model keeps believing the action is still pending.
+        """
+        if result.success:
+            out = result.output
+            detail = (out.get("message") if isinstance(out, dict) else None) or (
+                out if isinstance(out, str) else "")
+            verb = "completed successfully"
+        else:
+            detail = result.error or "unknown error"
+            verb = "FAILED"
+        detail = redact_secrets(" ".join(str(detail).split()))
+        if len(detail) > APPROVED_OUTCOME_MAX_CHARS:
+            detail = detail[:APPROVED_OUTCOME_MAX_CHARS].rstrip() + "…"
+        note = f"[Approved action finished] {tool_name} {verb}." + (f" {detail}" if detail else "")
+        try:
+            self._remember("assistant", note)
+        except Exception:
+            logger.warning("Could not record approved outcome for %s", tool_name, exc_info=True)
 
     @staticmethod
     def approval_wait_message(origin: str, tool_name: str, summary: str, arabic: bool = False) -> str:

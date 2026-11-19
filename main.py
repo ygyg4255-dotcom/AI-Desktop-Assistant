@@ -44,6 +44,7 @@ from src.services.telegram_service import (
     send_telegram_message_async,
 )
 from src.services.camera_service import get_camera_service
+from src.services.reminder_service import format_reminder_speech, get_reminder_service
 from ui_server import start_hud_server, stop_hud_server
 
 logger = get_logger("main")
@@ -96,6 +97,21 @@ def make_approval_listener(bridge_ref: list, notify_telegram=send_telegram_messa
     return _listener
 
 
+def make_reminder_handler(tts, notify_telegram=send_telegram_message_async):
+    """Callback for ReminderService: speak the reminder, log it to the HUD chat, ping Telegram.
+
+    Telegram sends are skipped silently when it is not configured (the sender returns False).
+    """
+    def _fire(rem) -> None:
+        text = format_reminder_speech(rem)
+        logger.info("Reminder fired: %s", text)
+        update_hud_status(log_entry=f"Altron: {text}")
+        notify_telegram(f"⏰ {text}")
+        if tts.is_enabled and not tts.is_muted:
+            tts.speak(text)
+    return _fire
+
+
 def main() -> None:
     """Coordinate and supervise all Altron subsystems concurrently."""
     log_path = setup_logging()
@@ -138,6 +154,10 @@ def main() -> None:
     approvals.add_listener(make_approval_listener(tg_bridge))
     approvals.start_sweeper(interval=5.0)
     tts_manager = TTSManager(enabled=True)
+
+    reminders = get_reminder_service()
+    reminders.set_callback(make_reminder_handler(tts_manager))
+    reminders.start()  # overdue reminders (missed while off) fire right away
 
     camera_service = get_camera_service()
     shutdown_event = threading.Event()
@@ -447,6 +467,10 @@ def main() -> None:
         approvals.stop()
     except Exception as err:
         logger.warning("Executor/approvals did not stop cleanly: %s", err)
+    try:
+        reminders.stop()
+    except Exception as err:
+        logger.warning("Reminder service did not stop cleanly: %s", err)
     try:
         tts_manager.stop()
     except Exception as err:

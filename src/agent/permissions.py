@@ -43,6 +43,10 @@ class PermissionGate:
         "capture_camera",
         "camera_start",  # turning the camera on/off is the user's explicit request;
         "camera_stop",   # frames stay in RAM and never go to Claude unless asked
+        # Reminders only schedule text to be spoken / logged / sent to the owner's own chat.
+        "set_reminder",
+        "list_reminders",
+        "cancel_reminder",
     }
 
     # Tools that auto-run only for low-risk inputs; the handler decides per call

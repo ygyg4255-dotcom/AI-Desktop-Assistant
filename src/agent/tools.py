@@ -24,6 +24,7 @@ from src.config.settings import get_config_value
 from src.config.log import get_logger, redact_secrets
 from src.agent.vision import CameraError, capture_camera_jpeg, compress_image_file, image_block
 from src.services.camera_service import CameraServiceError, get_camera_service
+from src.services.reminder_service import ReminderError, get_reminder_service, parse_when
 
 logger = get_logger(__name__)
 from src.agent.permissions import (
@@ -2255,6 +2256,36 @@ def handle_camera_stop(params: Dict[str, Any]) -> ToolResult:
 
 
 # ---------------------------------------------------------------------------
+# Reminders (SAFE tier): in-process scheduling only. Firing just speaks / logs / sends
+# the stored text, so no approval is needed.
+# ---------------------------------------------------------------------------
+
+def handle_set_reminder(params: Dict[str, Any]) -> ToolResult:
+    try:
+        due = parse_when(params.get("time_or_delay"), params.get("delay_seconds"))
+        rem = get_reminder_service().add(params.get("message", ""), due)
+    except ReminderError as err:
+        return ToolResult(success=False, output=None, error=str(err))
+    return ToolResult(success=True, output={
+        "id": rem.id, "due": rem.due_text(),
+        "message": f"Reminder set for {rem.due_text()}: {rem.message}",
+    })
+
+
+def handle_list_reminders(params: Dict[str, Any]) -> ToolResult:
+    items = [r.public_view() for r in get_reminder_service().list()]
+    msg = f"{len(items)} pending reminder(s)." if items else "No pending reminders."
+    return ToolResult(success=True, output={"reminders": items, "message": msg})
+
+
+def handle_cancel_reminder(params: Dict[str, Any]) -> ToolResult:
+    rid = str(params.get("reminder_id", "")).strip()
+    if get_reminder_service().cancel(rid):
+        return ToolResult(success=True, output={"message": f"Reminder {rid} cancelled."})
+    return ToolResult(success=False, output=None, error=f"No pending reminder with id {rid!r}.")
+
+
+# ---------------------------------------------------------------------------
 # GUI automation (pyautogui). gui_type / gui_hotkey are DANGEROUS (S4): the handler only
 # acts when the executor passes ``approved=True`` out-of-band after the user approved
 # the exact arguments. Input is validated *before* asking, so bad calls never prompt.
@@ -3752,6 +3783,35 @@ def create_default_registry() -> ToolRegistry:
         category=ToolCategory.SYSTEM,
         parameters=[],
         handler=handle_camera_stop,
+        requires_permission=False,
+    ))
+
+    registry.register(Tool(
+        name="set_reminder",
+        description="Set a reminder/alarm that Altron speaks aloud (and sends to Telegram) when due. Use this instead of PowerShell scheduled tasks. time_or_delay accepts a clock time ('22:40', '7:30 pm'; rolls to tomorrow if already passed today), an ISO datetime, or a relative delay ('in 10 minutes', '1h30m'). Alternatively pass delay_seconds.",
+        category=ToolCategory.UTILITY,
+        parameters=[
+            ToolParameter("message", "string", "What to remind the user about (max 500 characters)"),
+            ToolParameter("time_or_delay", "string", "Clock time, ISO datetime, or relative delay like 'in 10 minutes'", required=False, default=""),
+            ToolParameter("delay_seconds", "number", "Alternative to time_or_delay: seconds from now", required=False),
+        ],
+        handler=handle_set_reminder,
+        requires_permission=False,
+    ))
+    registry.register(Tool(
+        name="list_reminders",
+        description="List the active pending reminders with their ids and due times.",
+        category=ToolCategory.UTILITY,
+        parameters=[],
+        handler=handle_list_reminders,
+        requires_permission=False,
+    ))
+    registry.register(Tool(
+        name="cancel_reminder",
+        description="Cancel a pending reminder by its id (see list_reminders).",
+        category=ToolCategory.UTILITY,
+        parameters=[ToolParameter("reminder_id", "string", "Id of the reminder to cancel")],
+        handler=handle_cancel_reminder,
         requires_permission=False,
     ))
 
