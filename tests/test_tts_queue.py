@@ -276,3 +276,21 @@ def test_edge_synth_reuses_one_persistent_event_loop(tts, monkeypatch):
     assert tts._synthesize_edge("two") == ("dry", b"mp3")
     assert tts._loop is loop
     assert {"edge_tts_synth_ms", "decode_and_fx_ms"} <= set(tts._synth_timing)
+
+
+def test_first_sentence_latency_stages_account_for_total(caplog):
+    import logging
+    from src.services.voice_service import _AudioSlot
+    slot = _AudioSlot(first=True)
+    slot.timing.update({"enqueue_to_prefetch_start_ms": 3.0, "import_setup_ms": 4000.0,
+                        "edge_tts_synth_ms": 10.0, "decode_and_fx_ms": 5.0})
+    slot.t_enqueue -= 4.5  # pretend 4.5 s elapsed
+    slot.t_prefetch_done = time.monotonic() - 0.4
+    with caplog.at_level(logging.INFO):
+        TTSManager._log_first_latency(slot)
+    t = slot.timing
+    named = sum(t[k] for k in ("enqueue_to_prefetch_start_ms", "import_setup_ms", "edge_tts_synth_ms",
+                               "decode_and_fx_ms", "handoff_to_play_ms"))
+    assert t["total_to_play_ms"] == pytest.approx(named + t["other_ms"], abs=1.0)
+    assert t["handoff_to_play_ms"] >= 400
+    assert "TTS first-sentence latency" in caplog.text

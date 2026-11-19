@@ -89,9 +89,10 @@ def parse_wake_word(text: str) -> tuple[bool, str]:
 class _AudioSlot:
     """Hand-off cell between the prefetch thread (fills ``audio``) and the player."""
 
-    __slots__ = ("ready", "audio", "first", "t_enqueue", "timing")
+    __slots__ = ("ready", "audio", "first", "t_enqueue", "timing", "t_prefetch_done")
 
     def __init__(self, first: bool = False) -> None:
+        self.t_prefetch_done = 0.0
         self.ready = threading.Event()
         self.audio = None
         self.first = first  # first sentence of an utterance: emit latency timings
@@ -166,8 +167,15 @@ class TTSManager(QObject):
 
     def _warm_up(self) -> None:
         """Init pygame.mixer once at startup so the first sentence doesn't pay for it."""
+        # Cold imports of edge_tts (aiohttp stack) and pygame cost seconds; do them here,
+        # not inside the first sentence's synthesis.
+        try:
+            import edge_tts  # noqa: F401
+        except Exception as err:
+            logger.debug("edge_tts pre-import failed: %s", err)
         try:
             import pygame
+            import pygame.sndarray  # noqa: F401
             if not pygame.mixer.get_init():
                 pygame.mixer.init()
         except Exception as err:
@@ -296,6 +304,7 @@ class TTSManager(QObject):
         Everything stays in RAM (no temp files, no subprocess). Safe to call from the
         prefetch thread so the next sentence is ready while the current one plays.
         """
+        t_start = time.monotonic()
         try:
             import edge_tts
             import pygame
@@ -313,11 +322,13 @@ class TTSManager(QObject):
                         chunks.append(chunk["data"])
                 return b"".join(chunks)
 
-            t0 = time.monotonic()
             # One persistent loop (owned by the single prefetch thread) instead of
             # asyncio.new_event_loop()/close() per sentence.
             if self._loop is None or self._loop.is_closed():
                 self._loop = asyncio.new_event_loop()
+            t0 = time.monotonic()
+            # Imports + loop creation: formerly unmeasured (cold imports cost seconds).
+            self._synth_timing["import_setup_ms"] = (t0 - t_start) * 1000
             mp3_data = self._loop.run_until_complete(_generate())
             t1 = time.monotonic()
             self._synth_timing["edge_tts_synth_ms"] = (t1 - t0) * 1000
@@ -353,6 +364,22 @@ class TTSManager(QObject):
             logger.debug("voice fx failed, using dry audio: %s", err)
             return None
 
+    @staticmethod
+    def _log_first_latency(slot) -> None:
+        """Log the first sentence's stage breakdown; stages sum exactly to total_to_play_ms."""
+        if slot is None or not slot.first:
+            return
+        now = time.monotonic()
+        t = slot.timing
+        t["total_to_play_ms"] = (now - slot.t_enqueue) * 1000
+        if slot.t_prefetch_done:
+            t["handoff_to_play_ms"] = (now - slot.t_prefetch_done) * 1000
+        stages = ("enqueue_to_prefetch_start_ms", "import_setup_ms", "edge_tts_synth_ms",
+                  "decode_and_fx_ms", "handoff_to_play_ms")
+        # Anything not attributed to a named stage (thread scheduling, timing bookkeeping).
+        t["other_ms"] = max(0.0, t["total_to_play_ms"] - sum(t.get(k, 0.0) for k in stages))
+        logger.info("TTS first-sentence latency: %s", {k: round(v) for k, v in t.items()})
+
     def _play_prepared(self, prepared) -> bool:
         """Play audio from ``_synthesize_edge``; polls ``_stop_requested`` so stop() is immediate."""
         import pygame
@@ -360,11 +387,8 @@ class TTSManager(QObject):
         if self._stop_requested:
             return False
         slot = self._current_slot
-        if slot is not None and slot.first:
-            slot.timing["total_to_play_ms"] = (time.monotonic() - slot.t_enqueue) * 1000
-            logger.info("TTS first-sentence latency: %s",
-                        {k: round(v) for k, v in slot.timing.items()})
         if kind == "fx":
+            self._log_first_latency(slot)  # right before play(), nothing blocking in between
             channel = payload.play()
             if channel is None:
                 return False
@@ -375,6 +399,7 @@ class TTSManager(QObject):
                 return False
             return True
         pygame.mixer.music.load(io.BytesIO(payload))
+        self._log_first_latency(slot)
         pygame.mixer.music.play()
         while pygame.mixer.music.get_busy() and not self._stop_requested:
             time.sleep(0.02)
@@ -416,6 +441,7 @@ class TTSManager(QObject):
             except Exception:
                 logger.exception("TTS prefetch failed on one sentence")
             finally:
+                slot.t_prefetch_done = time.monotonic()
                 slot.ready.set()
 
     # -- Piper (local, fast) ------------------------------------------------
