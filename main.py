@@ -49,6 +49,13 @@ from ui_server import start_hud_server, stop_hud_server
 logger = get_logger("main")
 
 
+def _log_step(step) -> None:
+    """Internal execution steps go to the logger only, never the HUD chat feed."""
+    content = getattr(step, "content", None)
+    if content:
+        logger.info("Step: %s", content)
+
+
 def apply_ai_config(ai_client, cfg: dict) -> None:
     """Hot-reload model/key. The HUD payload only carries a masked key, so the
     real key is always loaded from Settings/.env, never taken from cfg."""
@@ -185,7 +192,7 @@ def main() -> None:
             return
         wake_gate.arm_direct()
         tts_manager.stop()
-        update_hud_status(state="Listening", log_entry="Direct listening (Alt+R)")
+        update_hud_status(state="Listening")
         logger.info("Alt+R pressed: listening without wake word")
 
     hotkey = GlobalHotkey(_on_hotkey)
@@ -232,9 +239,7 @@ def main() -> None:
         executor.process(
             user_message=clean_cmd,
             on_sentence=tts_manager.enqueue,
-            on_step=lambda step: update_hud_status(
-                log_entry=f"Step: {step.content}"
-            ) if getattr(step, "content", None) else None,
+            on_step=_log_step,
             on_complete=_on_complete,
             on_error=lambda err: (
                 logger.error("HUD command failed: %s", err),
@@ -280,7 +285,7 @@ def main() -> None:
                         update_hud_status(state="Idle")
                         return
                     if decision.action == ACTION_ACK:
-                        update_hud_status(state="Listening", log_entry="Wake word heard")
+                        update_hud_status(state="Listening")
                         tts_manager.speak("Yes?")
                         return
                     query = decision.query
@@ -304,9 +309,7 @@ def main() -> None:
                         future = executor.process(
                             user_message=query,
                             on_sentence=tts_manager.enqueue,
-                            on_step=lambda step: update_hud_status(
-                                log_entry=f"Step: {step.content}"
-                            ) if getattr(step, "content", None) else None,
+                            on_step=_log_step,
                             origin=CHANNEL_VOICE,
                         )
                         response = future.result(timeout=120)

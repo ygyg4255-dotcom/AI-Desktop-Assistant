@@ -1631,7 +1631,7 @@ Available tools are provided in the tool definitions. Use them responsibly."""
 
         # Automatically store new user message in short-term conversation memory and update HUD
         self._remember("user", user_message)
-        update_hud_status(state="Thinking", log_entry=f"User said: {user_message}")
+        update_hud_status(state="Thinking")
 
         # Include last 10 messages from memory.json as conversation context
         recent = self._memory.get_recent_messages(limit=10)
