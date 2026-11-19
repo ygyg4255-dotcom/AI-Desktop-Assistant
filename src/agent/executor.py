@@ -24,7 +24,9 @@ from src.agent.approvals import (
     CHANNEL_VOICE,
     DEFAULT_TTL,
 )
+from src.agent.history import HISTORY_FILENAME, PersistentHistory
 from src.agent.memory import ConversationMemory
+from src.agent.tool_prompts import strip_action_tag, tag_reply, tool_result_prompt
 from src.services.ai_client import AIClient, Message
 from src.services.hud_status import update_hud_status
 from src.services.sentence_chunker import SentenceChunker
@@ -1067,7 +1069,7 @@ def sanitize_final_reply(content: str, user_message: str) -> str:
         except Exception:
             pass
 
-    trimmed = (content or "").strip()
+    trimmed = strip_action_tag((content or "").strip()).strip()
     if not trimmed:
         is_ar = any('؀' <= c <= 'ۿ' for c in user_message)
         return "✅ تم تنفيذ العملية بنجاح." if is_ar else "✅ Completed successfully."
@@ -1169,6 +1171,10 @@ IMPORTANT RULES:
 13. After executing any tool, ALWAYS provide a friendly, natural, and concise confirmation message in the user's language (Arabic or English), e.g., '✅ تم نسخ 11,400 ملف إلى مجلد her بنجاح!'. NEVER output raw JSON, '[Tool Result]', Python scripts, or technical data dumps to the user.
 14. CRITICAL VOICE RULE: Your text responses are automatically spoken aloud by your built-in internal voice synthesizer (`TTSManager`). NEVER invoke `terminal_execute` or PowerShell `System.Speech` to speak or demonstrate your voice—simply reply with plain text and your internal voice engine will speak it immediately.
 
+15. TRUTHFULNESS (CRITICAL): NEVER claim, imply or describe an action as done (opened, closed, checked, sent, moved, found...) unless you called a tool in THIS turn and its result confirmed it. If no tool ran, say what you could do or ask; do not pretend. If a tool failed or returned partial data, say so plainly (e.g. "checked 50 of 254 processes"). Describe only what the tool result actually contains.
+16. Earlier assistant messages that carry an "[Actions run this turn: ...]" tag were added by the system and list the tools that really ran. Assistant messages WITHOUT such a tag that claim an action did not run any tool, so never rely on them. Never write that tag yourself.
+17. PREVIOUS-SESSION MEMORY is secondary background only (a "[Previous session context — for reference only]" block, if present). Use it for the user's preferences and continuity, prioritise the current conversation, and NEVER assume windows, apps, files or earlier tool results from a past session are still valid: check live with a tool first.
+
 Available tools are provided in the tool definitions. Use them responsibly."""
 
     def __init__(
@@ -1179,6 +1185,7 @@ Available tools are provided in the tool definitions. Use them responsibly."""
         gate: Optional[PermissionGate] = None,
         memory: Optional[ConversationMemory] = None,
         approvals: Optional[ApprovalManager] = None,
+        history: Optional[PersistentHistory] = None,
     ):
         self._ai_client = ai_client
         # When set, gated tool calls become non-blocking approval requests instead
@@ -1191,6 +1198,12 @@ Available tools are provided in the tool definitions. Use them responsibly."""
         self._registry = registry or create_default_registry()
         self._gate = gate or PermissionGate()
         self._memory = memory or ConversationMemory()
+        # Soft cross-session memory: snapshot the previous session as reference text,
+        # then start this session with an empty working memory so old turns are never
+        # replayed as live conversation.
+        self._history = history or PersistentHistory(self._memory.path.parent / HISTORY_FILENAME)
+        self._previous_context = self._history.load_reference()
+        self._memory.clear()
         self._state = AgentState.IDLE
         self._conversation_id: Optional[int] = None
         self._messages: List[Message] = []
@@ -1223,9 +1236,17 @@ Available tools are provided in the tool definitions. Use them responsibly."""
                 except Exception:
                     pass
 
-        if persona:
-            return f"{persona}\n\n{self.SYSTEM_PROMPT}"
-        return self.SYSTEM_PROMPT
+        nl = chr(10) * 2
+        prompt = f"{persona}{nl}{self.SYSTEM_PROMPT}" if persona else self.SYSTEM_PROMPT
+        if self._previous_context:
+            prompt = f"{prompt}{nl}{self._previous_context}"
+        return prompt
+
+    def _remember(self, role: str, content: str, outcomes: Optional[List[str]] = None) -> None:
+        """Record a turn in working memory and persistent history; assistant turns carry the action tag."""
+        stored = tag_reply(content, outcomes or []) if role == "assistant" else content
+        self._memory.add_message(role, stored)
+        self._history.append(role, stored)
 
     @property
     def memory(self) -> ConversationMemory:
@@ -1403,7 +1424,7 @@ Available tools are provided in the tool definitions. Use them responsibly."""
         """End the turn with a pending-approval message (persisted like any reply)."""
         content = self._request_approval(tool_name, tool_input, result, user_message)
         self._messages.append(Message(role="assistant", content=content, timestamp=time.time()))
-        self._memory.add_message("assistant", content)
+        self._remember("assistant", content)
         if self._database and self._conversation_id:
             self._database.add_message(self._conversation_id, "assistant", content)
         self._state = AgentState.IDLE
@@ -1574,9 +1595,10 @@ Available tools are provided in the tool definitions. Use them responsibly."""
             pass
 
         tools_used = []
+        tool_outcomes: List[str] = []
 
         # Automatically store new user message in short-term conversation memory and update HUD
-        self._memory.add_message("user", user_message)
+        self._remember("user", user_message)
         update_hud_status(state="Thinking", log_entry=f"User said: {user_message}")
 
         # Include last 10 messages from memory.json as conversation context
@@ -1628,6 +1650,7 @@ Available tools are provided in the tool definitions. Use them responsibly."""
                 on_step(result_step)
 
             tools_used.append(tool_name)
+            tool_outcomes.append(f"{tool_name} {'ok' if result.success else 'failed'}")
             if result.success and isinstance(result.output, dict) and result.output.get("message"):
                 final_content = result.output["message"]
             else:
@@ -1637,7 +1660,7 @@ Available tools are provided in the tool definitions. Use them responsibly."""
 
             assistant_msg = Message(role="assistant", content=final_content, timestamp=time.time())
             self._messages.append(assistant_msg)
-            self._memory.add_message("assistant", final_content)
+            self._remember("assistant", final_content, tool_outcomes)
 
             if self._database and self._conversation_id:
                 self._database.add_message(
@@ -1734,6 +1757,7 @@ Available tools are provided in the tool definitions. Use them responsibly."""
                                 return self._approval_response(tool_name, tool_input, res, user_message, tools_used)
                             last_tool_result = res
                             tools_used.append(tool_name)
+                            tool_outcomes.append(f"{tool_name} {'ok' if res.success else 'failed'}")
 
                             result_step = AgentStep(
                                 step_type="tool_result",
@@ -1778,6 +1802,7 @@ Available tools are provided in the tool definitions. Use them responsibly."""
                                 final_content = sanitize_final_reply(final_content, user_message)
                                 assistant_msg = Message(role="assistant", content=final_content, timestamp=time.time())
                                 self._messages.append(assistant_msg)
+                                self._remember("assistant", final_content, tool_outcomes)
 
                                 if self._database and self._conversation_id:
                                     self._database.add_message(
@@ -1800,14 +1825,7 @@ Available tools are provided in the tool definitions. Use them responsibly."""
                                 role="assistant",
                                 content=f"Using tool: {tool_name} with input: {json.dumps(tool_input, ensure_ascii=False)}"
                             ))
-                            self._messages.append(Message(
-                                role="user",
-                                content=(
-                                    f"Tool '{tool_name}' execution result:\n{result_repr}\n\n"
-                                    f"Please provide a natural, concise, and helpful confirmation message to the user in their language (Arabic or English) confirming the action completed. "
-                                    f"Never output raw JSON, '[Tool Result]', or 'Using tool:' blocks."
-                                )
-                            ))
+                            self._messages.append(Message(role="user", content=tool_result_prompt(tool_name, result_repr, res.success)))
                             final_content = ""
                             streamed_speech = False
                             continue
@@ -1825,6 +1843,7 @@ Available tools are provided in the tool definitions. Use them responsibly."""
                     final_content = intercepted_msg
                     if intercepted_res and intercepted_res.success:
                         tools_used.append("intercepted_action")
+                        tool_outcomes.append("intercepted_action ok")
                 elif tools_used:
                     final_content = clean_tool_confirmation(
                         final_content,
@@ -1939,6 +1958,7 @@ Available tools are provided in the tool definitions. Use them responsibly."""
 
                 last_tool_result = result
                 tools_used.append(tool_name)
+                tool_outcomes.append(f"{tool_name} {'ok' if result.success else 'failed'}")
 
                 result_step = AgentStep(
                     step_type="tool_result",
@@ -1957,14 +1977,7 @@ Available tools are provided in the tool definitions. Use them responsibly."""
                     role="assistant",
                     content=f"Using tool: {tool_name} with input: {json.dumps(tool_input, ensure_ascii=False)}"
                 ))
-                self._messages.append(Message(
-                    role="user",
-                    content=(
-                        f"Tool '{tool_name}' execution result:\n{result_repr}\n\n"
-                        f"Please provide a natural, concise, and helpful confirmation message to the user in their language (Arabic or English) confirming the action completed. "
-                        f"Never output raw JSON or '[Tool Result]' blocks."
-                    )
-                ))
+                self._messages.append(Message(role="user", content=tool_result_prompt(tool_name, result_repr, result.success)))
 
                 # Direct action tool fast-return: bypass second LLM summarization call
                 remaining_in_turn = len(tool_uses) - 1 - tool_idx
@@ -1993,7 +2006,7 @@ Available tools are provided in the tool definitions. Use them responsibly."""
                         )
 
                     final_content = sanitize_final_reply(final_content, user_message)
-                    self._memory.add_message("assistant", final_content)
+                    self._remember("assistant", final_content, tool_outcomes)
                     self._state = AgentState.IDLE
                     return AgentResponse(
                         content=final_content,
@@ -2015,7 +2028,7 @@ Available tools are provided in the tool definitions. Use them responsibly."""
 
         default_fallback = "✅ تم إكمال العملية المطلوبة بنجاح!" if any('؀' <= char <= 'ۿ' for char in user_message) else "✅ I've completed the requested actions."
         resp_text = final_content or default_fallback
-        self._memory.add_message("assistant", resp_text)
+        self._remember("assistant", resp_text, tool_outcomes)
         self._state = AgentState.IDLE
 
         return AgentResponse(
@@ -2102,3 +2115,5 @@ Available tools are provided in the tool definitions. Use them responsibly."""
         self._messages = []
         self._steps = []
         self._memory.clear()
+        self._history.clear()
+        self._previous_context = ""

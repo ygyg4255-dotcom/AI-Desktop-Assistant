@@ -20,6 +20,10 @@ class ConversationMemory:
         self._lock = threading.Lock()
         self._ensure_file()
 
+    @property
+    def path(self) -> Path:
+        return self._file_path
+
     def _ensure_file(self) -> None:
         """Ensure memory.json exists with valid JSON array."""
         with self._lock:
