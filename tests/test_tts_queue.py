@@ -28,7 +28,7 @@ def wait_for(cond, timeout=3.0):
 
 @pytest.fixture
 def tts():
-    m = TTSManager(enabled=True)
+    m = TTSManager(enabled=True, warm_up=False)  # no mixer init in tests
     m._synthesize = lambda text: None  # never hit the network in tests
     m.finished = []
     m.started = []
@@ -229,3 +229,50 @@ def test_stop_cancels_prefetched_sentences_midqueue(tts, monkeypatch):
     assert played == [] and tts.started == ["Alpha one."]
     assert tts._queue.empty() and tts._prefetch_q.empty()
     assert not is_speaking_event.is_set()
+
+
+# -- startup-latency work ----------------------------------------------------
+def test_split_first_clause_splits_long_first_sentence_after_60_chars():
+    from src.services.voice_service import split_first_clause
+    s = "x" * 65 + ", and then the rest of the sentence continues here."
+    head, tail = split_first_clause(s)
+    assert head.endswith(",") and len(head) == 66
+    assert tail.startswith("and then")
+    assert split_first_clause("Short, sentence.") == ("Short, sentence.", "")
+    head, tail = split_first_clause("ا" * 61 + "، والباقي")
+    assert head.endswith("،") and tail == "والباقي"
+
+
+def test_only_first_chunk_of_utterance_is_split(tts):
+    long_first = "w" * 70 + ", tail part one. Second sentence, with a comma that is short."
+    tts._synthesize = lambda text: None
+    tts.enqueue(long_first)
+    assert wait_for(lambda: len(tts.started) >= 3)
+    assert tts.started[0].endswith(",")
+    assert tts.started[-1] == "Second sentence, with a comma that is short."
+
+
+def test_edge_synth_reuses_one_persistent_event_loop(tts, monkeypatch):
+    import asyncio
+    import sys
+    import types
+
+    class FakeComm:
+        def __init__(self, *a, **k):
+            pass
+
+        async def stream(self):
+            yield {"type": "audio", "data": b"mp3"}
+
+    fake_edge = types.SimpleNamespace(Communicate=FakeComm)
+    fake_pg = types.SimpleNamespace(mixer=types.SimpleNamespace(get_init=lambda: True))
+    monkeypatch.setitem(sys.modules, "edge_tts", fake_edge)
+    monkeypatch.setitem(sys.modules, "pygame", fake_pg)
+    monkeypatch.setattr("src.services.voice_service.get_config_value",
+                        lambda *a, **k: "none")
+    assert tts._synthesize_edge("one") == ("dry", b"mp3")
+    loop = tts._loop
+    assert isinstance(loop, asyncio.AbstractEventLoop) and not loop.is_closed()
+    assert tts._synthesize_edge("two") == ("dry", b"mp3")
+    assert tts._loop is loop
+    assert {"edge_tts_synth_ms", "decode_and_fx_ms"} <= set(tts._synth_timing)

@@ -89,11 +89,31 @@ def parse_wake_word(text: str) -> tuple[bool, str]:
 class _AudioSlot:
     """Hand-off cell between the prefetch thread (fills ``audio``) and the player."""
 
-    __slots__ = ("ready", "audio")
+    __slots__ = ("ready", "audio", "first", "t_enqueue", "timing")
 
-    def __init__(self) -> None:
+    def __init__(self, first: bool = False) -> None:
         self.ready = threading.Event()
         self.audio = None
+        self.first = first  # first sentence of an utterance: emit latency timings
+        self.t_enqueue = time.monotonic()
+        self.timing: dict = {}  # filled by the synthesizer (ms values)
+
+
+FIRST_CLAUSE_MIN_CHARS = 60
+
+
+def split_first_clause(sentence: str, min_chars: int = FIRST_CLAUSE_MIN_CHARS) -> tuple[str, str]:
+    """Split a long first sentence at the first ``,``/``،`` found after ``min_chars``.
+
+    Returns (head, tail); tail is "" when no split applies.
+    """
+    for i in range(min_chars, len(sentence)):
+        if sentence[i] in ",،":
+            head, tail = sentence[:i + 1].strip(), sentence[i + 1:].strip()
+            if head and tail:
+                return head, tail
+            break
+    return sentence, ""
 
 
 def split_sentences(text: str) -> List[str]:
@@ -119,8 +139,9 @@ class TTSManager(QObject):
     speech_finished = Signal()
     is_speaking_event = is_speaking_event
 
-    def __init__(self, enabled: bool = True, parent=None):
+    def __init__(self, enabled: bool = True, parent=None, warm_up: bool = True):
         super().__init__(parent)
+        self._loop: Optional[asyncio.AbstractEventLoop] = None  # persistent, prefetch-thread-owned
         self._enabled = enabled
         self._muted = False
         self._lock = threading.Lock()
@@ -139,6 +160,18 @@ class TTSManager(QObject):
         self._piper_voice = None
         self._piper_failed = False
         self._piper_rate = 22050
+        self._synth_timing: dict = {}
+        if warm_up and enabled:
+            threading.Thread(target=self._warm_up, name="AltronTTSWarmup", daemon=True).start()
+
+    def _warm_up(self) -> None:
+        """Init pygame.mixer once at startup so the first sentence doesn't pay for it."""
+        try:
+            import pygame
+            if not pygame.mixer.get_init():
+                pygame.mixer.init()
+        except Exception as err:
+            logger.debug("mixer warm-up failed (will retry lazily): %s", err)
 
     @property
     def _stop_requested(self) -> bool:
@@ -191,12 +224,20 @@ class TTSManager(QObject):
 
     def _put_all(self, cleaned: str) -> None:
         """Split into sentences so the first one starts after one short synthesis."""
-        for sentence in split_sentences(cleaned):
-            self._put(sentence)
+        sentences = split_sentences(cleaned)
+        if sentences and self._queue.empty() and not is_speaking_event.is_set():
+            # Utterance start: shorten the very first chunk so audio begins sooner.
+            head, tail = split_first_clause(sentences[0])
+            sentences[0:1] = [s for s in (head, tail) if s]
+            first = True
+        else:
+            first = False
+        for i, sentence in enumerate(sentences):
+            self._put(sentence, first=first and i == 0)
 
-    def _put(self, cleaned: str) -> None:
+    def _put(self, cleaned: str, first: bool = False) -> None:
         with self._lock:
-            slot = _AudioSlot()
+            slot = _AudioSlot(first=first)
             self._queue.put((self._gen, cleaned, slot))
             self._prefetch_q.put((self._gen, cleaned, slot))
             if self._prefetch_thread is None or not self._prefetch_thread.is_alive():
@@ -272,22 +313,27 @@ class TTSManager(QObject):
                         chunks.append(chunk["data"])
                 return b"".join(chunks)
 
-            loop = asyncio.new_event_loop()
-            try:
-                mp3_data = loop.run_until_complete(_generate())
-            finally:
-                loop.close()
+            t0 = time.monotonic()
+            # One persistent loop (owned by the single prefetch thread) instead of
+            # asyncio.new_event_loop()/close() per sentence.
+            if self._loop is None or self._loop.is_closed():
+                self._loop = asyncio.new_event_loop()
+            mp3_data = self._loop.run_until_complete(_generate())
+            t1 = time.monotonic()
+            self._synth_timing["edge_tts_synth_ms"] = (t1 - t0) * 1000
             if not mp3_data:
                 return None
 
             if not pygame.mixer.get_init():
                 pygame.mixer.init()
             fx = normalize_fx_name(get_config_value("ALTRON_VOICE_FX", default=FX_ULTRON))
+            result = ("dry", mp3_data)
             if fx != FX_NONE:
                 wet = self._apply_fx(pygame, mp3_data, fx)
                 if wet is not None:
-                    return ("fx", wet)
-            return ("dry", mp3_data)
+                    result = ("fx", wet)
+            self._synth_timing["decode_and_fx_ms"] = (time.monotonic() - t1) * 1000
+            return result
         except Exception as err:
             logger.debug("edge-tts synthesis failed, falling back: %s", err)
             return None
@@ -313,6 +359,11 @@ class TTSManager(QObject):
         kind, payload = prepared
         if self._stop_requested:
             return False
+        slot = self._current_slot
+        if slot is not None and slot.first:
+            slot.timing["total_to_play_ms"] = (time.monotonic() - slot.t_enqueue) * 1000
+            logger.info("TTS first-sentence latency: %s",
+                        {k: round(v) for k, v in slot.timing.items()})
         if kind == "fx":
             channel = payload.play()
             if channel is None:
@@ -356,7 +407,10 @@ class TTSManager(QObject):
             gen, text, slot = self._prefetch_q.get()
             try:
                 if gen == self._gen and not self._piper_model_path():
+                    self._synth_timing = {}
+                    slot.timing["enqueue_to_prefetch_start_ms"] = (time.monotonic() - slot.t_enqueue) * 1000
                     prepared = self._synthesize(text)
+                    slot.timing.update(self._synth_timing)
                     if gen == self._gen:
                         slot.audio = prepared
             except Exception:
@@ -424,7 +478,11 @@ class TTSManager(QObject):
             if not pcm or self._stop_requested:
                 return False
             import sounddevice as sd
-            sd.play(np.frombuffer(pcm, dtype=np.int16), samplerate=rate)
+            samples = np.frombuffer(pcm, dtype=np.int16)
+            fx = normalize_fx_name(get_config_value("ALTRON_VOICE_FX", default=FX_ULTRON))
+            if fx != FX_NONE:
+                samples = apply_voice_fx(samples, rate, fx)  # same Ultron FX as edge-tts
+            sd.play(samples, samplerate=rate)
             sd.wait()
             return not self._stop_requested
         except Exception as err:
