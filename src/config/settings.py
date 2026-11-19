@@ -314,6 +314,10 @@ class Settings:
         self.camera_autostart = str(
             cfg("ALTRON_CAMERA_AUTOSTART", default="true") or "true"
         ).strip().lower() not in ("0", "false", "no", "off")
+        # TTS post-processing: "ultron" (subtle metallic comb + warmth) or "none".
+        self.voice_fx = "none" if str(
+            cfg("ALTRON_VOICE_FX", default="ultron") or "ultron"
+        ).strip().lower() in ("none", "off", "false", "0", "no") else "ultron"
         # Legacy readers (src/agent/tools.py) still look at os.environ.
         if self.telegram_bot_token:
             os.environ["TELEGRAM_BOT_TOKEN"] = self.telegram_bot_token

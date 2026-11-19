@@ -22,6 +22,7 @@ from src.services.audio_input import (
 )
 from src.services.groq_stt import GroqTranscriber
 from src.services.signals import CallbackSignal
+from src.services.voice_fx import FX_NONE, FX_ULTRON, apply_voice_fx, normalize_fx_name
 
 from src.services.hud_status import update_hud_status
 
@@ -188,6 +189,7 @@ class TTSManager(QObject):
             import pygame
             if pygame.mixer.get_init():
                 pygame.mixer.music.stop()
+                pygame.mixer.stop()  # channels used by the FX playback path
         except Exception as err:
             logger.debug("pygame stop failed: %s", err)
         try:
@@ -220,12 +222,13 @@ class TTSManager(QObject):
             import asyncio
             import pygame
 
-            voice = "en-GB-RyanNeural"
+            voice = "en-US-ChristopherNeural"
             if any('؀' <= c <= 'ۿ' for c in text):
                 voice = "ar-SA-HamedNeural"
 
             async def _generate():
-                comm = edge_tts.Communicate(text, voice=voice, rate="+5%", pitch="-8Hz")
+                # Deep, calm and deliberate: slight pitch drop and slower rate.
+                comm = edge_tts.Communicate(text, voice=voice, rate="-5%", pitch="-10Hz")
                 chunks = []
                 async for chunk in comm.stream():
                     if chunk["type"] == "audio":
@@ -244,6 +247,10 @@ class TTSManager(QObject):
             if not pygame.mixer.get_init():
                 pygame.mixer.init()
 
+            fx = normalize_fx_name(get_config_value("ALTRON_VOICE_FX", default=FX_ULTRON))
+            if fx != FX_NONE and self._play_with_fx(pygame, mp3_data, fx):
+                return not self._stop_requested
+
             pygame.mixer.music.load(io.BytesIO(mp3_data))
             pygame.mixer.music.play()
 
@@ -257,6 +264,36 @@ class TTSManager(QObject):
             return True
         except Exception as err:
             logger.debug("edge-tts failed, falling back: %s", err)
+            return False
+
+    def _play_with_fx(self, pygame, mp3_data: bytes, fx: str) -> bool:
+        """Decode, apply the voice effect and play via a mixer channel.
+
+        Returns False (so the caller plays dry audio) if decoding/processing fails.
+        Polling ``_stop_requested`` keeps playback interruptible; ``stop()`` also
+        calls ``pygame.mixer.stop()``.
+        """
+        try:
+            import pygame.sndarray
+            sound = pygame.mixer.Sound(file=io.BytesIO(mp3_data))
+            rate = pygame.mixer.get_init()[0]
+            dry = pygame.sndarray.array(sound)
+            wet = apply_voice_fx(dry, rate, fx)
+            if wet is dry:
+                return False
+            fx_sound = pygame.sndarray.make_sound(np.ascontiguousarray(wet))
+            if self._stop_requested:
+                return True
+            channel = fx_sound.play()
+            if channel is None:
+                return False
+            while channel.get_busy() and not self._stop_requested:
+                time.sleep(0.04)
+            if self._stop_requested:
+                channel.stop()
+            return True
+        except Exception as err:
+            logger.debug("voice fx playback failed, using dry audio: %s", err)
             return False
 
     # -- Piper (local, fast) ------------------------------------------------
