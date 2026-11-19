@@ -120,7 +120,8 @@
   function goOffline() {
     if (!offlineShown) {
       offlineShown = true;
-      document.body.className = 'state-idle';
+      document.body.className = 'state-offline';
+      if (window.AltronCore) window.AltronCore.setState('offline');
       document.title = 'A.L.T.R.O.N - Offline';
       if (coreStatusTextEl) coreStatusTextEl.textContent = 'Offline';
     }
@@ -146,6 +147,7 @@
     }
 
     document.body.className = `state-${normalized}`;
+    if (window.AltronCore) window.AltronCore.setState(normalized);
     if (coreStatusTextEl && coreStatusTextEl.textContent !== subtitle) {
       coreStatusTextEl.textContent = subtitle;
     }

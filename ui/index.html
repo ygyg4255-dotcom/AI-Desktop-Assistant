@@ -121,12 +121,7 @@
       <section class="panel center-panel">
         <div class="center-core">
           <div class="radar-rings">
-            <div class="ring ring-outer"></div>
-            <div class="ring ring-middle"></div>
-            <div class="ring ring-inner"></div>
-            <div class="grid-crosshairs"></div>
-            <div class="core-pulse-circle"></div>
-            <div class="core-orb"></div>
+            <canvas id="core-canvas" width="300" height="300" aria-label="Altron core"></canvas>
           </div>
 
           <h1 class="core-title">A . L . T . R . O . N</h1>
@@ -154,7 +149,7 @@
         </div>
       </section>
 
-      <!-- RIGHT COLUMN: CONVERSATION, TODAY'S EVENTS, REMINDERS -->
+      <!-- RIGHT COLUMN: CONVERSATION -->
       <aside class="panel right-panel">
         <!-- Pending tool approvals (hidden when there are none) -->
         <div id="approvals-card" class="card approvals-card" hidden>
@@ -176,50 +171,6 @@
             <div class="msg-bubble system">
               <span class="bubble-sender">[SYSTEM]</span>
               <span class="bubble-text">Altron is online. Listening for voice and commands.</span>
-            </div>
-          </div>
-        </div>
-
-        <div class="card events-card">
-          <div class="card-header">
-            <span class="card-tag">TODAY'S EVENTS</span>
-            <span class="badge-count" id="events-count">2</span>
-          </div>
-          <div class="events-list">
-            <div class="event-item">
-              <span class="event-dot"></span>
-              <div class="event-details">
-                <span class="event-title">Daily AI Assistant Sync</span>
-                <span class="event-time">10:00 AM</span>
-              </div>
-            </div>
-            <div class="event-item">
-              <span class="event-dot"></span>
-              <div class="event-details">
-                <span class="event-title">Scheduled Telegram Backup</span>
-                <span class="event-time">08:00 PM</span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div class="card reminders-card">
-          <div class="card-header">
-            <span class="card-tag">REMINDERS</span>
-            <span class="badge-count">Active</span>
-          </div>
-          <div class="reminders-list">
-            <div class="reminder-item">
-              <span class="rem-icon">🔔</span>
-              <span>Proactive 60s Break Alert: Active</span>
-            </div>
-            <div class="reminder-item">
-              <span class="rem-icon">🛡️</span>
-              <span>Microphone Echo Prevention: Enabled</span>
-            </div>
-            <div class="reminder-item">
-              <span class="rem-icon">⚡</span>
-              <span>Voice Pipeline: FastVAD + RyanNeural</span>
             </div>
           </div>
         </div>
@@ -265,6 +216,7 @@
     </div>
   </div>
 
+  <script src="core.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
