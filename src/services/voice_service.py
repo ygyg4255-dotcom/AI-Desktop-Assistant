@@ -21,6 +21,7 @@ from src.services.audio_input import (
     EchoGate, is_too_quiet, pick_input_device, MIN_UTTERANCE_RMS,
 )
 from src.services.groq_stt import GroqTranscriber
+from src.services.sentence_chunker import SentenceChunker
 from src.services.signals import CallbackSignal
 from src.services.voice_fx import FX_NONE, FX_ULTRON, apply_voice_fx, normalize_fx_name
 
@@ -85,6 +86,23 @@ def parse_wake_word(text: str) -> tuple[bool, str]:
     return True, remainder
 
 
+class _AudioSlot:
+    """Hand-off cell between the prefetch thread (fills ``audio``) and the player."""
+
+    __slots__ = ("ready", "audio")
+
+    def __init__(self) -> None:
+        self.ready = threading.Event()
+        self.audio = None
+
+
+def split_sentences(text: str) -> List[str]:
+    """Split text into speakable sentences (English ``. ! ?``, Arabic ``؟ ،``, newlines)."""
+    chunker = SentenceChunker()
+    out = chunker.feed(text) + chunker.flush()
+    return out or ([text.strip()] if text and text.strip() else [])
+
+
 class TTSManager(QObject):
     """Thread-safe, non-blocking Text-to-Speech manager.
 
@@ -109,6 +127,10 @@ class TTSManager(QObject):
         self._current_ps_proc: Optional[subprocess.Popen] = None
         self._active_sapi_voice = None
         self._queue: "queue.Queue[tuple]" = queue.Queue()
+        self._prefetch_q: "queue.Queue[tuple]" = queue.Queue()
+        self._prefetch_thread: Optional[threading.Thread] = None
+        self._current_slot: Optional[_AudioSlot] = None
+        self._synthesize = self._synthesize_edge
         self._worker: Optional[threading.Thread] = None
         # stop() bumps _gen; each queued item remembers the generation it was
         # queued in, so anything older than the current generation is stale.
@@ -159,17 +181,28 @@ class TTSManager(QObject):
         if not cleaned:
             return
         self.stop()
-        self._put(cleaned)
+        self._put_all(cleaned)
 
     def enqueue(self, text: str) -> None:
         """Append ``text`` to the playback queue without interrupting (non-blocking)."""
         cleaned = self._prepare(text)
         if cleaned:
-            self._put(cleaned)
+            self._put_all(cleaned)
+
+    def _put_all(self, cleaned: str) -> None:
+        """Split into sentences so the first one starts after one short synthesis."""
+        for sentence in split_sentences(cleaned):
+            self._put(sentence)
 
     def _put(self, cleaned: str) -> None:
         with self._lock:
-            self._queue.put((self._gen, cleaned))
+            slot = _AudioSlot()
+            self._queue.put((self._gen, cleaned, slot))
+            self._prefetch_q.put((self._gen, cleaned, slot))
+            if self._prefetch_thread is None or not self._prefetch_thread.is_alive():
+                self._prefetch_thread = threading.Thread(
+                    target=self._prefetch_loop, name="AltronTTSPrefetch", daemon=True)
+                self._prefetch_thread.start()
             if self._worker is None or not self._worker.is_alive():
                 self._worker = threading.Thread(target=self._worker_loop, name="AltronTTSWorker", daemon=True)
                 self._worker.start()
@@ -178,11 +211,13 @@ class TTSManager(QObject):
         """Immediately stop speaking and discard pending speech."""
         with self._lock:
             self._gen += 1
-            while True:
-                try:
-                    self._queue.get_nowait()
-                except queue.Empty:
-                    break
+            for q in (self._queue, self._prefetch_q):
+                while True:
+                    try:
+                        _, _, slot = q.get_nowait()
+                        slot.ready.set()  # unblock anything waiting on a dropped slot
+                    except queue.Empty:
+                        break
         is_speaking_event.clear()
         update_hud_status(state="Idle")
         try:
@@ -214,16 +249,18 @@ class TTSManager(QObject):
                     pass
                 self._current_ps_proc = None
 
-    def _speak_edge_tts(self, text: str) -> bool:
-        """Synthesize deep resonant male British butler/Altron voice using edge-tts."""
+    def _synthesize_edge(self, text: str):
+        """edge-tts -> in-memory MP3 -> (optional) voice FX. Returns ("fx", Sound), ("dry", mp3) or None.
+
+        Everything stays in RAM (no temp files, no subprocess). Safe to call from the
+        prefetch thread so the next sentence is ready while the current one plays.
+        """
         try:
             import edge_tts
-            import io
-            import asyncio
             import pygame
 
             voice = "en-US-ChristopherNeural"
-            if any('؀' <= c <= 'ۿ' for c in text):
+            if any('\u0600' <= c <= '\u06ff' for c in text):
                 voice = "ar-SA-HamedNeural"
 
             async def _generate():
@@ -240,39 +277,23 @@ class TTSManager(QObject):
                 mp3_data = loop.run_until_complete(_generate())
             finally:
                 loop.close()
-
-            if not mp3_data or self._stop_requested:
-                return False
+            if not mp3_data:
+                return None
 
             if not pygame.mixer.get_init():
                 pygame.mixer.init()
-
             fx = normalize_fx_name(get_config_value("ALTRON_VOICE_FX", default=FX_ULTRON))
-            if fx != FX_NONE and self._play_with_fx(pygame, mp3_data, fx):
-                return not self._stop_requested
-
-            pygame.mixer.music.load(io.BytesIO(mp3_data))
-            pygame.mixer.music.play()
-
-            while pygame.mixer.music.get_busy() and not self._stop_requested:
-                time.sleep(0.04)
-
-            if self._stop_requested:
-                pygame.mixer.music.stop()
-                return False
-
-            return True
+            if fx != FX_NONE:
+                wet = self._apply_fx(pygame, mp3_data, fx)
+                if wet is not None:
+                    return ("fx", wet)
+            return ("dry", mp3_data)
         except Exception as err:
-            logger.debug("edge-tts failed, falling back: %s", err)
-            return False
+            logger.debug("edge-tts synthesis failed, falling back: %s", err)
+            return None
 
-    def _play_with_fx(self, pygame, mp3_data: bytes, fx: str) -> bool:
-        """Decode, apply the voice effect and play via a mixer channel.
-
-        Returns False (so the caller plays dry audio) if decoding/processing fails.
-        Polling ``_stop_requested`` keeps playback interruptible; ``stop()`` also
-        calls ``pygame.mixer.stop()``.
-        """
+    def _apply_fx(self, pygame, mp3_data: bytes, fx: str):
+        """Decode MP3 bytes in memory, apply the effect, return a pygame Sound (None on failure)."""
         try:
             import pygame.sndarray
             sound = pygame.mixer.Sound(file=io.BytesIO(mp3_data))
@@ -280,21 +301,68 @@ class TTSManager(QObject):
             dry = pygame.sndarray.array(sound)
             wet = apply_voice_fx(dry, rate, fx)
             if wet is dry:
-                return False
-            fx_sound = pygame.sndarray.make_sound(np.ascontiguousarray(wet))
-            if self._stop_requested:
-                return True
-            channel = fx_sound.play()
+                return None
+            return pygame.sndarray.make_sound(np.ascontiguousarray(wet))
+        except Exception as err:
+            logger.debug("voice fx failed, using dry audio: %s", err)
+            return None
+
+    def _play_prepared(self, prepared) -> bool:
+        """Play audio from ``_synthesize_edge``; polls ``_stop_requested`` so stop() is immediate."""
+        import pygame
+        kind, payload = prepared
+        if self._stop_requested:
+            return False
+        if kind == "fx":
+            channel = payload.play()
             if channel is None:
                 return False
             while channel.get_busy() and not self._stop_requested:
-                time.sleep(0.04)
+                time.sleep(0.02)
             if self._stop_requested:
                 channel.stop()
+                return False
             return True
-        except Exception as err:
-            logger.debug("voice fx playback failed, using dry audio: %s", err)
+        pygame.mixer.music.load(io.BytesIO(payload))
+        pygame.mixer.music.play()
+        while pygame.mixer.music.get_busy() and not self._stop_requested:
+            time.sleep(0.02)
+        if self._stop_requested:
+            pygame.mixer.music.stop()
             return False
+        return True
+
+    def _speak_edge_tts(self, text: str) -> bool:
+        """Play the prefetched audio for this sentence (or synthesize now if none was queued)."""
+        try:
+            slot = self._current_slot
+            if slot is not None:
+                while not slot.ready.wait(0.03):
+                    if self._stop_requested:
+                        return False
+                prepared = slot.audio
+            else:
+                prepared = self._synthesize_edge(text)
+            if prepared is None or self._stop_requested:
+                return False
+            return self._play_prepared(prepared)
+        except Exception as err:
+            logger.debug("edge-tts playback failed, falling back: %s", err)
+            return False
+
+    def _prefetch_loop(self) -> None:
+        """Synthesize queued sentences in order while earlier ones are still playing."""
+        while True:
+            gen, text, slot = self._prefetch_q.get()
+            try:
+                if gen == self._gen and not self._piper_model_path():
+                    prepared = self._synthesize(text)
+                    if gen == self._gen:
+                        slot.audio = prepared
+            except Exception:
+                logger.exception("TTS prefetch failed on one sentence")
+            finally:
+                slot.ready.set()
 
     # -- Piper (local, fast) ------------------------------------------------
     def _piper_model_path(self) -> str:
@@ -367,10 +435,11 @@ class TTSManager(QObject):
     def _worker_loop(self) -> None:
         """Drain the queue forever on one dedicated thread (sentences play back to back)."""
         while True:
-            gen, text = self._queue.get()
+            gen, text, slot = self._queue.get()
             try:
                 if gen == self._gen:  # skip sentences queued before a stop()
                     self._item_gen = gen
+                    self._current_slot = slot
                     # Echo prevention: mic listener pauses while anything is playing/pending
                     is_speaking_event.set()
                     update_hud_status(state="Speaking")

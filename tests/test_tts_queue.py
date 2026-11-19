@@ -29,6 +29,7 @@ def wait_for(cond, timeout=3.0):
 @pytest.fixture
 def tts():
     m = TTSManager(enabled=True)
+    m._synthesize = lambda text: None  # never hit the network in tests
     m.finished = []
     m.started = []
     m.speech_finished.connect(lambda: m.finished.append(1), Qt.DirectConnection)
@@ -165,3 +166,66 @@ def test_piper_python_voice_is_used_and_played(tts, monkeypatch, tmp_path):
     monkeypatch.setitem(__import__("sys").modules, "sounddevice", FakeSD)
     assert tts._speak_piper("Hello.") is True
     assert played == {"n": 4, "rate": 16000}
+
+
+# -- sentence splitting + pipelining ---------------------------------------
+def test_split_sentences_english_and_arabic():
+    from src.services.voice_service import split_sentences
+    assert split_sentences("Hello there. How are you? Fine! Costs 3.5 dollars.") == [
+        "Hello there.", "How are you?", "Fine!", "Costs 3.5 dollars."]
+    assert split_sentences("مرحبا بك. كيف حالك؟ بخير!") == ["مرحبا بك.", "كيف حالك؟", "بخير!"]
+    assert split_sentences("no punctuation") == ["no punctuation"]
+
+
+def test_multi_sentence_speak_is_split_and_ordered(tts):
+    spoken = []
+    tts._speak_one = lambda text: spoken.append(text)
+    tts.speak("One here. Two here. Three here.")
+    assert wait_for(lambda: len(spoken) == 3)
+    assert spoken == ["One here.", "Two here.", "Three here."]
+
+
+def test_next_sentence_is_prefetched_while_current_plays(tts, monkeypatch):
+    monkeypatch.setattr(tts, "_piper_model_path", lambda: "")
+    synthesized, release = [], threading.Event()
+    tts._synthesize = lambda text: synthesized.append(text) or ("dry", text.encode())
+    playing = threading.Event()
+
+    def play(prepared):
+        playing.set()
+        release.wait(2)
+        return True
+
+    monkeypatch.setattr(tts, "_play_prepared", play)
+    monkeypatch.setattr(tts, "_speak_piper", lambda t: False)
+    tts.enqueue("First one. Second one. Third one.")
+    assert playing.wait(2)
+    # while sentence 1 is still "playing", the rest are already synthesized
+    assert wait_for(lambda: synthesized == ["First one.", "Second one.", "Third one."])
+    release.set()
+    assert wait_for(lambda: tts.finished)
+    assert tts.started == ["First one.", "Second one.", "Third one."]
+
+
+def test_stop_cancels_prefetched_sentences_midqueue(tts, monkeypatch):
+    monkeypatch.setattr(tts, "_piper_model_path", lambda: "")
+    monkeypatch.setattr(tts, "_speak_piper", lambda t: False)
+    gate, played = threading.Event(), []
+    tts._synthesize = lambda text: gate.wait(2) and ("dry", b"x")
+
+    def play(prepared):
+        played.append(prepared)
+        return True
+
+    monkeypatch.setattr(tts, "_play_prepared", play)
+    tts.enqueue("Alpha one. Beta two. Gamma three.")
+    assert wait_for(lambda: tts.started == ["Alpha one."])
+    t0 = time.perf_counter()
+    tts.stop()
+    gate.set()
+    assert time.perf_counter() - t0 < 0.5
+    assert wait_for(lambda: tts.finished)
+    time.sleep(0.2)
+    assert played == [] and tts.started == ["Alpha one."]
+    assert tts._queue.empty() and tts._prefetch_q.empty()
+    assert not is_speaking_event.is_set()
