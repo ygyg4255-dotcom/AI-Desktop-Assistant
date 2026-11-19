@@ -27,6 +27,10 @@ from src.agent.approvals import (
 from src.agent.memory import ConversationMemory
 from src.services.ai_client import AIClient, Message
 from src.services.hud_status import update_hud_status
+from src.services.sentence_chunker import SentenceChunker
+from src.config.log import get_logger
+
+logger = get_logger(__name__)
 from src.storage.db import Database
 
 
@@ -59,6 +63,43 @@ class AgentResponse:
     tools_used: List[str] = field(default_factory=list)
     success: bool = True
     error: Optional[str] = None
+    # True when ``content`` was already dispatched sentence-by-sentence to the
+    # ``on_sentence`` callback while streaming; callers must not speak it again.
+    streamed_speech: bool = False
+
+
+class SpeechStreamer:
+    """Turns streamed text deltas into whole sentences for the TTS queue.
+
+    Text that looks like a leaked plain-text tool call ("Using tool: ...") or
+    raw JSON is never dispatched; the executor still post-processes the final
+    text exactly as before.
+    """
+
+    def __init__(self, on_sentence: Callable[[str], None]):
+        self._on_sentence = on_sentence
+        self._chunker = SentenceChunker()
+        self._suppressed = False
+        self.spoke = False
+
+    def feed(self, delta: str) -> None:
+        self._dispatch(self._chunker.feed(delta))
+
+    def flush(self) -> None:
+        self._dispatch(self._chunker.flush())
+
+    def _dispatch(self, sentences: List[str]) -> None:
+        for sentence in sentences:
+            if self._suppressed:
+                return
+            if "Using tool:" in sentence or sentence.lstrip().startswith(("{", "[")):
+                self._suppressed = True
+                return
+            try:
+                self._on_sentence(sentence)
+                self.spoke = True
+            except Exception as err:  # a TTS hiccup must never break the agent turn
+                logger.debug("on_sentence callback failed: %s", err)
 
 
 class PermissionRequest:
@@ -1442,11 +1483,14 @@ Available tools are provided in the tool definitions. Use them responsibly."""
         on_complete: Optional[Callable[[AgentResponse], None]] = None,
         on_error: Optional[Callable[[Exception], None]] = None,
         origin: str = CHANNEL_LOCAL,
+        on_sentence: Optional[Callable[[str], None]] = None,
     ) -> Future:
         """Process a user message asynchronously.
 
         ``origin`` is the channel the message came from (local / hud / voice /
         telegram); it decides where approval requests are delivered.
+        ``on_sentence`` enables streaming: complete sentences of the model's text
+        are passed to it as they arrive (tool turns and the permission gate are unchanged).
         """
         future: Future = Future()
         self._cancel_flag = False
@@ -1483,6 +1527,7 @@ Available tools are provided in the tool definitions. Use them responsibly."""
                     on_step=on_step,
                     on_permission=on_permission,
                     origin=origin,
+                    on_sentence=on_sentence,
                 )
                 if not future.done():
                     future.set_result(response)
@@ -1516,6 +1561,7 @@ Available tools are provided in the tool definitions. Use them responsibly."""
         on_step: Optional[Callable[[AgentStep], None]] = None,
         on_permission: Optional[Callable[[PermissionRequest], None]] = None,
         origin: str = CHANNEL_LOCAL,
+        on_sentence: Optional[Callable[[str], None]] = None,
     ) -> AgentResponse:
         """Synchronous processing logic with fast local intent bypass."""
         self._origin = origin
@@ -1614,6 +1660,7 @@ Available tools are provided in the tool definitions. Use them responsibly."""
         last_tool_name = ""
         last_tool_input: Dict[str, Any] = {}
         last_tool_result: Optional[ToolResult] = None
+        streamed_speech = False
 
         while iteration < self._max_iterations and not self._cancel_flag:
             iteration += 1
@@ -1634,7 +1681,12 @@ Available tools are provided in the tool definitions. Use them responsibly."""
             if on_step:
                 on_step(thinking_step)
 
-            response_data = self._make_tool_request(payload)
+            streamer = SpeechStreamer(on_sentence) if on_sentence else None
+            response_data = self._make_tool_request(
+                payload, on_text=streamer.feed if streamer else None
+            )
+            if streamer:
+                streamer.flush()
 
             if self._cancel_flag:
                 break
@@ -1642,6 +1694,7 @@ Available tools are provided in the tool definitions. Use them responsibly."""
             tool_uses = self._parse_tool_use(response_data)
 
             if not tool_uses:
+                streamed_speech = bool(streamer and streamer.spoke)
                 content = response_data.get("content", [])
                 for block in content:
                     if block.get("type") == "text":
@@ -1756,6 +1809,7 @@ Available tools are provided in the tool definitions. Use them responsibly."""
                                 )
                             ))
                             final_content = ""
+                            streamed_speech = False
                             continue
                     except Exception:
                         pass
@@ -1968,11 +2022,21 @@ Available tools are provided in the tool definitions. Use them responsibly."""
             content=resp_text,
             steps=self._steps,
             tools_used=tools_used,
-            success=True
+            success=True,
+            streamed_speech=bool(streamed_speech and final_content),
         )
 
-    def _make_tool_request(self, payload: Dict[str, Any], max_attempts: int = 3, backoff: float = 1.5) -> Dict[str, Any]:
-        """Make a tool-enabled API request with automatic retry via Universal AIClient."""
+    def _make_tool_request(self, payload: Dict[str, Any], max_attempts: int = 3, backoff: float = 1.5,
+                           on_text: Optional[Callable[[str], None]] = None) -> Dict[str, Any]:
+        """Make a tool-enabled API request with automatic retry via Universal AIClient.
+
+        With ``on_text`` the request is streamed and text deltas are passed to it; the
+        returned dict has the same shape either way.
+        """
+        if on_text is not None and hasattr(self._ai_client, "stream_tool_request"):
+            return self._ai_client.stream_tool_request(
+                payload, on_text=on_text, max_attempts=max_attempts, backoff=backoff
+            )
         if hasattr(self._ai_client, "make_tool_request"):
             return self._ai_client.make_tool_request(payload, max_attempts=max_attempts, backoff=backoff)
 

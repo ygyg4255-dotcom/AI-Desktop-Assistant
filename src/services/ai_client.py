@@ -71,6 +71,89 @@ class AIResponse:
 
 
 
+def parse_sse_stream(
+    lines,
+    on_text: Optional[Callable[[str], None]] = None,
+    is_cancelled: Optional[Callable[[], bool]] = None,
+) -> Dict[str, Any]:
+    """Fold a Messages API SSE stream into the same dict a non-streaming call returns.
+
+    Text deltas are passed to ``on_text`` as they arrive; tool_use blocks are
+    only assembled (their JSON input is joined and parsed at block end), so the
+    caller sees complete tool calls exactly as before and the permission gate
+    in the executor is unaffected. ``lines`` yields raw bytes or str lines.
+    """
+    message: Dict[str, Any] = {"content": [], "usage": {}}
+    blocks: Dict[int, Dict[str, Any]] = {}
+    json_parts: Dict[int, List[str]] = {}
+    event = ""
+    for raw in lines:
+        if is_cancelled and is_cancelled():
+            raise RuntimeError("Request cancelled")
+        line = raw.decode("utf-8") if isinstance(raw, (bytes, bytearray)) else raw
+        line = line.rstrip("\r\n")
+        if not line:
+            event = ""
+            continue
+        if line.startswith("event:"):
+            event = line[6:].strip()
+            continue
+        if not line.startswith("data:"):
+            continue
+        try:
+            data = json.loads(line[5:].strip())
+        except ValueError:
+            continue
+        kind = data.get("type") or event
+        if kind == "message_start":
+            msg = data.get("message", {})
+            for key in ("id", "model", "role", "usage"):
+                if key in msg:
+                    message[key] = msg[key]
+        elif kind == "content_block_start":
+            idx = data.get("index", len(blocks))
+            block = dict(data.get("content_block", {}))
+            if block.get("type") == "tool_use":
+                json_parts[idx] = []
+            blocks[idx] = block
+        elif kind == "content_block_delta":
+            idx = data.get("index", 0)
+            block = blocks.setdefault(idx, {"type": "text", "text": ""})
+            delta = data.get("delta", {})
+            dtype = delta.get("type")
+            if dtype == "text_delta":
+                text = delta.get("text", "")
+                block["text"] = block.get("text", "") + text
+                if text and on_text:
+                    on_text(text)
+            elif dtype == "input_json_delta":
+                json_parts.setdefault(idx, []).append(delta.get("partial_json", ""))
+            elif dtype == "thinking_delta":
+                block["thinking"] = block.get("thinking", "") + delta.get("thinking", "")
+            elif dtype == "signature_delta":
+                block["signature"] = delta.get("signature", "")
+        elif kind == "content_block_stop":
+            idx = data.get("index", 0)
+            block = blocks.get(idx)
+            if block is not None and block.get("type") == "tool_use":
+                raw_json = "".join(json_parts.pop(idx, [])).strip()
+                try:
+                    block["input"] = json.loads(raw_json) if raw_json else {}
+                except ValueError:
+                    block["input"] = {}
+        elif kind == "message_delta":
+            delta = data.get("delta", {})
+            if "stop_reason" in delta:
+                message["stop_reason"] = delta["stop_reason"]
+            message["usage"] = {**message.get("usage", {}), **data.get("usage", {})}
+        elif kind == "error":
+            err = data.get("error", {})
+            raise ConnectionError(f"Stream error: {err.get('type', 'error')}: {str(err.get('message', ''))[:160]}")
+    message["content"] = [blocks[i] for i in sorted(blocks)]
+    message.setdefault("stop_reason", "end_turn")
+    return message
+
+
 class AIClient:
     """Anthropic Claude client. The endpoint is fixed; only key and model are configurable."""
 
@@ -154,6 +237,72 @@ class AIClient:
         return self._dispatch_http_json(
             self._get_endpoint_url(), self._get_headers(), req_payload, max_attempts, backoff
         )
+
+    def stream_tool_request(
+        self,
+        payload: Dict[str, Any],
+        on_text: Optional[Callable[[str], None]] = None,
+        max_attempts: int = 3,
+        backoff: float = 1.5,
+    ) -> Dict[str, Any]:
+        """Like ``make_tool_request`` but streams (``stream=True``), calling ``on_text`` per text delta.
+
+        Returns the same response dict shape. Retries only happen before the first
+        byte of the stream arrives; once text has been delivered a failure is raised
+        rather than replayed, so nothing is spoken twice.
+        """
+        self._cancel_flag = False
+        req_payload = dict(payload)
+        req_payload["model"] = self._model
+        req_payload["stream"] = True
+        headers = dict(self._get_headers())
+        headers["Accept"] = "text/event-stream"
+        data = json.dumps(req_payload, ensure_ascii=False).encode("utf-8")
+
+        for attempt in range(1, max_attempts + 1):
+            if self._cancel_flag:
+                raise RuntimeError("Request cancelled")
+            self._status = ConnectionStatus.CONNECTING
+            started = {"n": 0}
+
+            def _counted(text: str) -> None:
+                started["n"] += 1
+                if on_text:
+                    on_text(text)
+
+            try:
+                req = urllib.request.Request(self._get_endpoint_url(), data=data, headers=headers, method="POST")
+                with urllib.request.urlopen(req, timeout=self._timeout) as resp:
+                    parsed = parse_sse_stream(resp, _counted, lambda: self._cancel_flag)
+                self._status = ConnectionStatus.CONNECTED
+                self._last_error = None
+                return parsed
+            except urllib.error.HTTPError as e:
+                self._status = ConnectionStatus.ERROR
+                err_text = ""
+                try:
+                    err_text = e.read().decode("utf-8")
+                except Exception:
+                    pass
+                self._last_error = f"HTTP {e.code}: {err_text[:160]}"
+                if e.code in (429, 502, 503, 504) and attempt < max_attempts and not self._cancel_flag:
+                    time.sleep(backoff)
+                    continue
+                raise ConnectionError(self._last_error)
+            except (urllib.error.URLError, TimeoutError, socket.timeout, ConnectionError) as e:
+                self._status = ConnectionStatus.ERROR
+                reason = getattr(e, "reason", str(e))
+                self._last_error = f"Connection error: {reason}"
+                if started["n"] == 0 and attempt < max_attempts and not self._cancel_flag:
+                    time.sleep(backoff)
+                    continue
+                raise ConnectionError(self._last_error)
+            except Exception as e:
+                self._status = ConnectionStatus.ERROR
+                self._last_error = str(e)
+                raise
+
+        raise ConnectionError(self._last_error or "Max attempts exceeded")
 
     def _dispatch_http_json(
         self,
