@@ -17,11 +17,13 @@ recorded speech (STT only) to Groq Whisper.
   `/approvals`, `/approve`). Flask is required: there is no `http.server` fallback.
 - `src/agent/`: `executor.py` (agent loop), `tools.py` (tool registry and handlers),
   `permissions.py` (tiers), `approvals.py` (out-of-band approvals), `memory.py`
-  (conversation memory). Root `memory.py` only re-exports `src.agent.memory`.
+  (conversation memory), `history.py` (reference-only cross-session history),
+  `control_intents.py` (strict whole-utterance shutdown / mute / forget commands). Root `memory.py` only re-exports `src.agent.memory`.
 - `src/services/`: `ai_client.py` (Claude Messages API), `voice_service.py`
   (`SpeechRecognitionListener`, queue-based `TTSManager`), `groq_stt.py` (optional Groq
   Whisper with local faster-whisper fallback), `sentence_chunker.py` (streamed text ->
-  sentences for TTS), `telegram_service.py`
+  sentences for TTS), `audio_input.py` (mic selection that skips loopback devices, post-TTS
+  echo gate, energy floor), `telegram_service.py`
   (`TelegramRemoteListener`, `TelegramApprovalBridge`, send helpers), `hud_status.py`
   (in-memory HUD state, flushed atomically to `status.json`), `signals.py` (Qt-free
   `CallbackSignal`), plus desktop icon and OmniRoute helpers.
@@ -47,7 +49,8 @@ call `.run()` on a QThread from a Python thread. Root `test_app.py`, `test_chat_
 ## Runtime directory
 Runtime state lives in `~/.ai-desktop-assistant/` (override with `ALTRON_DATA_DIR`), never in
 the OneDrive-synced project folder. It holds `memory.json`, `status.json`,
-`telegram_offset.json`, `assistant.db` and `altron.log` (rotating: 1 MB x 3). Use
+`telegram_offset.json`, `conversation_history.json` (redacted, capped, reference-only),
+`assistant.db` and `altron.log` (rotating: 1 MB x 3). Use
 `src.config.paths.runtime_file(name)` for new files.
 
 ## Logging

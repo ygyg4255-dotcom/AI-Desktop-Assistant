@@ -22,6 +22,7 @@ from src.config.settings import get_config_value
 from src.storage.db import Database
 from src.services import AIClient, OmniRouteManager
 from src.agent.executor import AgentExecutor
+from src.agent.control_intents import ControlHandler
 from src.agent.approvals import (
     ApprovalManager,
     CHANNEL_HUD,
@@ -133,6 +134,40 @@ def main() -> None:
     active_voice_worker = [None]
     active_tg_worker = [None]
 
+    def _pause_mic() -> None:
+        worker = active_voice_worker[0]
+        if worker is not None:
+            worker.pause()
+
+    def _resume_mic() -> None:
+        worker = active_voice_worker[0]
+        if worker is not None:
+            worker.resume()
+
+    def _request_shutdown() -> None:
+        """Let the goodbye finish speaking (max ~5s), then end the supervision loop."""
+        def _later():
+            time.sleep(0.4)  # the reply is queued right after this returns
+            deadline = time.monotonic() + 5.0
+            while is_speaking_event.is_set() and time.monotonic() < deadline:
+                time.sleep(0.1)
+            shutdown_event.set()
+        threading.Thread(target=_later, name="AltronShutdown", daemon=True).start()
+
+    control = ControlHandler(
+        clear_memory=executor.clear_history,
+        request_shutdown=_request_shutdown,
+        pause_listening=_pause_mic,
+        resume_listening=_resume_mic,
+    )
+
+    def _reply_control(reply: str, speak: bool = True) -> None:
+        logger.info("Altron: %s", reply)
+        update_hud_status(state="Idle", log_entry=f"Altron: {reply}")
+        send_telegram_message_async(reply)
+        if speak and tts_manager.is_enabled and not tts_manager.is_muted:
+            tts_manager.speak(reply)
+
     # -------------------------------------------------------------
     # 1. HUD Server Subsystem Thread
     # -------------------------------------------------------------
@@ -146,6 +181,10 @@ def main() -> None:
             return
         logger.info("HUD command received: %r", clean_cmd)
         tts_manager.stop()  # a new command interrupts any speech still playing
+        control_reply = control.handle(clean_cmd)
+        if control_reply:
+            _reply_control(control_reply)
+            return
         update_hud_status(state="Thinking", log_entry=f"User: {clean_cmd}")
 
         def _on_complete(res):
@@ -198,6 +237,8 @@ def main() -> None:
             try:
                 worker = SpeechRecognitionListener()
                 active_voice_worker[0] = worker
+                if control.muted:
+                    worker.pause()
 
                 def _on_recognized(text: str):
                     if not text or not text.strip():
@@ -217,6 +258,10 @@ def main() -> None:
 
                     logger.info("Voice recognized: %r", clean_text)
                     tts_manager.stop()
+                    control_reply = control.handle(query)
+                    if control_reply:
+                        _reply_control(control_reply)
+                        return
                     update_hud_status(state="Thinking", log_entry=f"Voice: {clean_text}")
 
                     t_agent_start = time.perf_counter()
@@ -304,6 +349,10 @@ def main() -> None:
                         return
                     clean_cmd = text.strip()
                     logger.info("Telegram command received: %r", clean_cmd)
+                    control_reply = control.handle(clean_cmd)
+                    if control_reply:
+                        _reply_control(control_reply)
+                        return
                     update_hud_status(state="Thinking", log_entry=f"Telegram: {clean_cmd}")
 
                     def _on_complete(res):
@@ -343,28 +392,28 @@ def main() -> None:
             time.sleep(1)
     except KeyboardInterrupt:
         logger.info("Shutting down gracefully...")
-        shutdown_event.set()
-        if active_voice_worker[0]:
-            try:
-                active_voice_worker[0].abort()
-            except Exception as err:
-                logger.warning("Voice listener did not stop cleanly: %s", err)
-        if active_tg_worker[0]:
-            try:
-                active_tg_worker[0].stop()
-            except Exception as err:
-                logger.warning("Telegram listener did not stop cleanly: %s", err)
+    shutdown_event.set()
+    if active_voice_worker[0]:
         try:
-            executor.cancel()
-            approvals.stop()
+            active_voice_worker[0].abort()
         except Exception as err:
-            logger.warning("Executor/approvals did not stop cleanly: %s", err)
+            logger.warning("Voice listener did not stop cleanly: %s", err)
+    if active_tg_worker[0]:
         try:
-            tts_manager.stop()
+            active_tg_worker[0].stop()
         except Exception as err:
-            logger.warning("TTS did not stop cleanly: %s", err)
-        update_hud_status(state="Offline")
-        logger.info("All subsystems stopped.")
+            logger.warning("Telegram listener did not stop cleanly: %s", err)
+    try:
+        executor.cancel()
+        approvals.stop()
+    except Exception as err:
+        logger.warning("Executor/approvals did not stop cleanly: %s", err)
+    try:
+        tts_manager.stop()
+    except Exception as err:
+        logger.warning("TTS did not stop cleanly: %s", err)
+    update_hud_status(state="Offline")
+    logger.info("All subsystems stopped.")
 
 
 if __name__ == "__main__":
