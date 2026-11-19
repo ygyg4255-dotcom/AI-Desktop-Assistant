@@ -245,7 +245,7 @@ def test_split_first_clause_splits_long_first_sentence_after_60_chars():
 
 def test_only_first_chunk_of_utterance_is_split(tts):
     long_first = "w" * 70 + ", tail part one. Second sentence, with a comma that is short."
-    tts._synthesize = lambda text: None
+    tts._speak_one = lambda text: None  # no real engines
     tts.enqueue(long_first)
     assert wait_for(lambda: len(tts.started) >= 3)
     assert tts.started[0].endswith(",")
