@@ -14,9 +14,14 @@ from typing import Optional, List
 import numpy as np
 from PySide6.QtCore import QObject, QThread, Signal
 
+from src.config.log import get_logger
+from src.config.settings import get_config_value
+from src.services.groq_stt import GroqTranscriber
 from src.services.signals import CallbackSignal
 
 from src.services.hud_status import update_hud_status
+
+logger = get_logger(__name__)
 
 # Global echo prevention event: set when TTS is speaking, cleared when finished
 is_speaking_event = threading.Event()
@@ -397,6 +402,10 @@ class TTSManager(QObject):
                 pass
 
 
+# Post-speech silence before an utterance is closed: 20 frames * 30ms = 0.6s.
+POST_SPEECH_SILENCE_FRAMES = 20
+
+
 class EnergyVAD:
     """Zero-dependency adaptive RMS energy-based Voice Activity Detector."""
 
@@ -470,10 +479,26 @@ class SpeechRecognitionListener:
             model = "base"
         self._model_size = model
         self._whisper_model = None
+        # Optional fast cloud STT; local faster-whisper stays the fallback.
+        self._groq = GroqTranscriber(get_config_value("GROQ_API_KEY"))
 
         # Profiling durations
         self.last_listen_duration = 0.0
         self.last_stt_duration = 0.0
+
+    def _transcribe(self, raw_pcm: bytes, samples_float32) -> str:
+        """Groq Whisper when configured (short timeout), else/on error local faster-whisper."""
+        text = self._groq.transcribe(raw_pcm)
+        if text is not None:
+            return text
+        if self._whisper_model is None:
+            return ""
+        try:
+            segments, _ = self._whisper_model.transcribe(samples_float32, beam_size=1)
+            return " ".join(s.text for s in segments).strip()
+        except Exception as stt_err:
+            logger.warning("faster-whisper error: %s", stt_err)
+            return ""
 
     def abort(self) -> None:
         """Request immediate abort and stop of the continuous listening thread."""
@@ -564,8 +589,8 @@ class SpeechRecognitionListener:
         # 4. VAD Listening loop:
         # Frame size: 30ms = 480 samples = 960 bytes
         # Sliding window: 16 frames (~0.5s)
-        # Silence cutoff: 27 frames * 30ms = 0.81s (~0.8s cutoff)
-        MAX_SILENCE_FRAMES = 27
+        # Silence cutoff: 20 frames * 30ms = 0.6s
+        MAX_SILENCE_FRAMES = POST_SPEECH_SILENCE_FRAMES
         pre_roll_frames = collections.deque(maxlen=16)
         sliding_speech_flags = collections.deque(maxlen=16)
         audio_chunks = []
@@ -622,7 +647,7 @@ class SpeechRecognitionListener:
                     else:
                         silence_frame_count += 1
 
-                    # Stop recording immediately after 0.8s of silence (or 15s max limit)
+                    # Stop recording after 0.6s of silence (or 15s max limit)
                     duration_so_far = len(audio_chunks) * 0.03
                     if silence_frame_count >= MAX_SILENCE_FRAMES or duration_so_far >= 15.0:
                         t_record_end = time.perf_counter()
@@ -649,17 +674,7 @@ class SpeechRecognitionListener:
 
                         self.status_updated.emit("Transcribing...")
                         t_stt_start = time.perf_counter()
-                        recognized_text = ""
-
-                        if self._whisper_model is not None:
-                            try:
-                                segments, _ = self._whisper_model.transcribe(
-                                    samples_float32,
-                                    beam_size=1
-                                )
-                                recognized_text = " ".join(s.text for s in segments).strip()
-                            except Exception as stt_err:
-                                print(f"[STT] faster-whisper error: {stt_err}")
+                        recognized_text = self._transcribe(raw_bytes, samples_float32)
 
                         # Safe fallback to speech_recognition if whisper failed or unavailable
                         if not recognized_text and sr_recognizer is not None:

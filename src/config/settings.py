@@ -266,6 +266,9 @@ class Settings:
     telegram_bot_token: str = TELEGRAM_BOT_TOKEN
     telegram_chat_id: str = TELEGRAM_CHAT_ID
 
+    # Optional Groq key, used ONLY for Whisper speech-to-text (never for chat).
+    groq_api_key: str = ""
+
     # Startup settings
     start_with_windows: bool = False
     show_window_on_start: bool = False
@@ -301,6 +304,7 @@ class Settings:
 
         self.telegram_bot_token = cfg("TELEGRAM_BOT_TOKEN")
         self.telegram_chat_id = cfg("TELEGRAM_CHAT_ID")
+        self.groq_api_key = cfg("GROQ_API_KEY")
         # Legacy readers (src/agent/tools.py) still look at os.environ.
         if self.telegram_bot_token:
             os.environ["TELEGRAM_BOT_TOKEN"] = self.telegram_bot_token

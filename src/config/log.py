@@ -7,7 +7,7 @@ Usage::
 
 The runtime entry points (main.py, ``python ui_server.py``) call
 ``setup_logging()`` once. Every handler it installs formats through
-``RedactingFormatter``, so Telegram bot tokens and Anthropic API keys are
+``RedactingFormatter``, so Telegram bot tokens, Anthropic and Groq API keys are
 stripped from messages *and* tracebacks before they reach the console or
 ``~/.ai-desktop-assistant/altron.log`` (audit S6/S8). Without
 ``setup_logging()`` (tests, library use) records propagate to the root logger
@@ -33,6 +33,7 @@ LOG_BACKUPS = 3
 _BOT_TOKEN_RE = re.compile(r"bot\d{5,}:[A-Za-z0-9_-]{20,}")
 _BARE_BOT_TOKEN_RE = re.compile(r"\b\d{6,}:[A-Za-z0-9_-]{30,}")
 _ANTHROPIC_KEY_RE = re.compile(r"sk-ant-[A-Za-z0-9_-]{8,}")
+_GROQ_KEY_RE = re.compile(r"gsk_[A-Za-z0-9_-]{8,}")
 
 _SETUP_LOCK = threading.Lock()
 _INSTALLED: list = []  # (logger, handler) pairs added by setup_logging
@@ -46,7 +47,8 @@ def redact_secrets(text: object, *tokens: Optional[str]) -> str:
             out = out.replace(token, "<redacted>")
     out = _BOT_TOKEN_RE.sub("bot<redacted>", out)
     out = _BARE_BOT_TOKEN_RE.sub("<redacted>", out)
-    return _ANTHROPIC_KEY_RE.sub("sk-ant-<redacted>", out)
+    out = _ANTHROPIC_KEY_RE.sub("sk-ant-<redacted>", out)
+    return _GROQ_KEY_RE.sub("gsk_<redacted>", out)
 
 
 class RedactingFormatter(logging.Formatter):
