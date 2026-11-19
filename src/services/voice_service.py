@@ -17,6 +17,9 @@ from PySide6.QtCore import QObject, QThread, Signal
 
 from src.config.log import get_logger
 from src.config.settings import get_config_value
+from src.services.audio_input import (
+    EchoGate, is_too_quiet, pick_input_device, MIN_UTTERANCE_RMS,
+)
 from src.services.groq_stt import GroqTranscriber
 from src.services.signals import CallbackSignal
 
@@ -530,6 +533,34 @@ class FastVAD:
         return self._energy_vad.is_speech(frame_bytes)
 
 
+def _pyaudio_input_devices(pa):
+    """(devices, default_index) for PyAudio, normalised for pick_input_device."""
+    devices = []
+    for i in range(pa.get_device_count()):
+        info = pa.get_device_info_by_index(i)
+        devices.append({"index": i, "name": str(info.get("name", "")),
+                        "max_input_channels": int(info.get("maxInputChannels", 0))})
+    try:
+        default = int(pa.get_default_input_device_info()["index"])
+    except Exception as err:
+        logger.debug("no default PyAudio input device: %s", err)
+        default = None
+    return devices, default
+
+
+def _sounddevice_input_devices(sd):
+    devices = [{"index": i, "name": str(d.get("name", "")),
+                "max_input_channels": int(d.get("max_input_channels", 0))}
+               for i, d in enumerate(sd.query_devices())]
+    try:
+        default = sd.default.device[0]
+        default = int(default) if default is not None and int(default) >= 0 else None
+    except Exception as err:
+        logger.debug("no default sounddevice input: %s", err)
+        default = None
+    return devices, default
+
+
 class SpeechRecognitionListener:
     """Always-on continuous speech recognition loop (VAD + fast CPU STT), Qt-free.
 
@@ -574,6 +605,11 @@ class SpeechRecognitionListener:
         except Exception as stt_err:
             logger.warning("faster-whisper error: %s", stt_err)
             return ""
+
+    @staticmethod
+    def _is_too_quiet(raw_pcm: bytes) -> bool:
+        """True when the utterance is below the energy floor (would only feed Whisper hallucinations)."""
+        return is_too_quiet(raw_pcm, MIN_UTTERANCE_RMS)
 
     def abort(self) -> None:
         """Request immediate abort and stop of the continuous listening thread."""
@@ -631,22 +667,31 @@ class SpeechRecognitionListener:
         try:
             import pyaudio
             pa_instance = pyaudio.PyAudio()
+            devices, default_idx = _pyaudio_input_devices(pa_instance)
+            mic_index = pick_input_device(devices, get_config_value("ALTRON_MIC_DEVICE"), default_idx)
+            logger.info("Microphone input device: %s", mic_index if mic_index is not None else "system default")
+            open_kwargs = {"input_device_index": mic_index} if mic_index is not None else {}
             stream = pa_instance.open(
                 format=pyaudio.paInt16,
                 channels=1,
                 rate=16000,
                 input=True,
-                frames_per_buffer=480
+                frames_per_buffer=480,
+                **open_kwargs
             )
             stream_type = "pyaudio"
         except Exception as pa_err:
             try:
                 import sounddevice as sd
+                devices, default_idx = _sounddevice_input_devices(sd)
+                mic_index = pick_input_device(devices, get_config_value("ALTRON_MIC_DEVICE"), default_idx)
+                logger.info("Microphone input device: %s", mic_index if mic_index is not None else "system default")
                 stream = sd.RawInputStream(
                     samplerate=16000,
                     blocksize=480,
                     channels=1,
-                    dtype="int16"
+                    dtype="int16",
+                    device=mic_index
                 )
                 stream.start()
                 stream_type = "sounddevice"
@@ -672,29 +717,32 @@ class SpeechRecognitionListener:
         is_recording = False
         silence_frame_count = 0
         t_record_start = 0.0
+        echo_gate = EchoGate()
 
         try:
             while not self._is_aborted:
-                # Echo prevention: if TTS is speaking or worker is paused, discard audio and sleep
-                if is_speaking_event.is_set() or self._is_paused:
-                    if is_recording:
-                        audio_chunks.clear()
-                        is_recording = False
-                        silence_frame_count = 0
-                    pre_roll_frames.clear()
-                    sliding_speech_flags.clear()
-                    time.sleep(0.04)
-                    continue
-
-                # Read 30ms frame (480 samples)
+                # Read 30ms frame (480 samples). Frames are read even while gated so the
+                # OS buffer never holds audio captured during TTS playback.
                 try:
                     if stream_type == "pyaudio":
                         frame_bytes = stream.read(480, exception_on_overflow=False)
                     else:
                         frame_data, _ = stream.read(480)
                         frame_bytes = bytes(frame_data)
-                except Exception:
+                except Exception as read_err:
+                    logger.debug("mic read failed: %s", read_err)
                     time.sleep(0.02)
+                    continue
+
+                # Echo prevention: while TTS speaks (and for ~0.8s after) or when paused,
+                # discard the frame and any partial recording.
+                if echo_gate.should_discard(is_speaking_event.is_set() or self._is_paused):
+                    if is_recording:
+                        audio_chunks.clear()
+                        is_recording = False
+                        silence_frame_count = 0
+                    pre_roll_frames.clear()
+                    sliding_speech_flags.clear()
                     continue
 
                 if not frame_bytes or len(frame_bytes) != 960:
@@ -740,6 +788,10 @@ class SpeechRecognitionListener:
                         # Pass captured speech directly in-memory as NumPy float32 array (no disk writes)
                         raw_bytes = b"".join(audio_chunks)
                         audio_chunks.clear()
+                        if self._is_too_quiet(raw_bytes):
+                            logger.debug("Dropped low-energy audio (background noise)")
+                            self.status_updated.emit("Listening...")
+                            continue
                         samples_int16 = np.frombuffer(raw_bytes, dtype=np.int16)
                         samples_float32 = samples_int16.astype(np.float32) / 32768.0
 
