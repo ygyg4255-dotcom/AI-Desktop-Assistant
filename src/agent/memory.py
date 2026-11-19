@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional, Union
 
 from src.config.paths import runtime_file
+from src.agent.vision import scrub_image_data
 
 
 class ConversationMemory:
@@ -65,6 +66,7 @@ class ConversationMemory:
         """Append a message and trim to last max_messages."""
         if not content:
             return
+        content = scrub_image_data(content)  # never persist base64 screenshot data
         with self._lock:
             messages = self._read_messages()
             messages.append({"role": role, "content": content})

@@ -57,8 +57,17 @@ class PermissionGate:
         "file_copy",
         "terminal_execute",
         "app_close",
-        "code_edit"
+        "code_edit",
+        # GUI automation: every call is approved individually (see GUI_TOOLS)
+        "gui_click",
+        "gui_type",
+        "gui_hotkey",
+        "gui_scroll",
     }
+
+    # Mouse/keyboard automation. Always DANGEROUS, and a blanket "allow" (session or
+    # remembered) is refused so each click/keystroke batch needs its own approval.
+    GUI_TOOLS = {"gui_click", "gui_type", "gui_hotkey", "gui_scroll"}
 
     def __init__(self):
         self._session_rules: dict[str, PermissionLevel] = {}
@@ -90,9 +99,13 @@ class PermissionGate:
         """True if the handler decides per call whether approval is needed."""
         return tool_name in self.CONDITIONAL_TOOLS
 
+    def refuses_blanket_allow(self, tool_name: str) -> bool:
+        """True if a session/remembered "allow always" must never apply to this tool."""
+        return self.is_conditional(tool_name) or tool_name in self.GUI_TOOLS
+
     def set_session_permission(self, tool_name: str, level: PermissionLevel) -> None:
         """Set permission level for the current session."""
-        if level == PermissionLevel.ALLOW and self.is_conditional(tool_name):
+        if level == PermissionLevel.ALLOW and self.refuses_blanket_allow(tool_name):
             return  # a blanket allow would defeat the per-call checks
         self._session_rules[tool_name] = level
 
@@ -109,7 +122,11 @@ class PermissionGate:
             "file_move": f"Move/rename: {tool_input.get('source', 'unknown')} -> {tool_input.get('destination', 'unknown')}",
             "terminal_execute": f"Run command: {tool_input.get('command', 'unknown')[:100]}",
             "app_close": f"Close application: {tool_input.get('app_name', 'unknown')}",
-            "code_edit": f"Edit file: {tool_input.get('path', 'unknown')} (targeted replace)"
+            "code_edit": f"Edit file: {tool_input.get('path', 'unknown')} (targeted replace)",
+            "gui_click": f"Click {tool_input.get('button', 'left')} at ({tool_input.get('x', '?')}, {tool_input.get('y', '?')})",
+            "gui_type": f"Type text: {str(tool_input.get('text', ''))[:60]!r}",
+            "gui_hotkey": f"Press hotkey: {tool_input.get('keys', 'unknown')}",
+            "gui_scroll": f"Scroll by {tool_input.get('amount', '?')}",
         }
         return messages.get(tool_name, f"Execute tool: {tool_name}")
 

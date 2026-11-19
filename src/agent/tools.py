@@ -3,7 +3,7 @@
 Implements a structured tool system inspired by Claude Code's tool use pattern.
 """
 from typing import Dict, Any, List, Optional, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 import os
 import shutil
@@ -21,7 +21,8 @@ import html
 import inspect
 from src.services.telegram_service import send_telegram_message, send_telegram_message_async, send_telegram_document, send_telegram_photo_async
 from src.config.settings import get_config_value
-from src.config.log import get_logger
+from src.config.log import get_logger, redact_secrets
+from src.agent.vision import compress_image_file, image_block
 
 logger = get_logger(__name__)
 from src.agent.permissions import (
@@ -67,6 +68,9 @@ class ToolResult:
     permission_message: str = ""
     is_dangerous: bool = False
     message: Optional[str] = None
+    # Transient multimodal payload (Anthropic base64 image block) for the model to see.
+    # Kept out of ``output`` and ``repr`` so it is never JSON-serialised, logged or stored.
+    image: Optional[Dict[str, Any]] = field(default=None, repr=False)
 
     def __post_init__(self):
         if self.message and isinstance(self.output, dict) and "message" not in self.output:
@@ -2137,12 +2141,21 @@ def handle_capture_and_inspect_screen(params: Dict[str, Any]) -> ToolResult:
         else:
             telegram_status = " (Telegram not configured: set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in .env)"
 
+    # 4. Compressed copy for the model's own eyes (max 1280px wide, JPEG q75)
+    image = None
+    try:
+        image = image_block(compress_image_file(screenshot_path))
+    except Exception as e:
+        logger.warning("Could not prepare screenshot for vision: %s", e)
+
     top_apps = ", ".join(visible_windows[:8]) if visible_windows else "None detected"
     summary = (
         f"Active window: '{active_window}'. "
         f"Open applications: {top_apps}. "
         f"Screenshot captured at '{screenshot_path}'.{telegram_status}"
     )
+    if image:
+        summary += " The screenshot image is attached for you to look at."
 
     return ToolResult(
         success=True,
@@ -2151,10 +2164,173 @@ def handle_capture_and_inspect_screen(params: Dict[str, Any]) -> ToolResult:
             "visible_windows": visible_windows[:15],
             "screenshot_path": str(screenshot_path),
             "sent_to_telegram": sent_telegram,
+            "image_attached": image is not None,
             "summary": summary,
             "message": f"✅ Captured screen. Active window is '{active_window}'.{telegram_status}"
-        }
+        },
+        image=image,
     )
+
+
+# ---------------------------------------------------------------------------
+# GUI automation (pyautogui). Every tool here is DANGEROUS (S4): the handler only
+# acts when the executor passes ``approved=True`` out-of-band after the user approved
+# the exact arguments. Input is validated *before* asking, so bad calls never prompt.
+# ---------------------------------------------------------------------------
+
+GUI_MAX_TYPE_CHARS = 500
+GUI_MAX_SCROLL = 1000
+GUI_MAX_HOTKEY_KEYS = 4
+_GUI_BUTTONS = ("left", "right", "middle")
+_GUI_KEY_NAMES = {
+    "ctrl", "alt", "shift", "win", "enter", "tab", "esc", "escape", "space", "backspace",
+    "delete", "insert", "home", "end", "pageup", "pagedown", "up", "down", "left", "right",
+    *(f"f{i}" for i in range(1, 13)),
+}
+# Best-effort refusal when the focused window looks like a credential prompt.
+_CREDENTIAL_WINDOW = re.compile(
+    r"password|passcode|passkey|credential|sign[\s-]?in|log[\s-]?in|windows security|"
+    r"كلمة المرور|كلمة السر|تسجيل الدخول",
+    re.IGNORECASE,
+)
+
+
+def _load_pyautogui():
+    """Import pyautogui with the fail-safe on (mouse to a screen corner aborts) and a short pause."""
+    import pyautogui
+    pyautogui.FAILSAFE = True
+    pyautogui.PAUSE = 0.1
+    return pyautogui
+
+
+def _foreground_window_title() -> str:
+    try:
+        import win32gui
+        return win32gui.GetWindowText(win32gui.GetForegroundWindow()).strip()
+    except Exception as e:
+        logger.debug("Could not read foreground window title: %s", e)
+        return ""
+
+
+def _gui_needs_approval(tool_name: str, message: str) -> ToolResult:
+    return ToolResult(
+        success=False, output=None, requires_permission=True,
+        is_dangerous=True, permission_message=message,
+    )
+
+
+def _run_gui(action) -> ToolResult:
+    """Run ``action(pyautogui)`` and map pyautogui errors (incl. the fail-safe) to a ToolResult."""
+    try:
+        return action(_load_pyautogui())
+    except Exception as e:  # pyautogui.FailSafeException is matched by name (also works with mocks)
+        if type(e).__name__ == "FailSafeException":
+            return ToolResult(success=False, output=None,
+                              error="GUI action aborted by the pyautogui fail-safe (mouse in a screen corner).")
+        logger.warning("GUI automation failed: %s", e)
+        return ToolResult(success=False, output=None, error=f"GUI action failed: {e}")
+
+
+def handle_gui_click(params: Dict[str, Any], approved: bool = False) -> ToolResult:
+    try:
+        x, y = int(params.get("x")), int(params.get("y"))
+        clicks = int(params.get("clicks", 1) or 1)
+    except (TypeError, ValueError):
+        return ToolResult(success=False, output=None, error="gui_click needs integer x and y (and integer clicks).")
+    button = str(params.get("button", "left") or "left").lower()
+    if button not in _GUI_BUTTONS:
+        return ToolResult(success=False, output=None, error=f"button must be one of {', '.join(_GUI_BUTTONS)}.")
+    if not 1 <= clicks <= 3:
+        return ToolResult(success=False, output=None, error="clicks must be 1, 2 or 3.")
+    if x < 0 or y < 0:
+        return ToolResult(success=False, output=None, error="x and y must be non-negative screen coordinates.")
+
+    if not approved:
+        return _gui_needs_approval("gui_click", f"Click {button} x{clicks} at ({x}, {y})")
+
+    def _do(pg):
+        width, height = pg.size()
+        if x >= width or y >= height:
+            return ToolResult(success=False, output=None, error=f"({x}, {y}) is outside the {width}x{height} screen.")
+        pg.click(x=x, y=y, button=button, clicks=clicks)
+        return ToolResult(success=True, output={"message": f"Clicked {button} x{clicks} at ({x}, {y})."})
+
+    return _run_gui(_do)
+
+
+def handle_gui_type(params: Dict[str, Any], approved: bool = False) -> ToolResult:
+    text = params.get("text")
+    press_enter = params.get("press_enter", False)
+    if isinstance(press_enter, str):
+        press_enter = press_enter.lower() in ("true", "1", "yes")
+    if not isinstance(text, str) or not text:
+        return ToolResult(success=False, output=None, error="gui_type needs non-empty text.")
+    if len(text) > GUI_MAX_TYPE_CHARS:
+        return ToolResult(success=False, output=None, error=f"Text is too long (max {GUI_MAX_TYPE_CHARS} characters).")
+    if not text.isascii():
+        return ToolResult(success=False, output=None,
+                          error="gui_type only types ASCII; use clipboard_manager 'paste' for other scripts.")
+    # Credentials are never typed: refuse secret-looking text and credential-looking windows.
+    if redact_secrets(text) != text:
+        return ToolResult(success=False, output=None, error="Refusing to type what looks like a secret or API key.")
+    title = _foreground_window_title()
+    if title and _CREDENTIAL_WINDOW.search(title):
+        return ToolResult(success=False, output=None,
+                          error=f"Refusing to type: the focused window ('{title}') looks like a sign-in or password prompt. "
+                                "Ask the user to enter credentials themselves.")
+
+    if not approved:
+        return _gui_needs_approval("gui_type", f"Type {len(text)} characters: {text[:60]!r}"
+                                   + (" then press Enter" if press_enter else ""))
+
+    def _do(pg):
+        pg.write(text, interval=0.02)
+        if press_enter:
+            pg.press("enter")
+        return ToolResult(success=True, output={"message": f"Typed {len(text)} characters."})
+
+    return _run_gui(_do)
+
+
+def handle_gui_hotkey(params: Dict[str, Any], approved: bool = False) -> ToolResult:
+    keys = params.get("keys")
+    if isinstance(keys, str):
+        keys = [k for k in re.split(r"[+\s,]+", keys) if k]
+    if not isinstance(keys, (list, tuple)) or not keys or not all(isinstance(k, str) for k in keys):
+        return ToolResult(success=False, output=None, error='gui_hotkey needs a list of keys, e.g. ["ctrl", "c"].')
+    keys = [k.strip().lower() for k in keys]
+    if len(keys) > GUI_MAX_HOTKEY_KEYS:
+        return ToolResult(success=False, output=None, error=f"At most {GUI_MAX_HOTKEY_KEYS} keys per hotkey.")
+    bad = [k for k in keys if not (k in _GUI_KEY_NAMES or (len(k) == 1 and k.isascii() and k.isalnum()))]
+    if bad:
+        return ToolResult(success=False, output=None, error=f"Unsupported key(s): {', '.join(bad)}.")
+
+    if not approved:
+        return _gui_needs_approval("gui_hotkey", f"Press hotkey: {'+'.join(keys)}")
+
+    def _do(pg):
+        pg.hotkey(*keys)
+        return ToolResult(success=True, output={"message": f"Pressed {'+'.join(keys)}."})
+
+    return _run_gui(_do)
+
+
+def handle_gui_scroll(params: Dict[str, Any], approved: bool = False) -> ToolResult:
+    try:
+        amount = int(params.get("amount"))
+    except (TypeError, ValueError):
+        return ToolResult(success=False, output=None, error="gui_scroll needs an integer amount.")
+    if amount == 0 or abs(amount) > GUI_MAX_SCROLL:
+        return ToolResult(success=False, output=None, error=f"amount must be non-zero and within ±{GUI_MAX_SCROLL}.")
+
+    if not approved:
+        return _gui_needs_approval("gui_scroll", f"Scroll {'up' if amount > 0 else 'down'} by {abs(amount)}")
+
+    def _do(pg):
+        pg.scroll(amount)
+        return ToolResult(success=True, output={"message": f"Scrolled by {amount}."})
+
+    return _run_gui(_do)
 
 
 # === Windows Clipboard Manager ===
@@ -3426,6 +3602,56 @@ def create_default_registry() -> ToolRegistry:
         ],
         handler=handle_capture_and_inspect_screen,
         requires_permission=False
+    ))
+
+    # GUI automation: DANGEROUS (S4), approved per call; see GUI_TOOLS in permissions.py
+    registry.register(Tool(
+        name="gui_click",
+        description="Click the mouse at screen pixel coordinates (use capture_and_inspect_screen first to find them). Requires user approval every time.",
+        category=ToolCategory.SYSTEM,
+        parameters=[
+            ToolParameter("x", "number", "X pixel coordinate on the full-resolution screen"),
+            ToolParameter("y", "number", "Y pixel coordinate on the full-resolution screen"),
+            ToolParameter("button", "string", "Mouse button", required=False, default="left", enum=list(_GUI_BUTTONS)),
+            ToolParameter("clicks", "number", "Number of clicks, 1-3 (default 1)", required=False, default=1),
+        ],
+        handler=handle_gui_click,
+        requires_permission=True,
+        is_dangerous=True,
+    ))
+    registry.register(Tool(
+        name="gui_type",
+        description="Type ASCII text into the focused window, optionally pressing Enter. NEVER for passwords, credentials or secret fields. Requires user approval every time.",
+        category=ToolCategory.SYSTEM,
+        parameters=[
+            ToolParameter("text", "string", "Text to type (max 500 characters)"),
+            ToolParameter("press_enter", "boolean", "Press Enter afterwards (default False)", required=False, default=False),
+        ],
+        handler=handle_gui_type,
+        requires_permission=True,
+        is_dangerous=True,
+    ))
+    registry.register(Tool(
+        name="gui_hotkey",
+        description='Press a keyboard shortcut, e.g. ["ctrl", "c"]. Requires user approval every time.',
+        category=ToolCategory.SYSTEM,
+        parameters=[
+            ToolParameter("keys", "array", 'Keys pressed together, e.g. ["ctrl", "c"] (max 4)'),
+        ],
+        handler=handle_gui_hotkey,
+        requires_permission=True,
+        is_dangerous=True,
+    ))
+    registry.register(Tool(
+        name="gui_scroll",
+        description="Scroll the mouse wheel in the window under the cursor (positive = up, negative = down). Requires user approval every time.",
+        category=ToolCategory.SYSTEM,
+        parameters=[
+            ToolParameter("amount", "number", "Scroll clicks; positive up, negative down (max ±1000)"),
+        ],
+        handler=handle_gui_scroll,
+        requires_permission=True,
+        is_dangerous=True,
     ))
 
     # Windows Clipboard Manager Tool

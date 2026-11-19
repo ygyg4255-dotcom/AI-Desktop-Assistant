@@ -25,6 +25,7 @@ from src.agent.approvals import (
     DEFAULT_TTL,
 )
 from src.agent.history import HISTORY_FILENAME, PersistentHistory
+from src.agent.vision import strip_image_data
 from src.agent.memory import ConversationMemory
 from src.agent.tool_prompts import strip_action_tag, tag_reply, tool_result_prompt
 from src.services.ai_client import AIClient, Message
@@ -475,17 +476,18 @@ def match_local_intent(prompt: str) -> Optional[Dict[str, Any]]:
         }
 
     # 9. Screen Capture / Vision Intent
+    # Only explicit "take/send a screenshot" requests skip the LLM. Questions about what is
+    # ON the screen ("can you see my screen", "what's on my screen", "read this error") go
+    # to the model, which calls capture_and_inspect_screen and looks at the attached image.
     screen_cap_en = {
         "screenshot", "take a screenshot", "take screenshot", "capture screen",
-        "capture the screen", "screen capture", "can you see my screen", "can you see the screen",
-        "see my screen", "see screen", "what's on my screen", "whats on my screen",
-        "what is on my screen", "inspect screen", "show me my screen", "send screenshot"
+        "capture the screen", "screen capture", "send screenshot"
     }
     is_screen_cap = (
         clean_p_norm in screen_cap_en or
         ("screenshot" in clean_p_norm) or
-        ("screen" in tokens and any(t in tokens for t in ("capture", "take", "see", "grab", "inspect"))) or
-        any(w in norm_ar for w in {"صور الشاشه", "صور الشاشة", "لقطه شاشه", "لقطة شاشة", "صوره للشاشه", "صورة للشاشة", "شايف الشاشه", "شايف الشاشة", "شايف شاشتي", "هل تري شاشتي", "هل ترى شاشتي", "ماذا يوجد في الشاشه", "ماذا يوجد في الشاشة", "صور شاشتي", "سكرين شوت", "سكرينشوت"})
+        ("screen" in tokens and any(t in tokens for t in ("capture", "take", "grab"))) or
+        any(w in norm_ar for w in {"صور الشاشه", "صور الشاشة", "لقطه شاشه", "لقطة شاشة", "صوره للشاشه", "صورة للشاشة", "صور شاشتي", "سكرين شوت", "سكرينشوت"})
     )
     if is_screen_cap:
         msg = "✅ جاري فحص الشاشة والتقاطها وإرسالها إلى تيليجرام..." if is_arabic else "✅ Capturing desktop screen and delivering to Telegram..."
@@ -1133,9 +1135,15 @@ WINDOW MANAGEMENT vs DESKTOP ICONS (CRITICAL DISTINCTION):
 - Use `desktop_icon_position` ONLY for shortcut icons, files, or folders located on the Windows Desktop wallpaper background. NEVER confuse open application windows with desktop background icons!
 
 SCREEN VISION & CAPABILITIES:
-- You CAN see and capture the user's PC screen using the `capture_and_inspect_screen` tool.
-- When asked if you can see the screen, what is on the screen, to take a screenshot, or inspect the user's workspace, NEVER say "No" or claim that you lack vision or eyes. ALWAYS use the `capture_and_inspect_screen` tool to inspect the active windows and capture the live desktop screen, and answer with specific details about what is open and visible on the screen.
-- The `capture_and_inspect_screen` tool automatically captures a live desktop screenshot and delivers it directly to the user's Telegram chat whenever requested.
+- You CAN see the user's PC screen: `capture_and_inspect_screen` captures the desktop and attaches the screenshot as an image you can actually look at (text, errors, buttons, UI elements).
+- When asked if you can see the screen, what is on the screen, to read an error, or to inspect the user's workspace, NEVER say "No" or claim that you lack vision or eyes. ALWAYS use `capture_and_inspect_screen`, then describe what you really see in the image. Never invent screen content you have not captured.
+- `capture_and_inspect_screen` also delivers the screenshot to the user's Telegram chat when requested (set send_to_telegram=false if the user only wants you to look).
+
+GUI AUTOMATION (APPROVAL REQUIRED):
+- You CAN operate the mouse and keyboard with `gui_click`, `gui_type`, `gui_hotkey` and `gui_scroll`. Every call is shown to the user for approval first; if it is declined or pending, say so and do NOT claim it happened.
+- Look first: capture the screen, pick click coordinates from the screenshot (the image may be downscaled to 1280px wide, so scale coordinates back to the real screen resolution), act, then capture again to verify the result.
+- NEVER type into password, PIN, passcode or other credential fields, never type secrets, API keys or tokens, and never handle credentials: if a sign-in or password prompt appears, stop and ask the user to enter it themselves.
+- Prefer dedicated tools (app_open, whatsapp_send, ...) over GUI automation when one exists.
 
 YOUTUBE PLAY & SUMMARIZATION:
 - When the user asks to summarize, explain, or get key insights/takeaways from a YouTube video (e.g. 'اعطني ملخص هذا الفيديو', 'لخص هذا الفيديو', 'summarize this video'):
@@ -1156,7 +1164,7 @@ WHATSAPP DESKTOP AUTOMATION:
 IMPORTANT RULES:
 1. When asked to move, snap, position, maximize, or minimize an open APPLICATION WINDOW or BROWSER (نافذة أو متصفح أو برنامج), ALWAYS use the `move_application_window` tool.
 2. When asked to visually move or position desktop shortcut icons or files on the Windows Desktop wallpaper background, use the `desktop_icon_position` tool.
-3. When asked if you can see the screen, what is open/visible, or to capture/take a screenshot, ALWAYS use the `capture_and_inspect_screen` tool.
+3. When asked if you can see the screen, what is open/visible, what an error says, or to capture/take a screenshot, ALWAYS use the `capture_and_inspect_screen` tool. For clicking, typing, hotkeys or scrolling on screen use the `gui_*` tools (approval required; never for credentials).
 4. When asked to adjust volume (volume_up, volume_down, volume_mute, set_volume), screen brightness (brightness_up, brightness_down, set_brightness), or open Windows settings, ALWAYS use the `system_control` tool for instant execution. NEVER use terminal_execute or PowerShell for volume or brightness.
 5. When asked to summarize or explain a YouTube video, use `youtube_play_and_summarize` with `play=False` (unless the user explicitly asks to play/open it). When asked ONLY to play music or a video without summarization, use `youtube_play`.
 6. When asked to send a WhatsApp message, use `whatsapp_send`. When asked to read or check WhatsApp messages, use `whatsapp_read`.
@@ -1241,6 +1249,20 @@ Available tools are provided in the tool definitions. Use them responsibly."""
         if self._previous_context:
             prompt = f"{prompt}{nl}{self._previous_context}"
         return prompt
+
+    def _append_tool_feedback(self, tool_name: str, result_repr: str, result: ToolResult) -> None:
+        """Hand a tool result back to the model; a screenshot goes in as a multimodal image block.
+
+        Only the newest screenshot stays in the in-memory message list (older ones become
+        a text placeholder), and image data is never passed to ``_remember``/history.
+        """
+        text = tool_result_prompt(tool_name, result_repr, result.success)
+        if result.success and result.image:
+            for msg in self._messages:
+                msg.content = strip_image_data(msg.content)
+            self._messages.append(Message(role="user", content=[result.image, {"type": "text", "text": text}]))
+        else:
+            self._messages.append(Message(role="user", content=text))
 
     def _remember(self, role: str, content: str, outcomes: Optional[List[str]] = None) -> None:
         """Record a turn in working memory and persistent history; assistant turns carry the action tag."""
@@ -1464,7 +1486,7 @@ Available tools are provided in the tool definitions. Use them responsibly."""
         # Check database for saved permission
         if self._database:
             saved_permission = self._database.get_tool_permission(tool_name)
-            if saved_permission == "allow" and not self._gate.is_conditional(tool_name):
+            if saved_permission == "allow" and not self._gate.refuses_blanket_allow(tool_name):
                 return tool.run(tool_input, approved=True)
             elif saved_permission == "deny":
                 return ToolResult(
@@ -1785,7 +1807,7 @@ Available tools are provided in the tool definitions. Use them responsibly."""
                                 "clipboard_manager"
                             }
 
-                            if tool_name in DIRECT_ACTION_TOOLS and res.success:
+                            if tool_name in DIRECT_ACTION_TOOLS and res.success and not res.image:
                                 confirm_msg = ""
                                 if isinstance(res.output, dict):
                                     confirm_msg = res.output.get("message") or res.output.get("summary") or ""
@@ -1825,7 +1847,7 @@ Available tools are provided in the tool definitions. Use them responsibly."""
                                 role="assistant",
                                 content=f"Using tool: {tool_name} with input: {json.dumps(tool_input, ensure_ascii=False)}"
                             ))
-                            self._messages.append(Message(role="user", content=tool_result_prompt(tool_name, result_repr, res.success)))
+                            self._append_tool_feedback(tool_name, result_repr, res)
                             final_content = ""
                             streamed_speech = False
                             continue
@@ -1977,11 +1999,12 @@ Available tools are provided in the tool definitions. Use them responsibly."""
                     role="assistant",
                     content=f"Using tool: {tool_name} with input: {json.dumps(tool_input, ensure_ascii=False)}"
                 ))
-                self._messages.append(Message(role="user", content=tool_result_prompt(tool_name, result_repr, result.success)))
+                self._append_tool_feedback(tool_name, result_repr, result)
 
                 # Direct action tool fast-return: bypass second LLM summarization call
+                # (never for a screenshot: the model has to look at the image)
                 remaining_in_turn = len(tool_uses) - 1 - tool_idx
-                if tool_name in DIRECT_ACTION_TOOLS and result.success and remaining_in_turn == 0:
+                if tool_name in DIRECT_ACTION_TOOLS and result.success and remaining_in_turn == 0 and not result.image:
                     confirm_msg = ""
                     if isinstance(result.output, dict):
                         confirm_msg = result.output.get("message") or result.output.get("summary") or ""

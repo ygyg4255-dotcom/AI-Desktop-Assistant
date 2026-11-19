@@ -14,6 +14,7 @@ from typing import Dict, List, Optional, Union
 
 from src.config.log import get_logger, redact_secrets
 from src.config.paths import runtime_file
+from src.agent.vision import scrub_image_data
 
 logger = get_logger(__name__)
 
@@ -58,7 +59,7 @@ class PersistentHistory:
         """Store one turn (redacted, length-capped). Never raises: history is best-effort."""
         if role not in ("user", "assistant") or not content or not content.strip():
             return
-        clean = redact_secrets(content.strip())[:MAX_STORED_CHARS]
+        clean = redact_secrets(scrub_image_data(content.strip()))[:MAX_STORED_CHARS]
         with self._lock:
             try:
                 turns = self._read()
