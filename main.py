@@ -43,6 +43,7 @@ from src.services.telegram_service import (
     TelegramRemoteListener,
     send_telegram_message_async,
 )
+from src.services.camera_service import get_camera_service
 from ui_server import start_hud_server, stop_hud_server
 
 logger = get_logger("main")
@@ -131,6 +132,7 @@ def main() -> None:
     approvals.start_sweeper(interval=5.0)
     tts_manager = TTSManager(enabled=True)
 
+    camera_service = get_camera_service()
     shutdown_event = threading.Event()
     active_voice_worker = [None]
     active_tg_worker = [None]
@@ -160,7 +162,16 @@ def main() -> None:
         request_shutdown=_request_shutdown,
         pause_listening=_pause_mic,
         resume_listening=_resume_mic,
+        start_camera=camera_service.start,
+        stop_camera=camera_service.stop,
     )
+
+    if settings.camera_autostart:
+        try:
+            if not camera_service.start():
+                logger.warning("Camera autostart skipped: %s", camera_service.last_error)
+        except Exception as err:
+            logger.warning("Camera autostart failed: %s", err)
 
     wake_gate = WakeGate(
         require_wake_word=get_config_value("ALTRON_REQUIRE_WAKE_WORD", default="true").lower()
@@ -437,6 +448,10 @@ def main() -> None:
         tts_manager.stop()
     except Exception as err:
         logger.warning("TTS did not stop cleanly: %s", err)
+    try:
+        camera_service.stop()
+    except Exception as err:
+        logger.warning("Camera service did not stop cleanly: %s", err)
     # Flag Offline, let open HUD tabs see it and close, then free port 5000.
     stop_hud_server(grace=2.0)
     logger.info("All subsystems stopped.")

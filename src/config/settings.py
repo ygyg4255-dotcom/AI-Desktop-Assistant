@@ -309,6 +309,11 @@ class Settings:
         self.telegram_chat_id = cfg("TELEGRAM_CHAT_ID")
         self.groq_api_key = cfg("GROQ_API_KEY")
         self.altron_mic_device = cfg("ALTRON_MIC_DEVICE")
+        # Keep the webcam warm in RAM for instant capture (frames never leave the machine
+        # unless the user asks Altron to look). Missing camera/cv2 degrades to a warning.
+        self.camera_autostart = str(
+            cfg("ALTRON_CAMERA_AUTOSTART", default="true") or "true"
+        ).strip().lower() not in ("0", "false", "no", "off")
         # Legacy readers (src/agent/tools.py) still look at os.environ.
         if self.telegram_bot_token:
             os.environ["TELEGRAM_BOT_TOKEN"] = self.telegram_bot_token

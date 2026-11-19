@@ -1140,7 +1140,7 @@ SCREEN VISION & CAPABILITIES:
 - `capture_and_inspect_screen` also delivers the screenshot to the user's Telegram chat when requested (set send_to_telegram=false if the user only wants you to look).
 
 WEBCAM VISION:
-- You CAN see through the user's webcam: `capture_camera` takes one photo (the camera is released immediately) and attaches it as an image. When the user asks you to look through the camera, see them, or identify/describe something they are holding or showing, ALWAYS call it, then describe what you really see. Never claim you have no camera access, and only use it when the user asks.
+- You CAN see through the user's webcam: `capture_camera` takes one photo and attaches it as an image (instant when the background camera is on). When the user asks you to look through the camera, see them, or identify/describe something they are holding or showing, ALWAYS call it, then describe what you really see. For "what did I move?" / "what changed?" call it with `compare_seconds_ago` (e.g. 5) to get an earlier frame and the current one, and compare them. `camera_start` / `camera_stop` turn the background camera on/off when asked. Never claim you have no camera access, and only look when the user asks: camera frames are never sent to you otherwise.
 
 GUI AUTOMATION:
 - You CAN operate the mouse and keyboard. `gui_click` and `gui_scroll` run immediately when the user asks. `gui_type` and `gui_hotkey` are shown to the user for approval first; if declined or pending, say so and do NOT claim it happened.
@@ -1265,7 +1265,10 @@ Available tools are provided in the tool definitions. Use them responsibly."""
             for msg in self._messages:
                 placeholder = CAMERA_PLACEHOLDER if kinds.get(id(msg)) == "camera" else SCREENSHOT_PLACEHOLDER
                 msg.content = strip_image_data(msg.content, placeholder)
-            new_msg = Message(role="user", content=[result.image, {"type": "text", "text": text}])
+            new_msg = Message(
+                role="user",
+                content=[result.image, *getattr(result, "extra_content", []), {"type": "text", "text": text}],
+            )
             kinds[id(new_msg)] = result.image_kind
             self._messages.append(new_msg)
         else:
@@ -1810,6 +1813,8 @@ Available tools are provided in the tool definitions. Use them responsibly."""
                                 "move_application_window",
                                 "capture_and_inspect_screen",
                                 "capture_camera",
+                                "camera_start",
+                                "camera_stop",
                                 "whatsapp_send",
                                 "whatsapp_read",
                                 "clipboard_manager"
@@ -1910,6 +1915,8 @@ Available tools are provided in the tool definitions. Use them responsibly."""
                 "move_application_window",
                 "capture_and_inspect_screen",
                 "capture_camera",
+                "camera_start",
+                "camera_stop",
                 "whatsapp_send",
                 "whatsapp_read",
                 "clipboard_manager"

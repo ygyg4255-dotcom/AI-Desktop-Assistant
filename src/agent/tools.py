@@ -23,6 +23,7 @@ from src.services.telegram_service import send_telegram_message, send_telegram_m
 from src.config.settings import get_config_value
 from src.config.log import get_logger, redact_secrets
 from src.agent.vision import CameraError, capture_camera_jpeg, compress_image_file, image_block
+from src.services.camera_service import CameraServiceError, get_camera_service
 
 logger = get_logger(__name__)
 from src.agent.permissions import (
@@ -72,6 +73,8 @@ class ToolResult:
     # Kept out of ``output`` and ``repr`` so it is never JSON-serialised, logged or stored.
     image: Optional[Dict[str, Any]] = field(default=None, repr=False)
     image_kind: str = "screenshot"  # "screenshot" or "camera": picks the text placeholder
+    # Extra transient content blocks (e.g. a label plus a second image) sent after ``image``.
+    extra_content: List[Dict[str, Any]] = field(default_factory=list, repr=False)
 
     def __post_init__(self):
         if self.message and isinstance(self.output, dict) and "message" not in self.output:
@@ -2173,10 +2176,56 @@ def handle_capture_and_inspect_screen(params: Dict[str, Any]) -> ToolResult:
     )
 
 
-def handle_capture_camera(params: Dict[str, Any]) -> ToolResult:
-    """Capture a single webcam frame (released immediately) and attach it for the model to see."""
+def _camera_compare_result(service, seconds_ago: float) -> ToolResult:
+    """Earlier buffered frame + current frame from RAM, labelled, for 'what changed?' questions."""
     try:
-        jpeg = capture_camera_jpeg()
+        pair = service.get_before_after_jpegs(seconds_ago=seconds_ago)
+    except CameraServiceError as e:
+        return ToolResult(success=False, output=None, error=str(e))
+    apart = round(pair.seconds_apart, 1)
+    return ToolResult(
+        success=True,
+        output={
+            "image_attached": True,
+            "seconds_apart": apart,
+            "message": f"Two camera frames attached: the first from {apart}s ago, the second is current. Compare them.",
+        },
+        image=image_block(pair.before),
+        image_kind="camera",
+        extra_content=[
+            {"type": "text", "text": f"(Above: the camera {apart} seconds ago. Below: the camera now.)"},
+            image_block(pair.after),
+        ],
+    )
+
+
+def handle_capture_camera(params: Dict[str, Any]) -> ToolResult:
+    """Look through the webcam: instant from the background service's RAM, else a single-shot capture."""
+    service = get_camera_service()
+    compare = params.get("compare_seconds_ago")
+    if compare not in (None, "", 0):
+        try:
+            seconds_ago = float(compare)
+        except (TypeError, ValueError):
+            return ToolResult(success=False, output=None, error="compare_seconds_ago must be a number of seconds.")
+        if not 0 < seconds_ago <= 60:
+            return ToolResult(success=False, output=None, error="compare_seconds_ago must be between 0 and 60 seconds.")
+        if not service.is_running:
+            return ToolResult(
+                success=False, output=None,
+                error="Comparing needs the background camera, which is off. Ask the user to say 'start camera' first.",
+            )
+        return _camera_compare_result(service, seconds_ago)
+
+    try:
+        if service.is_running:
+            try:
+                jpeg = service.get_latest_jpeg()
+            except CameraServiceError as e:
+                logger.info("Background camera frame unavailable: %s", e)
+                return ToolResult(success=False, output=None, error=str(e))
+        else:
+            jpeg = capture_camera_jpeg()
     except CameraError as e:
         logger.info("Camera capture failed: %s", e)
         return ToolResult(success=False, output=None, error=str(e))
@@ -2189,6 +2238,20 @@ def handle_capture_camera(params: Dict[str, Any]) -> ToolResult:
         image=image_block(jpeg),
         image_kind="camera",
     )
+
+
+def handle_camera_start(params: Dict[str, Any]) -> ToolResult:
+    """Turn the background camera on (frames stay in RAM, nothing is sent until asked)."""
+    service = get_camera_service()
+    if service.is_running or service.start():
+        return ToolResult(success=True, output={"message": "Camera is on. I'll only look when you ask."})
+    return ToolResult(success=False, output=None, error=service.last_error or "The camera could not be started.")
+
+
+def handle_camera_stop(params: Dict[str, Any]) -> ToolResult:
+    """Turn the background camera off and drop every buffered frame."""
+    get_camera_service().stop()
+    return ToolResult(success=True, output={"message": "Camera is off."})
 
 
 # ---------------------------------------------------------------------------
@@ -3667,10 +3730,28 @@ def create_default_registry() -> ToolRegistry:
 
     registry.register(Tool(
         name="capture_camera",
-        description="Take one photo with the user's webcam and attach it as an image so you can see what is in front of the camera. The camera is released immediately. Use when the user asks you to look through the camera.",
+        description="Take a photo with the user's webcam and attach it as an image so you can see what is in front of the camera. Instant when the background camera is on, otherwise a single-shot capture. Use only when the user asks you to look through the camera. For 'what did I move / what changed?' set compare_seconds_ago to also receive the frame from that many seconds ago (needs the background camera on).",
+        category=ToolCategory.SYSTEM,
+        parameters=[
+            ToolParameter("compare_seconds_ago", "number", "Optional: also attach the camera frame from about this many seconds ago (1-60) to spot what changed", required=False, default=0),
+        ],
+        handler=handle_capture_camera,
+        requires_permission=False,
+    ))
+    registry.register(Tool(
+        name="camera_start",
+        description="Turn the background camera on (user says 'start camera'). Frames stay in memory and are only sent to you when the user asks you to look.",
         category=ToolCategory.SYSTEM,
         parameters=[],
-        handler=handle_capture_camera,
+        handler=handle_camera_start,
+        requires_permission=False,
+    ))
+    registry.register(Tool(
+        name="camera_stop",
+        description="Turn the background camera off (user says 'stop camera'), releasing the webcam and discarding buffered frames.",
+        category=ToolCategory.SYSTEM,
+        parameters=[],
+        handler=handle_camera_stop,
         requires_permission=False,
     ))
 

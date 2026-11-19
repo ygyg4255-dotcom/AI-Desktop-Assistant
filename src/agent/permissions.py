@@ -41,6 +41,8 @@ class PermissionGate:
         "gui_click",
         "gui_scroll",
         "capture_camera",
+        "camera_start",  # turning the camera on/off is the user's explicit request;
+        "camera_stop",   # frames stay in RAM and never go to Claude unless asked
     }
 
     # Tools that auto-run only for low-risk inputs; the handler decides per call

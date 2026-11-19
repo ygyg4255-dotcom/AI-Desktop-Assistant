@@ -16,6 +16,8 @@ SHUTDOWN = "shutdown"
 MUTE = "mute"
 UNMUTE = "unmute"
 CLEAR_MEMORY = "clear_memory"
+CAMERA_START = "camera_start"
+CAMERA_STOP = "camera_stop"
 
 _LEADING_FILLER = {"hey", "ok", "okay", "please", "يا", "من", "فضلك"}
 _TRAILING_FILLER = {"please", "now", "فضلك"}
@@ -43,6 +45,16 @@ _PHRASES = {
         "forget the last session", "forget everything", "forget our previous conversation",
         "امسح الذاكرة", "انس الجلسة السابقة",
     },
+    CAMERA_START: {
+        "start camera", "start the camera", "start webcam", "start the webcam",
+        "turn on camera", "turn on the camera", "turn camera on", "turn on webcam",
+        "turn on the webcam", "camera on", "شغل الكاميرا", "افتح الكاميرا",
+    },
+    CAMERA_STOP: {
+        "stop camera", "stop the camera", "stop webcam", "stop the webcam",
+        "turn off camera", "turn off the camera", "turn camera off", "turn off webcam",
+        "turn off the webcam", "camera off", "اطفئ الكاميرا", "اوقف الكاميرا", "اغلق الكاميرا",
+    },
 }
 # Short forms that are only unambiguous when addressed to Altron ("Altron, shut down").
 _ADDRESSED_ONLY = {SHUTDOWN: {"shut down", "shutdown", "close", "quit", "exit", "اغلق", "اطفئ"}}
@@ -68,7 +80,7 @@ _TRAILING = {" ".join(_normalize(f)) for f in _TRAILING_FILLER}
 
 
 def match_control_intent(text: str) -> Optional[str]:
-    """Return SHUTDOWN / MUTE / UNMUTE / CLEAR_MEMORY, or None for anything else."""
+    """Return SHUTDOWN / MUTE / UNMUTE / CLEAR_MEMORY / CAMERA_START / CAMERA_STOP, or None for anything else."""
     tokens = _normalize(text)
     while tokens and tokens[0] in _LEADING:
         tokens = tokens[1:]
@@ -100,7 +112,11 @@ class ControlHandler:
     """Runs control actions through injected callables, so main.py wires real subsystems."""
 
     def __init__(self, clear_memory: Callable[[], None], request_shutdown: Callable[[], None],
-                 pause_listening: Callable[[], None], resume_listening: Callable[[], None]):
+                 pause_listening: Callable[[], None], resume_listening: Callable[[], None],
+                 start_camera: Optional[Callable[[], bool]] = None,
+                 stop_camera: Optional[Callable[[], None]] = None):
+        self._start_camera = start_camera
+        self._stop_camera = stop_camera
         self._clear_memory = clear_memory
         self._request_shutdown = request_shutdown
         self._pause = pause_listening
@@ -126,5 +142,13 @@ class ControlHandler:
             self.muted = False
             self._resume()
             return "عدت للاستماع." if ar else "Listening again."
+        if action == CAMERA_START:
+            if self._start_camera is not None and not self._start_camera():
+                return "تعذر تشغيل الكاميرا." if ar else "I couldn't start the camera. Check that it's connected and not in use."
+            return "تم تشغيل الكاميرا." if ar else "Camera on. I'll only look when you ask."
+        if action == CAMERA_STOP:
+            if self._stop_camera is not None:
+                self._stop_camera()
+            return "تم إيقاف الكاميرا." if ar else "Camera off."
         self._clear_memory()
         return "تم مسح ذاكرة الجلسة السابقة." if ar else "Done. I've cleared the saved conversation memory."
