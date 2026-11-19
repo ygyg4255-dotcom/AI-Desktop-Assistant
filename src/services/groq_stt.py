@@ -21,6 +21,7 @@ logger = get_logger(__name__)
 
 GROQ_TRANSCRIPTION_URL = "https://api.groq.com/openai/v1/audio/transcriptions"
 GROQ_STT_MODEL = "whisper-large-v3-turbo"
+GROQ_USER_AGENT = "altron-stt/1.0"
 GROQ_TIMEOUT_SECONDS = 5.0
 # After a failure, skip Groq for a while so an offline machine does not pay the
 # network timeout on every utterance.
@@ -77,13 +78,20 @@ def transcribe_wav(wav_bytes: bytes, api_key: str, timeout: float = GROQ_TIMEOUT
             "Authorization": f"Bearer {api_key}",
             "Content-Type": content_type,
             "Accept": "application/json",
+            # Groq's CDN answers 403 to urllib's default "Python-urllib" agent.
+            "User-Agent": GROQ_USER_AGENT,
         },
     )
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             payload = json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as err:
-        raise GroqSTTError(redact_secrets(f"Groq HTTP {err.code}", api_key)) from None
+        detail = ""
+        try:
+            detail = err.read().decode("utf-8", "replace")[:200]
+        except Exception as read_err:
+            logger.debug("could not read Groq error body: %s", read_err)
+        raise GroqSTTError(redact_secrets(f"Groq HTTP {err.code}: {detail}", api_key)) from None
     except Exception as err:  # URLError, timeout, bad JSON, ...
         raise GroqSTTError(redact_secrets(f"Groq request failed: {type(err).__name__}: {err}", api_key)) from None
     text = payload.get("text") if isinstance(payload, dict) else None

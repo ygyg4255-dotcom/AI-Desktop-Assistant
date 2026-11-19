@@ -70,7 +70,8 @@ def test_groq_success_sends_expected_request_and_skips_local(monkeypatch):
 
     def fake_urlopen(req, timeout=None):
         seen.update(url=req.full_url, timeout=timeout, auth=req.get_header("Authorization"),
-                    ctype=req.get_header("Content-type"), body=req.data)
+                    ctype=req.get_header("Content-type"), body=req.data,
+                    ua=req.get_header("User-agent"))
         return _Resp({"text": "  hello altron "})
 
     monkeypatch.setattr(groq_stt.urllib.request, "urlopen", fake_urlopen)
@@ -82,6 +83,7 @@ def test_groq_success_sends_expected_request_and_skips_local(monkeypatch):
     assert seen["url"] == "https://api.groq.com/openai/v1/audio/transcriptions"
     assert seen["timeout"] <= 5.0
     assert seen["auth"] == f"Bearer {FAKE_KEY}"
+    assert seen["ua"] and "urllib" not in seen["ua"].lower()
     assert seen["ctype"].startswith("multipart/form-data; boundary=")
     assert b"whisper-large-v3-turbo" in seen["body"] and b"RIFF" in seen["body"]
 
