@@ -97,6 +97,11 @@
       if (!response.ok) return;
 
       const data = await response.json();
+      failures = 0;
+      if ((data.state || '').trim().toLowerCase() === 'offline') {
+        goOffline();
+        return;
+      }
       renderState(data.state || 'Idle');
       renderMetrics(data.metrics || data);
       renderLogs(data.logs || []);
@@ -105,8 +110,21 @@
         updateAiConfigDisplay(data.ai_config);
       }
     } catch (err) {
-      // Offline / reconnecting
+      // Server unreachable: after a few misses assume the backend is gone.
+      if (++failures >= 3) goOffline();
     }
+  }
+
+  let failures = 0;
+  let offlineShown = false;
+  function goOffline() {
+    if (!offlineShown) {
+      offlineShown = true;
+      document.body.className = 'state-idle';
+      document.title = 'A.L.T.R.O.N - Offline';
+      if (coreStatusTextEl) coreStatusTextEl.textContent = 'Offline';
+    }
+    try { window.close(); } catch (e) { /* tab not script-closable; stays on Offline */ }
   }
 
   // 3. Render State Accents & Subtitle

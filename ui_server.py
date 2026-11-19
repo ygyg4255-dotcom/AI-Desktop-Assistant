@@ -26,7 +26,7 @@ from flask import Flask, send_from_directory, Response, request, jsonify
 
 from src.config.log import get_logger, setup_logging
 from src.config.settings import get_active_config_dict, get_config_value, is_masked_key, save_ai_config
-from src.services.hud_status import get_hud_status, clear_hud_logs
+from src.services.hud_status import get_hud_status, clear_hud_logs, update_hud_status
 
 logger = get_logger("hud")
 
@@ -352,6 +352,31 @@ def _is_port_in_use(host: str, port: int) -> bool:
         return False
 
 
+_SERVER: Any = None
+_SERVER_THREAD: Optional[threading.Thread] = None
+
+
+def stop_hud_server(grace: float = 2.0, timeout: float = 5.0) -> None:
+    """Flag the HUD offline, give open tabs `grace` seconds to see it and close, then
+    stop the HTTP server and release the port. Safe to call more than once."""
+    global _SERVER, _SERVER_THREAD
+    update_hud_status(state="Offline")
+    server, thread = _SERVER, _SERVER_THREAD
+    _SERVER = _SERVER_THREAD = None
+    if server is None:
+        return
+    if grace > 0:
+        time.sleep(grace)
+    try:
+        server.shutdown()
+        server.server_close()
+    except Exception as err:
+        logger.warning("HUD server did not stop cleanly: %s", err)
+    if thread is not None and thread.is_alive():
+        thread.join(timeout)
+    logger.info("HUD server stopped.")
+
+
 def start_hud_server(
     host: str = "127.0.0.1",
     port: int = 5000,
@@ -376,11 +401,20 @@ def start_hud_server(
         actual_port = fallback_port
     _HUD_PORT = actual_port
 
-    def _run():
-        logging.getLogger("werkzeug").setLevel(logging.ERROR)
-        flask_app.run(host=host, port=actual_port, debug=False, use_reloader=False)
+    global _SERVER, _SERVER_THREAD
+    logging.getLogger("werkzeug").setLevel(logging.ERROR)
+    from werkzeug.serving import make_server
 
-    thread = threading.Thread(target=_run, daemon=True)
+    _SERVER = make_server(host, actual_port, flask_app, threaded=True)
+
+    def _run():
+        try:
+            _SERVER.serve_forever()
+        except Exception:
+            logger.exception("HUD server loop failed")
+
+    thread = threading.Thread(target=_run, name="AltronHUDServer", daemon=True)
+    _SERVER_THREAD = thread
     thread.start()
 
     if open_browser:

@@ -42,7 +42,7 @@ from src.services.telegram_service import (
     TelegramRemoteListener,
     send_telegram_message_async,
 )
-from ui_server import start_hud_server
+from ui_server import start_hud_server, stop_hud_server
 
 logger = get_logger("main")
 
@@ -412,7 +412,8 @@ def main() -> None:
         tts_manager.stop()
     except Exception as err:
         logger.warning("TTS did not stop cleanly: %s", err)
-    update_hud_status(state="Offline")
+    # Flag Offline, let open HUD tabs see it and close, then free port 5000.
+    stop_hud_server(grace=2.0)
     logger.info("All subsystems stopped.")
 
 
