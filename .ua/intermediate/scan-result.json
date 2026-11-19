@@ -1,8 +1,7 @@
 {
-  "name": "Altron",
-  "description": "Autonomous Windows desktop assistant featuring a floating dynamic capsule UI, voice wake-word detection, conditional speech synthesis, desktop icon control, and remote Telegram control.",
+  "name": "AI Desktop Assistant",
+  "description": "Altron is an autonomous Windows desktop assistant: a headless Python orchestrator that drives a local Flask HUD in the browser, always-on voice control (wake word, faster-whisper STT, TTS), permission-gated desktop and file automation tools, and Telegram remote control with out-of-band approvals, backed by the Anthropic Claude Messages API.",
   "languages": [
-    "config",
     "css",
     "html",
     "javascript",
@@ -12,46 +11,45 @@
     "txt"
   ],
   "frameworks": [
-    "PySide6",
     "Flask",
-    "Edge-TTS"
+    "pytest"
   ],
   "files": [
     {
       "path": ".env.example",
       "language": "config",
-      "sizeLines": 38,
+      "sizeLines": 12,
       "fileCategory": "config"
+    },
+    {
+      "path": ".gitattributes",
+      "language": "unknown",
+      "sizeLines": 1,
+      "fileCategory": "code"
     },
     {
       "path": "CLAUDE.md",
       "language": "markdown",
-      "sizeLines": 18,
+      "sizeLines": 91,
       "fileCategory": "docs"
     },
     {
       "path": "README.md",
       "language": "markdown",
-      "sizeLines": 180,
+      "sizeLines": 231,
       "fileCategory": "docs"
     },
     {
       "path": "build_exe.py",
       "language": "python",
-      "sizeLines": 96,
+      "sizeLines": 147,
       "fileCategory": "code"
     },
     {
       "path": "main.py",
       "language": "python",
-      "sizeLines": 311,
+      "sizeLines": 364,
       "fileCategory": "code"
-    },
-    {
-      "path": "memory.json",
-      "language": "json",
-      "sizeLines": 41,
-      "fileCategory": "config"
     },
     {
       "path": "memory.py",
@@ -66,9 +64,15 @@
       "fileCategory": "docs"
     },
     {
+      "path": "pytest.ini",
+      "language": "config",
+      "sizeLines": 7,
+      "fileCategory": "config"
+    },
+    {
       "path": "requirements.txt",
       "language": "txt",
-      "sizeLines": 13,
+      "sizeLines": 22,
       "fileCategory": "docs"
     },
     {
@@ -84,27 +88,33 @@
       "fileCategory": "code"
     },
     {
+      "path": "src/agent/approvals.py",
+      "language": "python",
+      "sizeLines": 265,
+      "fileCategory": "code"
+    },
+    {
       "path": "src/agent/executor.py",
       "language": "python",
-      "sizeLines": 1923,
+      "sizeLines": 2040,
       "fileCategory": "code"
     },
     {
       "path": "src/agent/memory.py",
       "language": "python",
-      "sizeLines": 92,
+      "sizeLines": 89,
       "fileCategory": "code"
     },
     {
       "path": "src/agent/permissions.py",
       "language": "python",
-      "sizeLines": 97,
+      "sizeLines": 200,
       "fileCategory": "code"
     },
     {
       "path": "src/agent/tools.py",
       "language": "python",
-      "sizeLines": 3220,
+      "sizeLines": 3391,
       "fileCategory": "code"
     },
     {
@@ -120,21 +130,33 @@
       "fileCategory": "code"
     },
     {
+      "path": "src/config/log.py",
+      "language": "python",
+      "sizeLines": 127,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/config/paths.py",
+      "language": "python",
+      "sizeLines": 25,
+      "fileCategory": "code"
+    },
+    {
       "path": "src/config/settings.py",
       "language": "python",
-      "sizeLines": 229,
+      "sizeLines": 347,
       "fileCategory": "code"
     },
     {
       "path": "src/services/__init__.py",
       "language": "python",
-      "sizeLines": 42,
+      "sizeLines": 46,
       "fileCategory": "code"
     },
     {
       "path": "src/services/ai_client.py",
       "language": "python",
-      "sizeLines": 558,
+      "sizeLines": 293,
       "fileCategory": "code"
     },
     {
@@ -152,25 +174,31 @@
     {
       "path": "src/services/hud_status.py",
       "language": "python",
-      "sizeLines": 168,
+      "sizeLines": 150,
       "fileCategory": "code"
     },
     {
       "path": "src/services/omniroute_manager.py",
       "language": "python",
-      "sizeLines": 106,
+      "sizeLines": 110,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/signals.py",
+      "language": "python",
+      "sizeLines": 54,
       "fileCategory": "code"
     },
     {
       "path": "src/services/telegram_service.py",
       "language": "python",
-      "sizeLines": 330,
+      "sizeLines": 478,
       "fileCategory": "code"
     },
     {
       "path": "src/services/voice_service.py",
       "language": "python",
-      "sizeLines": 747,
+      "sizeLines": 772,
       "fileCategory": "code"
     },
     {
@@ -210,47 +238,45 @@
       "fileCategory": "code"
     },
     {
-      "path": "status.json",
-      "language": "json",
-      "sizeLines": 8,
-      "fileCategory": "config"
-    },
-    {
       "path": "ui/app.js",
       "language": "javascript",
-      "sizeLines": 561,
+      "sizeLines": 606,
       "fileCategory": "code"
     },
     {
       "path": "ui/index.html",
       "language": "html",
-      "sizeLines": 279,
+      "sizeLines": 272,
       "fileCategory": "markup"
     },
     {
       "path": "ui/style.css",
       "language": "css",
-      "sizeLines": 1006,
+      "sizeLines": 1082,
       "fileCategory": "markup"
     },
     {
       "path": "ui_server.py",
       "language": "python",
-      "sizeLines": 457,
+      "sizeLines": 403,
       "fileCategory": "code"
     }
   ],
-  "totalFiles": 37,
-  "filteredByIgnore": 6,
+  "totalFiles": 41,
+  "filteredByIgnore": 23,
   "estimatedComplexity": "moderate",
   "importMap": {
     ".env.example": [],
+    ".gitattributes": [],
     "CLAUDE.md": [],
     "README.md": [],
     "build_exe.py": [],
     "main.py": [
+      "src/agent/approvals.py",
       "src/agent/executor.py",
       "src/config/__init__.py",
+      "src/config/log.py",
+      "src/config/settings.py",
       "src/services/__init__.py",
       "src/services/hud_status.py",
       "src/services/telegram_service.py",
@@ -258,11 +284,11 @@
       "src/storage/db.py",
       "ui_server.py"
     ],
-    "memory.json": [],
     "memory.py": [
       "src/agent/memory.py"
     ],
     "prompts/system_prompt.txt": [],
+    "pytest.ini": [],
     "requirements.txt": [],
     "src/__init__.py": [],
     "src/agent/__init__.py": [
@@ -271,7 +297,9 @@
       "src/agent/permissions.py",
       "src/agent/tools.py"
     ],
+    "src/agent/approvals.py": [],
     "src/agent/executor.py": [
+      "src/agent/approvals.py",
       "src/agent/memory.py",
       "src/agent/permissions.py",
       "src/agent/tools.py",
@@ -279,9 +307,12 @@
       "src/services/hud_status.py",
       "src/storage/db.py"
     ],
-    "src/agent/memory.py": [],
+    "src/agent/memory.py": [
+      "src/config/paths.py"
+    ],
     "src/agent/permissions.py": [],
     "src/agent/tools.py": [
+      "src/agent/permissions.py",
       "src/config/settings.py",
       "src/services/telegram_service.py"
     ],
@@ -295,7 +326,13 @@
     "src/config/__init__.py": [
       "src/config/settings.py"
     ],
-    "src/config/settings.py": [],
+    "src/config/log.py": [
+      "src/config/paths.py"
+    ],
+    "src/config/paths.py": [],
+    "src/config/settings.py": [
+      "src/config/log.py"
+    ],
     "src/services/__init__.py": [
       "src/services/ai_client.py",
       "src/services/database.py",
@@ -304,18 +341,28 @@
       "src/services/telegram_service.py",
       "src/services/voice_service.py"
     ],
-    "src/services/ai_client.py": [],
+    "src/services/ai_client.py": [
+      "src/config/settings.py"
+    ],
     "src/services/database.py": [
       "src/storage/db.py"
     ],
     "src/services/desktop_icon_service.py": [],
-    "src/services/hud_status.py": [],
+    "src/services/hud_status.py": [
+      "src/config/log.py",
+      "src/config/paths.py"
+    ],
     "src/services/omniroute_manager.py": [],
+    "src/services/signals.py": [],
     "src/services/telegram_service.py": [
-      "src/config/settings.py"
+      "src/config/log.py",
+      "src/config/paths.py",
+      "src/config/settings.py",
+      "src/services/signals.py"
     ],
     "src/services/voice_service.py": [
-      "src/services/hud_status.py"
+      "src/services/hud_status.py",
+      "src/services/signals.py"
     ],
     "src/storage/__init__.py": [
       "src/storage/db.py"
@@ -341,10 +388,13 @@
       "src/storage/db.py"
     ],
     "src/ui/system_tray.py": [],
-    "status.json": [],
     "ui/app.js": [],
     "ui/index.html": [],
     "ui/style.css": [],
-    "ui_server.py": []
+    "ui_server.py": [
+      "src/config/log.py",
+      "src/config/settings.py",
+      "src/services/hud_status.py"
+    ]
   }
 }

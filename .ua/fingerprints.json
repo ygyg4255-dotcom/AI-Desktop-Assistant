@@ -1,61 +1,78 @@
 {
   "version": "1.0.0",
-  "gitCommitHash": "090a5f8956716c2a22a4905144348d0e74b43a46",
-  "generatedAt": "2026-11-17T15:06:42.946Z",
+  "gitCommitHash": "118e0069dad95604e064893c44dca1154916b9a6",
+  "generatedAt": "2026-11-19T14:07:04.845Z",
   "files": {
     ".env.example": {
       "filePath": ".env.example",
-      "contentHash": "f3d70e5198c8ed55e70d14d58a5ac736152de7f12268db235193f33729934f09",
+      "contentHash": "626db580a40c9c726dcb67e478dd23c8362d30b722350e51266da3d1f46bb784",
       "functions": [],
       "classes": [],
       "imports": [],
       "exports": [],
-      "totalLines": 39,
+      "totalLines": 13,
+      "hasStructuralAnalysis": false
+    },
+    ".gitattributes": {
+      "filePath": ".gitattributes",
+      "contentHash": "e753774a5c6c845d5b43db5e4e133c8b7308c233f036517be1e2ae01cb068790",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 2,
       "hasStructuralAnalysis": false
     },
     "CLAUDE.md": {
       "filePath": "CLAUDE.md",
-      "contentHash": "d867cc964aad3565545f392f0f00c205a129406e503f64bd17c368c9738c88b0",
+      "contentHash": "3b749b6029decb5308734c20299af836130ad1b6b828cd70d5ddbc3de29b7321",
       "functions": [],
       "classes": [],
       "imports": [],
       "exports": [],
-      "totalLines": 19,
+      "totalLines": 92,
       "hasStructuralAnalysis": false
     },
     "README.md": {
       "filePath": "README.md",
-      "contentHash": "b735b8a9129a7b28dcea3f7c7fdfdcc05da598913ad2c207ac47e6577fa8028f",
+      "contentHash": "b78e7cf7c67b3093a8e08109245599d3efa15335dd0647a820cde8bc60bfbe47",
       "functions": [],
       "classes": [],
       "imports": [],
       "exports": [],
-      "totalLines": 181,
+      "totalLines": 232,
       "hasStructuralAnalysis": false
     },
     "build_exe.py": {
       "filePath": "build_exe.py",
-      "contentHash": "7356fb87abedbd3521a0ec1a2bc06b16b8f8783d977dd2fc906143a1fc8ae6de",
+      "contentHash": "53b6abaa8a1ec84c5ab803d927ebf3c8a4673bf6ce8fbef24767994bafc6fcb8",
       "functions": [
         {
           "name": "build",
           "params": [],
+          "returnType": "bool",
           "exported": true,
-          "lineCount": 78
+          "lineCount": 62
         }
       ],
       "classes": [],
       "imports": [
         {
-          "source": "sys",
+          "source": "logging",
           "specifiers": [
-            "sys"
+            "logging"
           ]
         },
         {
           "source": "shutil",
           "specifiers": [
             "shutil"
+          ]
+        },
+        {
+          "source": "sys",
+          "specifiers": [
+            "sys"
           ]
         },
         {
@@ -74,19 +91,38 @@
       "exports": [
         "build"
       ],
-      "totalLines": 97,
+      "totalLines": 148,
       "hasStructuralAnalysis": true
     },
     "main.py": {
       "filePath": "main.py",
-      "contentHash": "899c2a420976118a04e6cbb31c62582e22ca321e66b822656a193d8bf72a0344",
+      "contentHash": "aee5aadcf3863358c2bc4490b5425f84ad3bc3a01030baa6ec6b16af426d0e9c",
       "functions": [
+        {
+          "name": "apply_ai_config",
+          "params": [
+            "ai_client",
+            "cfg"
+          ],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 7
+        },
+        {
+          "name": "make_approval_listener",
+          "params": [
+            "bridge_ref",
+            "notify_telegram"
+          ],
+          "exported": true,
+          "lineCount": 29
+        },
         {
           "name": "main",
           "params": [],
           "returnType": "None",
           "exported": true,
-          "lineCount": 269
+          "lineCount": 272
         }
       ],
       "classes": [],
@@ -122,16 +158,22 @@
           ]
         },
         {
-          "source": "PySide6.QtCore",
-          "specifiers": [
-            "QCoreApplication",
-            "Qt"
-          ]
-        },
-        {
           "source": "src.config",
           "specifiers": [
             "Settings"
+          ]
+        },
+        {
+          "source": "src.config.log",
+          "specifiers": [
+            "get_logger",
+            "setup_logging"
+          ]
+        },
+        {
+          "source": "src.config.settings",
+          "specifiers": [
+            "get_config_value"
           ]
         },
         {
@@ -154,6 +196,15 @@
           ]
         },
         {
+          "source": "src.agent.approvals",
+          "specifiers": [
+            "ApprovalManager",
+            "CHANNEL_HUD",
+            "CHANNEL_TELEGRAM",
+            "CHANNEL_VOICE"
+          ]
+        },
+        {
           "source": "src.services.hud_status",
           "specifiers": [
             "init_hud_status",
@@ -164,7 +215,7 @@
           "source": "src.services.voice_service",
           "specifiers": [
             "TTSManager",
-            "SpeechRecognitionWorker",
+            "SpeechRecognitionListener",
             "is_speaking_event",
             "parse_wake_word"
           ]
@@ -172,7 +223,9 @@
         {
           "source": "src.services.telegram_service",
           "specifiers": [
-            "TelegramRemoteWorker",
+            "TelegramApprovalBridge",
+            "TelegramBotApi",
+            "TelegramRemoteListener",
             "send_telegram_message_async"
           ]
         },
@@ -184,20 +237,12 @@
         }
       ],
       "exports": [
+        "apply_ai_config",
+        "make_approval_listener",
         "main"
       ],
-      "totalLines": 312,
+      "totalLines": 365,
       "hasStructuralAnalysis": true
-    },
-    "memory.json": {
-      "filePath": "memory.json",
-      "contentHash": "28a12b7108e732158f56c52dc74f28d0030e3fd8280b2958c55e9f9ce4bf1ad3",
-      "functions": [],
-      "classes": [],
-      "imports": [],
-      "exports": [],
-      "totalLines": 42,
-      "hasStructuralAnalysis": false
     },
     "memory.py": {
       "filePath": "memory.py",
@@ -226,14 +271,24 @@
       "totalLines": 3,
       "hasStructuralAnalysis": false
     },
-    "requirements.txt": {
-      "filePath": "requirements.txt",
-      "contentHash": "2d6bf6ee63c992442f662ff04678d9fe07d14a6067bddb1a414447e9836952dd",
+    "pytest.ini": {
+      "filePath": "pytest.ini",
+      "contentHash": "a4f65250a4c4aa6b1d1a4914f4ea414902f7d54d95c7b2e71863d0d1a2f12084",
       "functions": [],
       "classes": [],
       "imports": [],
       "exports": [],
-      "totalLines": 14,
+      "totalLines": 8,
+      "hasStructuralAnalysis": false
+    },
+    "requirements.txt": {
+      "filePath": "requirements.txt",
+      "contentHash": "e969e41790c178b22d86950fe2e86116307224bd992fca556bd4698de844ac5d",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 23,
       "hasStructuralAnalysis": false
     },
     "src/__init__.py": {
@@ -290,9 +345,172 @@
       "totalLines": 12,
       "hasStructuralAnalysis": true
     },
+    "src/agent/approvals.py": {
+      "filePath": "src/agent/approvals.py",
+      "contentHash": "506261810ee9c9a83b097ffbb516513b7573366a390758eb8e2e364c3cfa3dd1",
+      "functions": [
+        {
+          "name": "args_hash",
+          "params": [
+            "tool_name",
+            "args"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 7
+        },
+        {
+          "name": "summarize_args",
+          "params": [
+            "args",
+            "limit"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 7
+        },
+        {
+          "name": "_thread_dispatch",
+          "params": [
+            "fn"
+          ],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 2
+        }
+      ],
+      "classes": [
+        {
+          "name": "ApprovalRequest",
+          "methods": [
+            "public_view"
+          ],
+          "properties": [
+            "id",
+            "tool_name",
+            "args",
+            "args_hash",
+            "channel",
+            "summary",
+            "created_at",
+            "expires_at",
+            "approver_channels",
+            "status",
+            "resolved_via",
+            "result",
+            "meta"
+          ],
+          "exported": true,
+          "lineCount": 26
+        },
+        {
+          "name": "ResolveResult",
+          "methods": [
+            "ok"
+          ],
+          "properties": [
+            "outcome",
+            "request"
+          ],
+          "exported": true,
+          "lineCount": 7
+        },
+        {
+          "name": "ApprovalManager",
+          "methods": [
+            "__init__",
+            "set_runner",
+            "add_listener",
+            "_notify",
+            "create_request",
+            "get",
+            "list_pending",
+            "sweep",
+            "resolve",
+            "_run",
+            "start_sweeper",
+            "stop"
+          ],
+          "properties": [],
+          "exported": true,
+          "lineCount": 144
+        }
+      ],
+      "imports": [
+        {
+          "source": "copy",
+          "specifiers": [
+            "copy"
+          ]
+        },
+        {
+          "source": "hashlib",
+          "specifiers": [
+            "hashlib"
+          ]
+        },
+        {
+          "source": "hmac",
+          "specifiers": [
+            "hmac"
+          ]
+        },
+        {
+          "source": "json",
+          "specifiers": [
+            "json"
+          ]
+        },
+        {
+          "source": "secrets",
+          "specifiers": [
+            "secrets"
+          ]
+        },
+        {
+          "source": "threading",
+          "specifiers": [
+            "threading"
+          ]
+        },
+        {
+          "source": "time",
+          "specifiers": [
+            "time"
+          ]
+        },
+        {
+          "source": "dataclasses",
+          "specifiers": [
+            "dataclass",
+            "field"
+          ]
+        },
+        {
+          "source": "typing",
+          "specifiers": [
+            "Any",
+            "Callable",
+            "Dict",
+            "List",
+            "Optional"
+          ]
+        }
+      ],
+      "exports": [
+        "args_hash",
+        "summarize_args",
+        "ApprovalRequest",
+        "ResolveResult",
+        "_thread_dispatch",
+        "ApprovalManager"
+      ],
+      "totalLines": 266,
+      "hasStructuralAnalysis": true
+    },
     "src/agent/executor.py": {
       "filePath": "src/agent/executor.py",
-      "contentHash": "f5ca4a691ee7eab83f35fdbd1f03a23aa6acc899bf3d3e4be9277c27ae87bfe9",
+      "contentHash": "b30b4ca110e65f53feb048922bfc0a38069145d5fe2a6e861b48630e38707985",
       "functions": [
         {
           "name": "match_local_intent",
@@ -325,7 +543,7 @@
           ],
           "returnType": "Optional[tuple]",
           "exported": true,
-          "lineCount": 138
+          "lineCount": 142
         },
         {
           "name": "sanitize_final_reply",
@@ -406,6 +624,12 @@
             "_build_messages_with_tools",
             "_parse_tool_use",
             "_execute_tool",
+            "approvals",
+            "attach_approvals",
+            "run_approved",
+            "approval_wait_message",
+            "_request_approval",
+            "_approval_response",
             "_execute_tool_with_permission",
             "process",
             "_process_sync",
@@ -416,7 +640,7 @@
           ],
           "properties": [],
           "exported": true,
-          "lineCount": 855
+          "lineCount": 960
         }
       ],
       "imports": [
@@ -491,7 +715,8 @@
           "specifiers": [
             "ToolRegistry",
             "ToolResult",
-            "create_default_registry"
+            "create_default_registry",
+            "strip_internal_keys"
           ]
         },
         {
@@ -499,6 +724,17 @@
           "specifiers": [
             "PermissionGate",
             "PermissionLevel"
+          ]
+        },
+        {
+          "source": "src.agent.approvals",
+          "specifiers": [
+            "ApprovalManager",
+            "CHANNEL_HUD",
+            "CHANNEL_LOCAL",
+            "CHANNEL_TELEGRAM",
+            "CHANNEL_VOICE",
+            "DEFAULT_TTL"
           ]
         },
         {
@@ -538,12 +774,12 @@
         "sanitize_final_reply",
         "AgentExecutor"
       ],
-      "totalLines": 1924,
+      "totalLines": 2041,
       "hasStructuralAnalysis": true
     },
     "src/agent/memory.py": {
       "filePath": "src/agent/memory.py",
-      "contentHash": "4a075693fea88fb660bdf36d9d23d011fb1a583a6e32adaf502465f5b8f38225",
+      "contentHash": "3c687ec17c33c72d44f9f1490df2c5491c890fbd61e45c40e9505a3ef8658446",
       "functions": [],
       "classes": [
         {
@@ -560,7 +796,7 @@
           ],
           "properties": [],
           "exported": true,
-          "lineCount": 85
+          "lineCount": 80
         }
       ],
       "imports": [
@@ -591,18 +827,80 @@
             "Optional",
             "Union"
           ]
+        },
+        {
+          "source": "src.config.paths",
+          "specifiers": [
+            "runtime_file"
+          ]
         }
       ],
       "exports": [
         "ConversationMemory"
       ],
-      "totalLines": 93,
+      "totalLines": 90,
       "hasStructuralAnalysis": true
     },
     "src/agent/permissions.py": {
       "filePath": "src/agent/permissions.py",
-      "contentHash": "0920393af61cd527646083f8abbeb26a139047c74f2329872cbb92e91ca50e2c",
-      "functions": [],
+      "contentHash": "4edb899e4c08b96d5ac41ea5c7197cca633cfe1a3a9ca473d6d47612eabdb2ec",
+      "functions": [
+        {
+          "name": "_canonical_candidates",
+          "params": [
+            "path"
+          ],
+          "returnType": "set",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "is_sensitive_path",
+          "params": [
+            "path"
+          ],
+          "returnType": "bool",
+          "exported": true,
+          "lineCount": 21
+        },
+        {
+          "name": "_has_risky_extension",
+          "params": [
+            "path"
+          ],
+          "returnType": "bool",
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "needs_approval_file_read",
+          "params": [
+            "path"
+          ],
+          "returnType": "bool",
+          "exported": true,
+          "lineCount": 2
+        },
+        {
+          "name": "needs_approval_file_open",
+          "params": [
+            "path"
+          ],
+          "returnType": "bool",
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "needs_approval_app_open",
+          "params": [
+            "app_name",
+            "path"
+          ],
+          "returnType": "bool",
+          "exported": true,
+          "lineCount": 10
+        }
+      ],
       "classes": [
         {
           "name": "PermissionLevel",
@@ -630,20 +928,39 @@
             "is_dangerous",
             "requires_permission",
             "get_permission_level",
+            "is_conditional",
             "set_session_permission",
             "clear_session_permissions",
             "get_permission_message"
           ],
           "properties": [],
           "exported": true,
-          "lineCount": 76
+          "lineCount": 90
         }
       ],
       "imports": [
         {
+          "source": "os",
+          "specifiers": [
+            "os"
+          ]
+        },
+        {
+          "source": "re",
+          "specifiers": [
+            "re"
+          ]
+        },
+        {
           "source": "dataclasses",
           "specifiers": [
             "dataclass"
+          ]
+        },
+        {
+          "source": "pathlib",
+          "specifiers": [
+            "Path"
           ]
         },
         {
@@ -662,15 +979,37 @@
       "exports": [
         "PermissionLevel",
         "PermissionRule",
-        "PermissionGate"
+        "PermissionGate",
+        "_canonical_candidates",
+        "is_sensitive_path",
+        "_has_risky_extension",
+        "needs_approval_file_read",
+        "needs_approval_file_open",
+        "needs_approval_app_open"
       ],
-      "totalLines": 98,
+      "totalLines": 201,
       "hasStructuralAnalysis": true
     },
     "src/agent/tools.py": {
       "filePath": "src/agent/tools.py",
-      "contentHash": "d99effe5b00a3b90d7ef97febc55bdd3a81a7f8291c18e6127941827b0f45ea9",
+      "contentHash": "494c32b43fb5188ddabbe4b485e79a07a71054eb4544cc27ea5d71aa257da0f3",
       "functions": [
+        {
+          "name": "_telegram_credentials",
+          "params": [],
+          "returnType": "tuple",
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "strip_internal_keys",
+          "params": [
+            "params"
+          ],
+          "returnType": "Dict[str, Any]",
+          "exported": true,
+          "lineCount": 3
+        },
         {
           "name": "handle_file_search",
           "params": [
@@ -683,16 +1022,18 @@
         {
           "name": "handle_file_read",
           "params": [
-            "params"
+            "params",
+            "approved"
           ],
           "returnType": "ToolResult",
           "exported": true,
-          "lineCount": 39
+          "lineCount": 48
         },
         {
           "name": "handle_file_write",
           "params": [
-            "params"
+            "params",
+            "approved"
           ],
           "returnType": "ToolResult",
           "exported": true,
@@ -701,7 +1042,8 @@
         {
           "name": "handle_file_delete",
           "params": [
-            "params"
+            "params",
+            "approved"
           ],
           "returnType": "ToolResult",
           "exported": true,
@@ -710,16 +1052,18 @@
         {
           "name": "handle_file_copy",
           "params": [
-            "params"
+            "params",
+            "approved"
           ],
           "returnType": "ToolResult",
           "exported": true,
-          "lineCount": 31
+          "lineCount": 40
         },
         {
           "name": "handle_file_move",
           "params": [
-            "params"
+            "params",
+            "approved"
           ],
           "returnType": "ToolResult",
           "exported": true,
@@ -728,16 +1072,18 @@
         {
           "name": "handle_file_open",
           "params": [
-            "params"
+            "params",
+            "approved"
           ],
           "returnType": "ToolResult",
           "exported": true,
-          "lineCount": 24
+          "lineCount": 33
         },
         {
           "name": "handle_terminal_command",
           "params": [
-            "params"
+            "params",
+            "approved"
           ],
           "returnType": "ToolResult",
           "exported": true,
@@ -746,16 +1092,18 @@
         {
           "name": "handle_app_open",
           "params": [
-            "params"
+            "params",
+            "approved"
           ],
           "returnType": "ToolResult",
           "exported": true,
-          "lineCount": 61
+          "lineCount": 65
         },
         {
           "name": "handle_app_close",
           "params": [
-            "params"
+            "params",
+            "approved"
           ],
           "returnType": "ToolResult",
           "exported": true,
@@ -827,11 +1175,58 @@
         {
           "name": "handle_code_edit",
           "params": [
-            "params"
+            "params",
+            "approved"
           ],
           "returnType": "ToolResult",
           "exported": true,
           "lineCount": 68
+        },
+        {
+          "name": "_ip_is_public",
+          "params": [
+            "addr"
+          ],
+          "returnType": "bool",
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "_resolve_public",
+          "params": [
+            "host",
+            "port"
+          ],
+          "returnType": "list",
+          "exported": true,
+          "lineCount": 12
+        },
+        {
+          "name": "_check_fetch_url",
+          "params": [
+            "url"
+          ],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 8
+        },
+        {
+          "name": "_connect_public",
+          "params": [
+            "host",
+            "port",
+            "timeout"
+          ],
+          "returnType": "socket.socket",
+          "exported": true,
+          "lineCount": 12
+        },
+        {
+          "name": "_build_public_opener",
+          "params": [],
+          "returnType": "urllib.request.OpenerDirector",
+          "exported": true,
+          "lineCount": 7
         },
         {
           "name": "handle_web_fetch",
@@ -840,7 +1235,7 @@
           ],
           "returnType": "ToolResult",
           "exported": true,
-          "lineCount": 80
+          "lineCount": 85
         },
         {
           "name": "handle_system_control",
@@ -895,16 +1290,17 @@
           ],
           "returnType": "ToolResult",
           "exported": true,
-          "lineCount": 128
+          "lineCount": 127
         },
         {
           "name": "handle_send_to_telegram",
           "params": [
-            "params"
+            "params",
+            "approved"
           ],
           "returnType": "ToolResult",
           "exported": true,
-          "lineCount": 52
+          "lineCount": 60
         },
         {
           "name": "handle_capture_and_inspect_screen",
@@ -913,7 +1309,7 @@
           ],
           "returnType": "ToolResult",
           "exported": true,
-          "lineCount": 122
+          "lineCount": 121
         },
         {
           "name": "_record_clipboard_history",
@@ -1036,7 +1432,7 @@
           ],
           "returnType": "ToolResult",
           "exported": true,
-          "lineCount": 362
+          "lineCount": 361
         },
         {
           "name": "create_default_registry",
@@ -1088,6 +1484,7 @@
         {
           "name": "Tool",
           "methods": [
+            "run",
             "to_api_schema"
           ],
           "properties": [
@@ -1100,7 +1497,7 @@
             "is_dangerous"
           ],
           "exported": true,
-          "lineCount": 38
+          "lineCount": 49
         },
         {
           "name": "ToolRegistry",
@@ -1115,7 +1512,52 @@
           ],
           "properties": [],
           "exported": true,
-          "lineCount": 42
+          "lineCount": 52
+        },
+        {
+          "name": "_PublicHTTPConnection",
+          "methods": [
+            "connect"
+          ],
+          "properties": [],
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "_PublicHTTPSConnection",
+          "methods": [
+            "connect"
+          ],
+          "properties": [],
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "_PublicHTTPHandler",
+          "methods": [
+            "http_open"
+          ],
+          "properties": [],
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "_PublicHTTPSHandler",
+          "methods": [
+            "https_open"
+          ],
+          "properties": [],
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "_CheckedRedirectHandler",
+          "methods": [
+            "redirect_request"
+          ],
+          "properties": [],
+          "exported": true,
+          "lineCount": 7
         }
       ],
       "imports": [
@@ -1184,6 +1626,30 @@
           ]
         },
         {
+          "source": "urllib.error",
+          "specifiers": [
+            "urllib.error"
+          ]
+        },
+        {
+          "source": "ipaddress",
+          "specifiers": [
+            "ipaddress"
+          ]
+        },
+        {
+          "source": "socket",
+          "specifiers": [
+            "socket"
+          ]
+        },
+        {
+          "source": "http.client",
+          "specifiers": [
+            "http.client"
+          ]
+        },
+        {
           "source": "pathlib",
           "specifiers": [
             "Path"
@@ -1193,6 +1659,12 @@
           "source": "html",
           "specifiers": [
             "html"
+          ]
+        },
+        {
+          "source": "inspect",
+          "specifiers": [
+            "inspect"
           ]
         },
         {
@@ -1207,16 +1679,25 @@
         {
           "source": "src.config.settings",
           "specifiers": [
-            "TELEGRAM_BOT_TOKEN",
-            "TELEGRAM_CHAT_ID"
+            "get_config_value"
+          ]
+        },
+        {
+          "source": "src.agent.permissions",
+          "specifiers": [
+            "needs_approval_app_open",
+            "needs_approval_file_open",
+            "needs_approval_file_read"
           ]
         }
       ],
       "exports": [
+        "_telegram_credentials",
         "ToolCategory",
         "ToolParameter",
         "ToolResult",
         "Tool",
+        "strip_internal_keys",
         "ToolRegistry",
         "handle_file_search",
         "handle_file_read",
@@ -1236,6 +1717,16 @@
         "handle_move_application_window",
         "handle_desktop_icon_position",
         "handle_code_edit",
+        "_ip_is_public",
+        "_resolve_public",
+        "_check_fetch_url",
+        "_connect_public",
+        "_PublicHTTPConnection",
+        "_PublicHTTPSConnection",
+        "_PublicHTTPHandler",
+        "_PublicHTTPSHandler",
+        "_CheckedRedirectHandler",
+        "_build_public_opener",
         "handle_web_fetch",
         "handle_system_control",
         "handle_youtube_play",
@@ -1260,7 +1751,7 @@
         "handle_whatsapp_read",
         "create_default_registry"
       ],
-      "totalLines": 3221,
+      "totalLines": 3392,
       "hasStructuralAnalysis": true
     },
     "src/app.py": {
@@ -1377,10 +1868,262 @@
       "totalLines": 5,
       "hasStructuralAnalysis": true
     },
+    "src/config/log.py": {
+      "filePath": "src/config/log.py",
+      "contentHash": "5f53ca920a0a4c1502bef03e4e3ab0654a9e811ba058aaf12ee540f012cf4b66",
+      "functions": [
+        {
+          "name": "redact_secrets",
+          "params": [
+            "text"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 9
+        },
+        {
+          "name": "get_logger",
+          "params": [
+            "name"
+          ],
+          "returnType": "logging.Logger",
+          "exported": true,
+          "lineCount": 5
+        },
+        {
+          "name": "default_log_path",
+          "params": [],
+          "returnType": "Path",
+          "exported": true,
+          "lineCount": 2
+        },
+        {
+          "name": "setup_logging",
+          "params": [
+            "level",
+            "log_file",
+            "console"
+          ],
+          "returnType": "Path",
+          "exported": true,
+          "lineCount": 39
+        },
+        {
+          "name": "shutdown_logging",
+          "params": [],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "_remove_installed_handlers",
+          "params": [],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 11
+        }
+      ],
+      "classes": [
+        {
+          "name": "RedactingFormatter",
+          "methods": [
+            "format"
+          ],
+          "properties": [],
+          "exported": true,
+          "lineCount": 5
+        }
+      ],
+      "imports": [
+        {
+          "source": "logging",
+          "specifiers": [
+            "logging"
+          ]
+        },
+        {
+          "source": "logging.handlers",
+          "specifiers": [
+            "logging.handlers"
+          ]
+        },
+        {
+          "source": "os",
+          "specifiers": [
+            "os"
+          ]
+        },
+        {
+          "source": "re",
+          "specifiers": [
+            "re"
+          ]
+        },
+        {
+          "source": "sys",
+          "specifiers": [
+            "sys"
+          ]
+        },
+        {
+          "source": "threading",
+          "specifiers": [
+            "threading"
+          ]
+        },
+        {
+          "source": "pathlib",
+          "specifiers": [
+            "Path"
+          ]
+        },
+        {
+          "source": "typing",
+          "specifiers": [
+            "Optional"
+          ]
+        },
+        {
+          "source": "src.config.paths",
+          "specifiers": [
+            "runtime_file"
+          ]
+        }
+      ],
+      "exports": [
+        "redact_secrets",
+        "RedactingFormatter",
+        "get_logger",
+        "default_log_path",
+        "setup_logging",
+        "shutdown_logging",
+        "_remove_installed_handlers"
+      ],
+      "totalLines": 128,
+      "hasStructuralAnalysis": true
+    },
+    "src/config/paths.py": {
+      "filePath": "src/config/paths.py",
+      "contentHash": "8f3834b5c6a197f74d8697f46adb9d68b78739337513846cf5cc509ca088f188",
+      "functions": [
+        {
+          "name": "get_runtime_dir",
+          "params": [],
+          "returnType": "Path",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "runtime_file",
+          "params": [
+            "name"
+          ],
+          "returnType": "Path",
+          "exported": true,
+          "lineCount": 11
+        }
+      ],
+      "classes": [],
+      "imports": [
+        {
+          "source": "os",
+          "specifiers": [
+            "os"
+          ]
+        },
+        {
+          "source": "shutil",
+          "specifiers": [
+            "shutil"
+          ]
+        },
+        {
+          "source": "pathlib",
+          "specifiers": [
+            "Path"
+          ]
+        }
+      ],
+      "exports": [
+        "get_runtime_dir",
+        "runtime_file"
+      ],
+      "totalLines": 26,
+      "hasStructuralAnalysis": true
+    },
     "src/config/settings.py": {
       "filePath": "src/config/settings.py",
-      "contentHash": "146cdf077fb0a48633c97e7b5228c9f928d3cd309bd0a7ed855d0bb707837e70",
+      "contentHash": "e43c6bb4094ec6edf0dff41bae154d527f9e37fbf3c4501acdd33ea33cdd009c",
       "functions": [
+        {
+          "name": "_env_stamp",
+          "params": [
+            "env_path"
+          ],
+          "returnType": "Any",
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "invalidate_config_cache",
+          "params": [],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "resolve_env_path",
+          "params": [
+            "data_dir"
+          ],
+          "returnType": "Path",
+          "exported": true,
+          "lineCount": 13
+        },
+        {
+          "name": "read_env_vars",
+          "params": [
+            "env_path"
+          ],
+          "returnType": "Dict[str, str]",
+          "exported": true,
+          "lineCount": 15
+        },
+        {
+          "name": "get_config_value",
+          "params": [
+            "default",
+            "env_path"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 13
+        },
+        {
+          "name": "get_active_config_dict",
+          "params": [],
+          "returnType": "Dict[str, Any]",
+          "exported": true,
+          "lineCount": 12
+        },
+        {
+          "name": "_unquote_env_value",
+          "params": [
+            "value"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "_format_env_value",
+          "params": [
+            "value"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 11
+        },
         {
           "name": "load_env_file",
           "params": [
@@ -1402,16 +2145,14 @@
         {
           "name": "save_ai_config",
           "params": [
-            "provider",
             "model",
             "api_key",
-            "base_url",
             "language",
             "env_path"
           ],
           "returnType": "Dict[str, str]",
           "exported": true,
-          "lineCount": 63
+          "lineCount": 65
         }
       ],
       "classes": [
@@ -1420,6 +2161,11 @@
           "methods": [
             "__post_init__",
             "load_environment",
+            "ai_provider",
+            "ai_base_url",
+            "ai_base_url",
+            "anthropic_base_url",
+            "anthropic_base_url",
             "get_config_dict"
           ],
           "properties": [
@@ -1432,12 +2178,10 @@
             "env_path",
             "window_width",
             "window_height",
-            "ai_provider",
             "ai_model",
+            "ai_fast_model",
             "ai_api_key",
-            "ai_base_url",
             "altron_language",
-            "anthropic_base_url",
             "anthropic_api_key",
             "anthropic_model",
             "max_tokens",
@@ -1450,7 +2194,7 @@
             "dynamic_notch"
           ],
           "exported": true,
-          "lineCount": 127
+          "lineCount": 112
         }
       ],
       "imports": [
@@ -1470,6 +2214,12 @@
           "source": "json",
           "specifiers": [
             "json"
+          ]
+        },
+        {
+          "source": "threading",
+          "specifiers": [
+            "threading"
           ]
         },
         {
@@ -1498,20 +2248,34 @@
           "specifiers": [
             "load_dotenv"
           ]
+        },
+        {
+          "source": "src.config.log",
+          "specifiers": [
+            "get_logger"
+          ]
         }
       ],
       "exports": [
+        "_env_stamp",
+        "invalidate_config_cache",
+        "resolve_env_path",
+        "read_env_vars",
+        "get_config_value",
+        "get_active_config_dict",
+        "_unquote_env_value",
+        "_format_env_value",
         "load_env_file",
         "is_masked_key",
         "save_ai_config",
         "Settings"
       ],
-      "totalLines": 230,
+      "totalLines": 348,
       "hasStructuralAnalysis": true
     },
     "src/services/__init__.py": {
       "filePath": "src/services/__init__.py",
-      "contentHash": "88100519df6454686e682a1dddaaf1372181470abfdd077304425dc14a8976f8",
+      "contentHash": "c02f56a1da2a7f530f27a7b2e7e396b7eb8780244c952edeadbf4b81a4bdc19f",
       "functions": [],
       "classes": [],
       "imports": [
@@ -1540,6 +2304,7 @@
           "source": "src.services.voice_service",
           "specifiers": [
             "TTSManager",
+            "SpeechRecognitionListener",
             "SpeechRecognitionWorker",
             "clean_text_for_speech",
             "parse_wake_word",
@@ -1556,6 +2321,7 @@
         {
           "source": "src.services.telegram_service",
           "specifiers": [
+            "TelegramRemoteListener",
             "TelegramRemoteWorker",
             "send_telegram_message",
             "send_telegram_message_async",
@@ -1566,23 +2332,13 @@
         }
       ],
       "exports": [],
-      "totalLines": 43,
+      "totalLines": 47,
       "hasStructuralAnalysis": true
     },
     "src/services/ai_client.py": {
       "filePath": "src/services/ai_client.py",
-      "contentHash": "e18a2eb808efd1d856f8ce67d1025d6530a6fed090e03ff8e7a52cfc6e39b096",
-      "functions": [
-        {
-          "name": "_clean_schema_for_gemini",
-          "params": [
-            "val"
-          ],
-          "returnType": "Any",
-          "exported": true,
-          "lineCount": 12
-        }
-      ],
+      "contentHash": "1c4a6b5fb9166096dddc74e51bb446db4db02a0a13307e0b2c36a4cbf1cf4bfc",
+      "functions": [],
       "classes": [
         {
           "name": "ConnectionStatus",
@@ -1623,18 +2379,16 @@
           "name": "AIClient",
           "methods": [
             "__init__",
+            "_normalize_model",
             "update_config",
-            "_normalize_config",
             "provider",
             "status",
             "last_error",
             "model",
             "base_url",
-            "_is_anthropic_wire",
             "_get_endpoint_url",
             "_get_headers",
             "make_tool_request",
-            "_make_gemini_native_request",
             "_dispatch_http_json",
             "chat",
             "send_message",
@@ -1643,22 +2397,10 @@
           ],
           "properties": [],
           "exported": true,
-          "lineCount": 472
+          "lineCount": 220
         }
       ],
       "imports": [
-        {
-          "source": "os",
-          "specifiers": [
-            "os"
-          ]
-        },
-        {
-          "source": "sys",
-          "specifiers": [
-            "sys"
-          ]
-        },
         {
           "source": "json",
           "specifiers": [
@@ -1675,12 +2417,6 @@
           "source": "socket",
           "specifiers": [
             "socket"
-          ]
-        },
-        {
-          "source": "asyncio",
-          "specifiers": [
-            "asyncio"
           ]
         },
         {
@@ -1731,16 +2467,22 @@
             "Union",
             "Tuple"
           ]
+        },
+        {
+          "source": "src.config.settings",
+          "specifiers": [
+            "DEFAULT_MODEL",
+            "DEFAULT_FAST_MODEL"
+          ]
         }
       ],
       "exports": [
         "ConnectionStatus",
         "Message",
         "AIResponse",
-        "_clean_schema_for_gemini",
         "AIClient"
       ],
-      "totalLines": 559,
+      "totalLines": 294,
       "hasStructuralAnalysis": true
     },
     "src/services/database.py": {
@@ -1898,8 +2640,18 @@
     },
     "src/services/hud_status.py": {
       "filePath": "src/services/hud_status.py",
-      "contentHash": "5f175c4de768b3711b2e1a8e873a3f04ec3cd2ec8f67466abbaad0cdbf67f5a0",
+      "contentHash": "7dfc80b87d41a9fda361963ce9b27852ecd490d69e9cc052bd2e27c07d68bc62",
       "functions": [
+        {
+          "name": "_warn_once",
+          "params": [
+            "key",
+            "msg"
+          ],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 7
+        },
         {
           "name": "get_system_metrics",
           "params": [],
@@ -1908,11 +2660,18 @@
           "lineCount": 44
         },
         {
+          "name": "_flush_locked",
+          "params": [],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 21
+        },
+        {
           "name": "get_hud_status",
           "params": [],
           "returnType": "Dict[str, Any]",
           "exported": true,
-          "lineCount": 20
+          "lineCount": 10
         },
         {
           "name": "update_hud_status",
@@ -1922,21 +2681,21 @@
           ],
           "returnType": "None",
           "exported": true,
-          "lineCount": 40
+          "lineCount": 17
         },
         {
           "name": "clear_hud_logs",
           "params": [],
           "returnType": "None",
           "exported": true,
-          "lineCount": 24
+          "lineCount": 6
         },
         {
           "name": "init_hud_status",
           "params": [],
           "returnType": "None",
           "exported": true,
-          "lineCount": 16
+          "lineCount": 6
         }
       ],
       "classes": [],
@@ -1945,6 +2704,12 @@
           "source": "json",
           "specifiers": [
             "json"
+          ]
+        },
+        {
+          "source": "os",
+          "specifiers": [
+            "os"
           ]
         },
         {
@@ -1979,21 +2744,35 @@
           "specifiers": [
             "psutil"
           ]
+        },
+        {
+          "source": "src.config.log",
+          "specifiers": [
+            "get_logger"
+          ]
+        },
+        {
+          "source": "src.config.paths",
+          "specifiers": [
+            "runtime_file"
+          ]
         }
       ],
       "exports": [
+        "_warn_once",
         "get_system_metrics",
+        "_flush_locked",
         "get_hud_status",
         "update_hud_status",
         "clear_hud_logs",
         "init_hud_status"
       ],
-      "totalLines": 169,
+      "totalLines": 151,
       "hasStructuralAnalysis": true
     },
     "src/services/omniroute_manager.py": {
       "filePath": "src/services/omniroute_manager.py",
-      "contentHash": "74eb5551ad5459c6e0a1e7e2800caea2adeab0a81c599dc67485cad816cb9448",
+      "contentHash": "1fb9c4160db7dfffeb6cc2202911fa5d4f001fb4ed484d20dd46aa77d5d018cf",
       "functions": [],
       "classes": [
         {
@@ -2007,10 +2786,16 @@
           ],
           "properties": [],
           "exported": true,
-          "lineCount": 95
+          "lineCount": 98
         }
       ],
       "imports": [
+        {
+          "source": "shutil",
+          "specifiers": [
+            "shutil"
+          ]
+        },
         {
           "source": "subprocess",
           "specifiers": [
@@ -2045,12 +2830,69 @@
       "exports": [
         "OmniRouteManager"
       ],
-      "totalLines": 107,
+      "totalLines": 111,
+      "hasStructuralAnalysis": true
+    },
+    "src/services/signals.py": {
+      "filePath": "src/services/signals.py",
+      "contentHash": "f095ff14e927c3799359c1d9196a3718822b1d230b56701e551f6575c8b0c427",
+      "functions": [],
+      "classes": [
+        {
+          "name": "_BoundCallbacks",
+          "methods": [
+            "__init__",
+            "connect",
+            "disconnect",
+            "emit"
+          ],
+          "properties": [],
+          "exported": true,
+          "lineCount": 24
+        },
+        {
+          "name": "CallbackSignal",
+          "methods": [
+            "__set_name__",
+            "__get__"
+          ],
+          "properties": [],
+          "exported": true,
+          "lineCount": 14
+        }
+      ],
+      "imports": [
+        {
+          "source": "logging",
+          "specifiers": [
+            "logging"
+          ]
+        },
+        {
+          "source": "threading",
+          "specifiers": [
+            "threading"
+          ]
+        },
+        {
+          "source": "typing",
+          "specifiers": [
+            "Any",
+            "Callable",
+            "List"
+          ]
+        }
+      ],
+      "exports": [
+        "_BoundCallbacks",
+        "CallbackSignal"
+      ],
+      "totalLines": 55,
       "hasStructuralAnalysis": true
     },
     "src/services/telegram_service.py": {
       "filePath": "src/services/telegram_service.py",
-      "contentHash": "c5bc92f483003668ddbe71f1472c44abc543468c647af273d39d8491021bbc7f",
+      "contentHash": "66634a4226b05a2b9142b61b8711be160afd7090032fd6fcd0a9d5fb2ec53b25",
       "functions": [
         {
           "name": "chunk_message",
@@ -2063,6 +2905,16 @@
           "lineCount": 33
         },
         {
+          "name": "resolve_credentials",
+          "params": [
+            "token",
+            "chat_id"
+          ],
+          "returnType": "tuple[str, str]",
+          "exported": true,
+          "lineCount": 6
+        },
+        {
           "name": "send_telegram_message",
           "params": [
             "text",
@@ -2071,7 +2923,7 @@
           ],
           "returnType": "bool",
           "exported": true,
-          "lineCount": 48
+          "lineCount": 36
         },
         {
           "name": "send_telegram_message_async",
@@ -2085,6 +2937,22 @@
           "lineCount": 13
         },
         {
+          "name": "_post_file",
+          "params": [
+            "method",
+            "field",
+            "file_path",
+            "caption",
+            "token",
+            "chat_id",
+            "max_bytes",
+            "content_type"
+          ],
+          "returnType": "bool",
+          "exported": true,
+          "lineCount": 43
+        },
+        {
           "name": "send_telegram_document",
           "params": [
             "file_path",
@@ -2094,7 +2962,7 @@
           ],
           "returnType": "bool",
           "exported": true,
-          "lineCount": 59
+          "lineCount": 8
         },
         {
           "name": "send_telegram_photo",
@@ -2106,7 +2974,7 @@
           ],
           "returnType": "bool",
           "exported": true,
-          "lineCount": 62
+          "lineCount": 10
         },
         {
           "name": "send_telegram_photo_async",
@@ -2119,11 +2987,72 @@
           "returnType": "Optional[threading.Thread]",
           "exported": true,
           "lineCount": 18
+        },
+        {
+          "name": "_background",
+          "params": [
+            "fn"
+          ],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 2
+        },
+        {
+          "name": "_bot_id",
+          "params": [
+            "token"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 2
+        },
+        {
+          "name": "load_update_offset",
+          "params": [
+            "token"
+          ],
+          "returnType": "int",
+          "exported": true,
+          "lineCount": 11
+        },
+        {
+          "name": "save_update_offset",
+          "params": [
+            "token",
+            "offset"
+          ],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 9
         }
       ],
       "classes": [
         {
-          "name": "TelegramRemoteWorker",
+          "name": "TelegramBotApi",
+          "methods": [
+            "__init__",
+            "call"
+          ],
+          "properties": [],
+          "exported": true,
+          "lineCount": 22
+        },
+        {
+          "name": "TelegramApprovalBridge",
+          "methods": [
+            "__init__",
+            "request_text",
+            "send_request",
+            "on_resolved",
+            "_answer",
+            "handle_callback_query"
+          ],
+          "properties": [],
+          "exported": true,
+          "lineCount": 100
+        },
+        {
+          "name": "TelegramRemoteListener",
           "methods": [
             "__init__",
             "stop",
@@ -2131,7 +3060,17 @@
           ],
           "properties": [],
           "exported": true,
-          "lineCount": 67
+          "lineCount": 84
+        },
+        {
+          "name": "TelegramRemoteWorker",
+          "methods": [
+            "__init__",
+            "run"
+          ],
+          "properties": [],
+          "exported": true,
+          "lineCount": 15
         }
       ],
       "imports": [
@@ -2154,6 +3093,12 @@
           ]
         },
         {
+          "source": "time",
+          "specifiers": [
+            "time"
+          ]
+        },
+        {
           "source": "urllib.request",
           "specifiers": [
             "urllib.request"
@@ -2168,6 +3113,7 @@
         {
           "source": "typing",
           "specifiers": [
+            "Callable",
             "Optional"
           ]
         },
@@ -2179,28 +3125,55 @@
           ]
         },
         {
+          "source": "src.config.paths",
+          "specifiers": [
+            "runtime_file"
+          ]
+        },
+        {
+          "source": "src.config.log",
+          "specifiers": [
+            "get_logger",
+            "redact_secrets"
+          ]
+        },
+        {
           "source": "src.config.settings",
           "specifiers": [
-            "TELEGRAM_BOT_TOKEN",
-            "TELEGRAM_CHAT_ID"
+            "get_config_value"
+          ]
+        },
+        {
+          "source": "src.services.signals",
+          "specifiers": [
+            "CallbackSignal"
           ]
         }
       ],
       "exports": [
         "chunk_message",
+        "resolve_credentials",
         "send_telegram_message",
         "send_telegram_message_async",
+        "_post_file",
         "send_telegram_document",
         "send_telegram_photo",
         "send_telegram_photo_async",
+        "TelegramBotApi",
+        "_background",
+        "TelegramApprovalBridge",
+        "_bot_id",
+        "load_update_offset",
+        "save_update_offset",
+        "TelegramRemoteListener",
         "TelegramRemoteWorker"
       ],
-      "totalLines": 331,
+      "totalLines": 479,
       "hasStructuralAnalysis": true
     },
     "src/services/voice_service.py": {
       "filePath": "src/services/voice_service.py",
-      "contentHash": "82fd7336a3a4b4bdf82f18cdff5205eaa5f68f71d2d3d35892bac9eb5cfa8d27",
+      "contentHash": "290ea5828379efb732094fc56eaaec3e74202e079f5374bd38ea75d77dbf9b6b",
       "functions": [
         {
           "name": "clean_text_for_speech",
@@ -2261,7 +3234,7 @@
           "lineCount": 20
         },
         {
-          "name": "SpeechRecognitionWorker",
+          "name": "SpeechRecognitionListener",
           "methods": [
             "__init__",
             "abort",
@@ -2273,7 +3246,17 @@
           ],
           "properties": [],
           "exported": true,
-          "lineCount": 301
+          "lineCount": 304
+        },
+        {
+          "name": "SpeechRecognitionWorker",
+          "methods": [
+            "__init__",
+            "run"
+          ],
+          "properties": [],
+          "exported": true,
+          "lineCount": 18
         }
       ],
       "imports": [
@@ -2359,6 +3342,12 @@
           ]
         },
         {
+          "source": "src.services.signals",
+          "specifiers": [
+            "CallbackSignal"
+          ]
+        },
+        {
           "source": "src.services.hud_status",
           "specifiers": [
             "update_hud_status"
@@ -2371,9 +3360,10 @@
         "TTSManager",
         "EnergyVAD",
         "FastVAD",
+        "SpeechRecognitionListener",
         "SpeechRecognitionWorker"
       ],
-      "totalLines": 748,
+      "totalLines": 773,
       "hasStructuralAnalysis": true
     },
     "src/storage/__init__.py": {
@@ -2993,50 +3983,49 @@
       "totalLines": 82,
       "hasStructuralAnalysis": true
     },
-    "status.json": {
-      "filePath": "status.json",
-      "contentHash": "18e2ec6fb4ed6691342aa5a8784a1f6dde0a294a9b69ec1baac8fc7cb3099c49",
-      "functions": [],
-      "classes": [],
-      "imports": [],
-      "exports": [],
-      "totalLines": 9,
-      "hasStructuralAnalysis": false
-    },
     "ui/app.js": {
       "filePath": "ui/app.js",
-      "contentHash": "bddfeab62f7d99d8cdd5faa852ff8841b17f80d74daec558b98179946cf866e5",
+      "contentHash": "d72848ca25190966082ea9215ac58bc36de51189bf67a45a5a527fbf950e5771",
       "functions": [],
       "classes": [],
       "imports": [],
       "exports": [],
-      "totalLines": 562,
+      "totalLines": 607,
       "hasStructuralAnalysis": true
     },
     "ui/index.html": {
       "filePath": "ui/index.html",
-      "contentHash": "838f9ba42bce172ad31c1fcdca2230d5e95feb07b526db11b0b11b248799fb01",
+      "contentHash": "58e32f186810b3ac1839dd2d58598a90ef4d6085449d9938c212d8071b280e71",
       "functions": [],
       "classes": [],
       "imports": [],
       "exports": [],
-      "totalLines": 280,
+      "totalLines": 273,
       "hasStructuralAnalysis": false
     },
     "ui/style.css": {
       "filePath": "ui/style.css",
-      "contentHash": "d3ffd52b31f5090617d69d295805b03cafb1528b4ead975189f8ad941096663f",
+      "contentHash": "d97ce1060744dd77f633ba0af0de1189908785fb10e0769f6e763bb7c4314d02",
       "functions": [],
       "classes": [],
       "imports": [],
       "exports": [],
-      "totalLines": 1007,
+      "totalLines": 1083,
       "hasStructuralAnalysis": false
     },
     "ui_server.py": {
       "filePath": "ui_server.py",
-      "contentHash": "cdd091565982a7fe1fdb02845ca44648e49482af7d7f50cdb393a8c7279d7cfe",
+      "contentHash": "1b102285b88a127ecda4178358b122ccd356c8a09eca55fc48d00df9c59656e3",
       "functions": [
+        {
+          "name": "set_approval_manager",
+          "params": [
+            "manager"
+          ],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 4
+        },
         {
           "name": "set_command_handler",
           "params": [
@@ -3060,7 +4049,7 @@
           "params": [],
           "returnType": "Dict[str, Any]",
           "exported": true,
-          "lineCount": 15
+          "lineCount": 3
         },
         {
           "name": "_get_status_payload_str",
@@ -3074,7 +4063,7 @@
           "params": [],
           "returnType": "tuple[Optional[str], Optional[str]]",
           "exported": true,
-          "lineCount": 21
+          "lineCount": 22
         },
         {
           "name": "_is_chromium_browser",
@@ -3096,6 +4085,110 @@
           "lineCount": 20
         },
         {
+          "name": "_allowed_hosts",
+          "params": [],
+          "returnType": "set",
+          "exported": true,
+          "lineCount": 2
+        },
+        {
+          "name": "_error",
+          "params": [
+            "code",
+            "message"
+          ],
+          "returnType": "Response",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "_enforce_hud_security",
+          "params": [],
+          "exported": true,
+          "lineCount": 21
+        },
+        {
+          "name": "_security_headers",
+          "params": [
+            "resp"
+          ],
+          "returnType": "Response",
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "_json_object",
+          "params": [],
+          "returnType": "Optional[Dict[str, Any]]",
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "_validate_config_payload",
+          "params": [
+            "data"
+          ],
+          "returnType": "Optional[str]",
+          "exported": true,
+          "lineCount": 17
+        },
+        {
+          "name": "index",
+          "params": [],
+          "exported": true,
+          "lineCount": 5
+        },
+        {
+          "name": "static_files",
+          "params": [
+            "filename"
+          ],
+          "exported": true,
+          "lineCount": 2
+        },
+        {
+          "name": "status_route",
+          "params": [],
+          "exported": true,
+          "lineCount": 2
+        },
+        {
+          "name": "config_route",
+          "params": [],
+          "exported": true,
+          "lineCount": 27
+        },
+        {
+          "name": "test_config_route",
+          "params": [],
+          "exported": true,
+          "lineCount": 22
+        },
+        {
+          "name": "command_route",
+          "params": [],
+          "exported": true,
+          "lineCount": 12
+        },
+        {
+          "name": "clear_logs_route",
+          "params": [],
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "approvals_route",
+          "params": [],
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "approve_route",
+          "params": [],
+          "exported": true,
+          "lineCount": 16
+        },
+        {
           "name": "_is_port_in_use",
           "params": [
             "host",
@@ -3103,7 +4196,7 @@
           ],
           "returnType": "bool",
           "exported": true,
-          "lineCount": 8
+          "lineCount": 9
         },
         {
           "name": "start_hud_server",
@@ -3112,11 +4205,12 @@
             "port",
             "open_browser",
             "command_handler",
-            "on_config_updated"
+            "on_config_updated",
+            "approval_manager"
           ],
           "returnType": "threading.Thread",
           "exported": true,
-          "lineCount": 40
+          "lineCount": 39
         }
       ],
       "classes": [],
@@ -3134,9 +4228,27 @@
           ]
         },
         {
+          "source": "hmac",
+          "specifiers": [
+            "hmac"
+          ]
+        },
+        {
           "source": "json",
           "specifiers": [
             "json"
+          ]
+        },
+        {
+          "source": "logging",
+          "specifiers": [
+            "logging"
+          ]
+        },
+        {
+          "source": "secrets",
+          "specifiers": [
+            "secrets"
           ]
         },
         {
@@ -3189,9 +4301,43 @@
             "Any",
             "Dict"
           ]
+        },
+        {
+          "source": "flask",
+          "specifiers": [
+            "Flask",
+            "send_from_directory",
+            "Response",
+            "request",
+            "jsonify"
+          ]
+        },
+        {
+          "source": "src.config.log",
+          "specifiers": [
+            "get_logger",
+            "setup_logging"
+          ]
+        },
+        {
+          "source": "src.config.settings",
+          "specifiers": [
+            "get_active_config_dict",
+            "get_config_value",
+            "is_masked_key",
+            "save_ai_config"
+          ]
+        },
+        {
+          "source": "src.services.hud_status",
+          "specifiers": [
+            "get_hud_status",
+            "clear_hud_logs"
+          ]
         }
       ],
       "exports": [
+        "set_approval_manager",
         "set_command_handler",
         "set_config_updated_callback",
         "get_active_config",
@@ -3199,10 +4345,25 @@
         "_get_default_browser",
         "_is_chromium_browser",
         "open_hud_window",
+        "_allowed_hosts",
+        "_error",
+        "_enforce_hud_security",
+        "_security_headers",
+        "_json_object",
+        "_validate_config_payload",
+        "index",
+        "static_files",
+        "status_route",
+        "config_route",
+        "test_config_route",
+        "command_route",
+        "clear_logs_route",
+        "approvals_route",
+        "approve_route",
         "_is_port_in_use",
         "start_hud_server"
       ],
-      "totalLines": 458,
+      "totalLines": 404,
       "hasStructuralAnalysis": true
     }
   }

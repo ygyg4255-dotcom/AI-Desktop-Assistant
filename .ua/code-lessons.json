@@ -1,283 +1,1750 @@
 {
   "version": 1,
-  "generatedAt": "2026-11-17T15:05:03.993641+00:00",
+  "generatedAt": "2026-11-19T14:06:44.595Z",
   "files": {
-    "src/app.py": {
-      "overview": "Function main() implementing core logic in app.py.",
+    "README.md": {
+      "overview": "The bilingual (English and Arabic) front page of the project. It introduces Altron as a Windows desktop assistant driven by a headless orchestrator, and it documents the architecture, the runtime directory, the S1-S8 security design and the Telegram and installation steps. It is the first stop of the tour and gives you the vocabulary used by every later step.",
       "sections": [
         {
-          "title": "Qt Application Setup",
+          "title": "Title and overview",
           "lineRange": [
-            15,
-            60
+            1,
+            24
           ],
-          "explanation": "Configures high-DPI scaling, initializes QApplication with Windows styling, and prepares the event loop."
+          "explanation": "The header carries the badges and a bilingual title, followed by the English overview. It describes Altron as a `main.py` orchestrator that drives a Flask HUD, wake-word voice, TTS, Win32 icon control and Telegram. The capability list also states that the Claude endpoint is fixed to `api.anthropic.com` and that dangerous actions need out-of-band approval.",
+          "tourOrder": 1
         },
         {
-          "title": "UI Window & Tray Bootstrapping",
+          "title": "Architecture and configuration",
           "lineRange": [
-            61,
+            26,
+            47
+          ],
+          "explanation": "A table maps each component (`main.py`, `ui_server.py`, `src/agent/`, `src/services/`, `src/config/`) to its role and marks `src/app.py` and `src/ui/` as legacy. It also states the single configuration precedence: explicit argument, then `.env`, then process environment, then default. The runtime-directory table explains why mutable files such as `memory.json` and `altron.log` live outside the OneDrive-synced project folder.",
+          "tourOrder": 1
+        },
+        {
+          "title": "Security design table",
+          "lineRange": [
+            49,
+            61
+          ],
+          "explanation": "Lists the audit items S1 to S8 in one table: HUD token, Claude-only and JSON-only endpoints, unforgeable approval, permission tiers, single-use approvals, secret redaction, no `shell=True`, and runtime files in the data dir. These are the invariants that later tour steps (permissions, approvals, HUD server, logging) implement in code.",
+          "tourOrder": 1
+        },
+        {
+          "title": "Telegram bot setup",
+          "lineRange": [
+            65,
+            83
+          ],
+          "explanation": "Step-by-step instructions to create a bot with BotFather, find the numeric chat ID and copy `.env.example` to `.env`. The two values `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` are what `main.py` later reads to start the Telegram listener and the approval bridge."
+        },
+        {
+          "title": "Installation and running",
+          "lineRange": [
+            87,
+            137
+          ],
+          "explanation": "Covers prerequisites, virtual environment, dependencies, environment configuration, the Windows desktop setting needed for icon movement, launching with `python main.py` and running tests with `pytest -p no:cacheprovider`. It notes that the PySide6 `python -m src.app` entry point is deprecated, matching the legacy label elsewhere.",
+          "tourOrder": 1
+        },
+        {
+          "title": "Arabic translation",
+          "lineRange": [
+            141,
+            231
+          ],
+          "explanation": "The Arabic half mirrors the English sections: overview, key features, Telegram setup, installation and test steps, followed by the MIT license note. It is a condensed translation rather than a line-by-line copy, so it omits the architecture and security tables."
+        }
+      ]
+    },
+    "CLAUDE.md": {
+      "overview": "The contributor guide checked into the repo. It states the official runtime path, module layout, configuration and logging rules, the S1-S8 security invariants and the testing conventions. It is the authoritative statement of the rules that the code in the following tour steps follows.",
+      "sections": [
+        {
+          "title": "Overview and runtime path",
+          "lineRange": [
+            1,
+            26
+          ],
+          "explanation": "Defines Altron and declares `python main.py` the only supported entry point. It lists which module owns which job: `main.py` supervises plain threads and must not import PySide6, `ui_server.py` serves the HUD and JSON API, `src/agent/` holds the agent loop, tools, tiers, approvals and memory, and `src/config/` holds settings, paths and logging.",
+          "tourOrder": 1
+        },
+        {
+          "title": "Legacy code policy",
+          "lineRange": [
+            28,
+            33
+          ],
+          "explanation": "Marks the PySide6 UI under `src/app.py` and `src/ui/` as deprecated and not to be extended. It also warns that the Qt worker classes must be started with `.start()` and never `.run()` from a Python thread, and that the root GUI test scripts are manual scripts, not pytest suites."
+        },
+        {
+          "title": "Configuration rules",
+          "lineRange": [
+            35,
+            42
+          ],
+          "explanation": "All configuration goes through `get_config_value` or `Settings()` and never directly through `os.environ` or `.env`. The precedence is explicit argument, then `.env`, then process environment, then default. Default model names live only in `settings.py`, and the real `.env` must never be read or edited.",
+          "tourOrder": 1
+        },
+        {
+          "title": "Runtime directory and logging",
+          "lineRange": [
+            44,
+            57
+          ],
+          "explanation": "Runtime state belongs in `~/.ai-desktop-assistant/` (or `ALTRON_DATA_DIR`) and is obtained with `runtime_file(name)`. Logging uses `get_logger`, forbids `print()` and silent `except: pass`, and relies on `RedactingFormatter` to strip secrets, while callers should still pass known secrets to `redact_secrets` explicitly."
+        },
+        {
+          "title": "Security invariants S1-S8",
+          "lineRange": [
+            59,
+            78
+          ],
+          "explanation": "Each bullet is a rule the code must keep: a HUD token with Host and Origin checks, a hard-coded Anthropic endpoint, `_`-prefixed key stripping so the model cannot forge approval, three permission tiers with DANGEROUS as the default, non-blocking single-use approvals, secret redaction, no `shell=True`, and runtime files in the data dir. Later tour steps on tools, permissions, approvals and the HUD server each implement one or more of these.",
+          "tourOrder": 1
+        },
+        {
+          "title": "Tests and knowledge graph",
+          "lineRange": [
+            80,
+            91
+          ],
+          "explanation": "Describes how to run pytest without writing a cache into OneDrive, requires tests to use a temporary `ALTRON_DATA_DIR`, and asks for log checks with `caplog`. The last section points to the generated knowledge graph at `.ua/knowledge-graph.json` for architectural questions."
+        }
+      ]
+    },
+    "main.py": {
+      "overview": "The unified entry point and orchestrator. It configures logging, builds the shared services (database, AI client, approval manager, agent executor, TTS) and starts the HUD, voice and Telegram subsystems on daemon threads. The main thread then idles, waiting for Ctrl+C to shut everything down. It has the highest fan-out in the project, so each of its imports is a later stop on the tour.",
+      "sections": [
+        {
+          "title": "Imports and path setup",
+          "lineRange": [
+            1,
+            46
+          ],
+          "explanation": "The docstring lists the three subsystems. The project root is put on `sys.path` so the script runs from anywhere, then the config, storage, agent, service and HUD server modules are imported. Note that nothing from PySide6 is imported, in line with the headless design.",
+          "tourOrder": 2
+        },
+        {
+          "title": "AI config hot reload",
+          "lineRange": [
+            49,
+            55
+          ],
+          "explanation": "`apply_ai_config` is called when the HUD saves new settings. The HUD only ever holds a masked key, so the real key is re-read from `Settings()` rather than from the payload, and only then pushed into the live `AIClient`.",
+          "tourOrder": 2
+        },
+        {
+          "title": "Approval event listener",
+          "lineRange": [
+            58,
+            86
+          ],
+          "explanation": "A closure factory returns the listener registered with `ApprovalManager`. For each event (`created`, `resolved`, `executed`) it writes to the HUD log and, when a Telegram bridge exists, sends inline-keyboard requests only for Telegram or voice origins. The bridge is passed in a one-element list so it can be filled in later, after the listener is registered.",
+          "tourOrder": 2
+        },
+        {
+          "title": "Startup and shared services",
+          "lineRange": [
+            89,
+            134
+          ],
+          "explanation": "`main()` starts logging, initialises HUD status, opens the SQLite database (logging a failure instead of crashing), optionally auto-starts OmniRoute, and builds `AIClient`, `ApprovalManager`, `AgentExecutor` and `TTSManager`. The approval sweeper runs in the background to expire old requests, and a shared `threading.Event` is created for shutdown.",
+          "tourOrder": 2
+        },
+        {
+          "title": "HUD server thread",
+          "lineRange": [
+            136,
+            187
+          ],
+          "explanation": "Defines the callback that turns a HUD command into an `executor.process` call with `origin=CHANNEL_HUD`, reporting steps and the final answer to the HUD, Telegram and TTS. The server itself runs on a daemon thread, and any exception is logged so one failing subsystem does not take down the others.",
+          "tourOrder": 2
+        },
+        {
+          "title": "Voice listener thread",
+          "lineRange": [
+            189,
+            263
+          ],
+          "explanation": "A restart loop creates a `SpeechRecognitionListener`, connects its callbacks and calls `worker.run()` directly on this plain thread (no Qt). Recognised text goes through `parse_wake_word`, then to the executor with `origin=CHANNEL_VOICE`, and the reply is spoken. The code also logs per-stage timing (VAD, STT, agent, TTS). If the listener exits or crashes it backs off for two seconds and restarts.",
+          "tourOrder": 2
+        },
+        {
+          "title": "Telegram listener thread",
+          "lineRange": [
+            265,
+            326
+          ],
+          "explanation": "Reads the bot token and chat ID from `Settings`, builds the `TelegramApprovalBridge` only when both are present, and needs an owner user ID for approval callbacks (it falls back to the chat ID in private chats). The listener thread has the same restart-with-backoff pattern as the voice thread and is skipped with a warning when Telegram is not configured.",
+          "tourOrder": 2
+        },
+        {
+          "title": "Supervision and shutdown",
+          "lineRange": [
+            328,
+            364
+          ],
+          "explanation": "After marking the HUD Idle, the main thread sleeps in a one-second loop. On `KeyboardInterrupt` it sets the shutdown event, then stops the voice listener, Telegram listener, executor, approvals and TTS, each guarded by its own try/except so one failure does not block the rest. Because the worker threads are daemons, the process exits cleanly afterwards.",
+          "tourOrder": 2
+        }
+      ]
+    },
+    "src/config/settings.py": {
+      "overview": "The central configuration module and the most imported file in the project. It implements the single precedence rule (`.env`, then process environment, then default) in `get_config_value`, persists changes with `save_ai_config`, and exposes a `Settings` dataclass for the rest of the app. It also fixes the Claude endpoint and default model names.",
+      "sections": [
+        {
+          "title": "Constants and module setup",
+          "lineRange": [
+            1,
+            41
+          ],
+          "explanation": "The docstring states the precedence rule. The API URL is a hard-coded constant and not configurable (audit S2), and the default model names live here only. Locks and caches are declared so the HUD `/status` poll does not re-read `.env` on every request.",
+          "tourOrder": 3
+        },
+        {
+          "title": "Env path and cached reads",
+          "lineRange": [
+            43,
+            123
+          ],
+          "explanation": "`resolve_env_path` picks one `.env` location for source checkouts and frozen builds. `read_env_vars` caches the parsed file keyed on `(path, mtime, size)` so hot paths stay cheap. `get_config_value` then walks the `.env` values and the process environment, trying each alias key in order and returning the first non-empty value. `get_active_config_dict` caches the masked config until the file or a save invalidates it.",
+          "tourOrder": 3
+        },
+        {
+          "title": "Env file parsing helpers",
+          "lineRange": [
+            126,
+            165
+          ],
+          "explanation": "A small hand-written `.env` parser strips one pair of matching quotes, and `_format_env_value` picks a quote character the value does not contain because there are no escape sequences. `is_masked_key` recognises the bullet-masked placeholder the HUD sends back, so a masked value never overwrites the real secret.",
+          "tourOrder": 3
+        },
+        {
+          "title": "Saving AI config",
+          "lineRange": [
+            168,
+            232
+          ],
+          "explanation": "`save_ai_config` rejects values with line breaks (audit S2), updates only the known keys while keeping other lines and comments, and writes the file. Read and write failures are logged without the values and re-raised, never swallowed (audit S6). Afterwards it mirrors the values into `os.environ` and invalidates the caches. It still writes the legacy `ANTHROPIC_*` keys alongside `AI_*` for compatibility.",
+          "tourOrder": 3
+        },
+        {
+          "title": "Settings dataclass",
+          "lineRange": [
+            235,
+            308
+          ],
+          "explanation": "The dataclass holds the app, path, Claude, Telegram and UI fields. `__post_init__` creates the data dir and derives `db_path` and `env_path`, then `load_environment` resolves each field through `get_config_value`. The old proxy placeholder model `serve` is mapped to the default model, and Telegram values are copied into `os.environ` for legacy readers in the tools module.",
+          "tourOrder": 3
+        },
+        {
+          "title": "Compatibility aliases and masking",
+          "lineRange": [
+            310,
+            347
+          ],
+          "explanation": "`ai_provider` and `ai_base_url` are read-only properties that always return Anthropic values, and their setters ignore writes, so old callers cannot redirect the key. `get_config_dict` returns the model, language and a masked key (first four and last four characters) for the HUD, so the secret itself is never exposed.",
+          "tourOrder": 3
+        }
+      ]
+    },
+    "src/config/paths.py": {
+      "overview": "A tiny module that decides where mutable runtime files live. It keeps state out of the OneDrive-synced project folder (audit S8) and moves older project-root copies into the new location once.",
+      "sections": [
+        {
+          "title": "Runtime directory",
+          "lineRange": [
+            1,
+            12
+          ],
+          "explanation": "`get_runtime_dir` returns `ALTRON_DATA_DIR` if set, which is how tests isolate themselves, and otherwise `~/.ai-desktop-assistant`. Reading `os.environ` here is deliberate: this is a path bootstrap that has to work before the config layer is available.",
+          "tourOrder": 3
+        },
+        {
+          "title": "Runtime file helper",
+          "lineRange": [
+            15,
+            25
+          ],
+          "explanation": "`runtime_file(name)` creates the data directory and returns the file path. If the file does not exist yet but an old copy exists in the project root, it moves it across once. `OSError` is swallowed on purpose so a read-only or locked folder cannot stop startup, and the target path is still returned.",
+          "tourOrder": 3
+        }
+      ]
+    },
+    "src/config/log.py": {
+      "overview": "Central logging for Altron. It sets up a console handler and a rotating file handler under the `altron` logger namespace and runs every record through a redacting formatter, so bot tokens and Anthropic keys never reach a log. Entry points call `setup_logging()` once; library code simply uses `get_logger`.",
+      "sections": [
+        {
+          "title": "Constants and secret patterns",
+          "lineRange": [
+            1,
+            38
+          ],
+          "explanation": "The docstring explains the contract, including why records still propagate to the root logger in tests so `caplog` works. Three compiled regexes recognise `bot<id>:<token>`, bare Telegram tokens and `sk-ant-` keys. Log rotation is 1 MB with three backups.",
+          "tourOrder": 3
+        },
+        {
+          "title": "Redaction and formatter",
+          "lineRange": [
+            41,
+            56
+          ],
+          "explanation": "`redact_secrets` first replaces explicitly passed tokens, then applies the three patterns. `RedactingFormatter` overrides `format()` so the whole formatted output, including tracebacks, goes through redaction. Because it sits on the handler, every logger is covered with no per-call work.",
+          "tourOrder": 3
+        },
+        {
+          "title": "Logger helpers",
+          "lineRange": [
+            59,
+            67
+          ],
+          "explanation": "`get_logger` prefixes names with `altron.` so every module shares one configurable root, and avoids double-prefixing. `default_log_path` uses `runtime_file`, which ties logging to the runtime directory.",
+          "tourOrder": 3
+        },
+        {
+          "title": "Handler installation",
+          "lineRange": [
+            70,
+            108
+          ],
+          "explanation": "`setup_logging` is idempotent: it removes handlers it installed earlier, builds a lazily opened `RotatingFileHandler` and a stderr handler, and sets the level from the argument, `ALTRON_LOG_LEVEL` or INFO. It reconfigures stderr to use `backslashreplace` so emoji do not crash legacy consoles, and quiets Werkzeug to errors only because it logs every HUD poll. A failed file handler degrades to console-only instead of aborting.",
+          "tourOrder": 3
+        },
+        {
+          "title": "Shutdown and cleanup",
+          "lineRange": [
+            111,
+            127
+          ],
+          "explanation": "`shutdown_logging` and `_remove_installed_handlers` remove and close only the handlers this module installed, tracking closed ones by `id` since one handler can be attached to two loggers. The close error is swallowed, which is one of the few places a silent `except` is tolerated.",
+          "tourOrder": 3
+        }
+      ]
+    },
+    ".env.example": {
+      "overview": "The committed template for local configuration. It is copied to `.env` and filled in by the user. It lists the Claude API key and model settings together with the Telegram bot token and chat ID, and the app also reads a language setting through `Settings`. The real `.env` is never committed or read by tooling.",
+      "sections": [
+        {
+          "title": "AI provider settings",
+          "lineRange": [
+            1,
+            4
+          ],
+          "explanation": "The first block holds the AI provider section: a placeholder API key and model entries. `Settings.load_environment` reads these through `get_config_value`, accepting both the `AI_*` and `ANTHROPIC_*` aliases. The endpoint itself is not meant to be set here, because it is fixed in code to `api.anthropic.com` (audit S2).",
+          "tourOrder": 3
+        },
+        {
+          "title": "Telegram credentials",
+          "lineRange": [
+            6,
+            12
+          ],
+          "explanation": "Placeholders for `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`, with comments on how to obtain them from BotFather and a user-info bot. `main.py` enables the Telegram listener and the approval bridge only when both values are non-empty.",
+          "tourOrder": 3
+        }
+      ]
+    },
+    "src/services/ai_client.py": {
+      "overview": "The only path to a language model: a small Claude Messages API client built on `urllib`. The endpoint is a module constant, so no configuration can redirect the API key. It also holds the message and response dataclasses, connection-status tracking and retry logic used by the agent executor.",
+      "sections": [
+        {
+          "title": "Endpoint constants and status enum",
+          "lineRange": [
+            1,
+            28
+          ],
+          "explanation": "The URL and API version are constants (audit S2), and default model IDs are imported from `settings.py` as the single source of truth. `ConnectionStatus` records whether the last call was disconnected, connecting, connected or in error, which the UI can read.",
+          "tourOrder": 4
+        },
+        {
+          "title": "Message and response dataclasses",
+          "lineRange": [
+            31,
+            70
+          ],
+          "explanation": "`Message` holds a role, content (a string or a list of blocks) and a timestamp, and can convert to the API shape or a storage dict. `AIResponse` carries the joined text plus model, stop reason, usage and the raw response.",
+          "tourOrder": 4
+        },
+        {
+          "title": "Client setup and config",
+          "lineRange": [
+            74,
+            142
+          ],
+          "explanation": "`base_url` and `provider` are still accepted by the constructor for old callers but ignored. `_normalize_model` maps an empty value or the legacy `serve` placeholder to the default model. `update_config` lets the HUD change model and key at runtime, and the `x-api-key` header is built from the current key on every request.",
+          "tourOrder": 4
+        },
+        {
+          "title": "HTTP dispatch with retries",
+          "lineRange": [
+            144,
+            213
+          ],
+          "explanation": "`make_tool_request` forces the client's model into the payload and delegates to `_dispatch_http_json`. That method posts JSON and retries on HTTP 429, 502, 503 and 504 and on network errors, with a fixed backoff and a cooperative `_cancel_flag` check. HTTP error text is truncated to 160 characters when stored. The executor uses this for its tool-enabled requests.",
+          "tourOrder": 4
+        },
+        {
+          "title": "Chat and async send",
+          "lineRange": [
+            215,
+            269
+          ],
+          "explanation": "`chat` builds a simple Messages payload, joins the `text` blocks into a string and returns an `AIResponse`. `send_message` runs `chat` on a daemon thread and returns a `concurrent.futures.Future`, also calling optional completion or error callbacks.",
+          "tourOrder": 4
+        },
+        {
+          "title": "Cancel and connection test",
+          "lineRange": [
+            271,
+            293
+          ],
+          "explanation": "`cancel` sets a flag that the retry loop checks. `test_connection` sends a tiny 'ping' request with a single attempt and returns a `(success, message)` pair, which the HUD uses for its configuration test.",
+          "tourOrder": 4
+        }
+      ]
+    },
+    "prompts/system_prompt.txt": {
+      "overview": "The persona prompt that gives Altron its calm British-butler voice. The executor loads it at request time and prepends it to its built-in instructions, so you can change the tone without touching code. It matters for voice use, because replies are spoken by the TTS engine.",
+      "sections": [
+        {
+          "title": "Persona and voice rule",
+          "lineRange": [
+            1,
+            2
+          ],
+          "explanation": "Line 1 defines a polite, concise butler persona that opens with phrases like 'Very well, sir.'. Line 2 is a critical voice rule: replies are spoken automatically by the internal `TTSManager`, so the model must never run terminal commands or PowerShell speech to speak. The same rule is repeated as rule 14 in the executor's `SYSTEM_PROMPT`.",
+          "tourOrder": 4
+        }
+      ]
+    },
+    "src/agent/executor.py": {
+      "overview": "The core agent loop. `AgentExecutor` takes a user message, optionally short-circuits it through a local intent router, otherwise calls Claude with the tool schemas, runs the requested tools through the permission gate and feeds results back until a final answer is produced. Out-of-band approvals end the turn immediately and resume later through `run_approved`. The file is long because it also holds the large intent matcher and the reply-cleaning helpers.",
+      "sections": [
+        {
+          "title": "Imports, state and step types",
+          "lineRange": [
+            1,
+            100
+          ],
+          "explanation": "Imports the tool registry, permission gate, approval manager, memory, AI client and HUD status. It defines the `AgentState` enum, the `AgentStep` and `AgentResponse` dataclasses and the legacy `PermissionRequest`, a blocking object backed by a `threading.Event` that is still used by the old desktop chat window.",
+          "tourOrder": 5
+        },
+        {
+          "title": "Local intent router",
+          "lineRange": [
+            103,
+            648
+          ],
+          "explanation": "`match_local_intent` is a long chain of rules, using Arabic normalisation, digit conversion and fuzzy matching via `difflib`, that recognises common commands (window moves, volume, YouTube, clipboard and similar) and returns a ready-made tool call and confirmation text. This skips the LLM round trip for latency. It is the first thing `_process_sync` tries.",
+          "tourOrder": 5
+        },
+        {
+          "title": "Reply cleaning helpers",
+          "lineRange": [
+            651,
+            1079
+          ],
+          "explanation": "`clean_tool_confirmation`, `intercept_raw_code_or_payload` and `sanitize_final_reply` make sure the user never sees raw JSON, `[Tool Result]` blocks, code leaks or 'Using tool:' text. The model sometimes prints tool calls as plain text, so these functions rewrite or detect that and give a natural confirmation instead.",
+          "tourOrder": 5
+        },
+        {
+          "title": "System prompt text",
+          "lineRange": [
+            1081,
+            1131
+          ],
+          "explanation": "The class opens with the built-in `SYSTEM_PROMPT`. It explains the difference between application windows and desktop icons, screen vision, YouTube summarisation, clipboard and WhatsApp tools, and a numbered list of rules. The numbering in the list repeats 7 and 8, which is harmless but shows the prompt grew by accretion.",
+          "tourOrder": 5
+        },
+        {
+          "title": "Construction and prompt loading",
+          "lineRange": [
+            1133,
+            1230
+          ],
+          "explanation": "The constructor wires in the AI client, optional database, registry, gate, memory and approvals (`attach_approvals` registers `run_approved` as the runner), and sets `_max_iterations = 10` to bound the loop. `_get_system_prompt` reads `prompts/system_prompt.txt` from two candidate paths and prepends the persona to the built-in prompt. The rest of the block is read-only properties and thin wrappers.",
+          "tourOrder": 5
+        },
+        {
+          "title": "Tools, approvals and permissions",
+          "lineRange": [
+            1232,
+            1435
+          ],
+          "explanation": "`_parse_tool_use` extracts `tool_use` blocks, and `_execute_tool` runs a tool with `approved=` as a kwarg, the only channel for approval (audit S3). `run_approved` runs exactly the stored arguments after an out-of-band approval and logs the execution. `_request_approval` creates an `ApprovalManager` request with `strip_internal_keys` applied and returns a message that depends on the origin channel, saying for voice that approval must happen on screen. `_execute_tool_with_permission` checks session and database permissions, never applying a saved allow to conditional tools, before running the tool.",
+          "tourOrder": 5
+        },
+        {
+          "title": "Async process entry point",
+          "lineRange": [
+            1437,
+            1511
+          ],
+          "explanation": "`process` returns a `Future` and runs `_process_sync` on a daemon thread, calling `on_complete` or `on_error`. A 60-second `threading.Timer` announces a long-task reminder. The `finally` block always cancels the timer and resets the state to IDLE, so the next message can be handled even after an error.",
+          "tourOrder": 5
+        },
+        {
+          "title": "Start of _process_sync",
+          "lineRange": [
+            1513,
+            1610
+          ],
+          "explanation": "Records the origin, stores the user message in `ConversationMemory`, rebuilds the history from the last ten messages and logs to the database. If `match_local_intent` hits, the tool runs immediately. A gated tool is turned into an approval request rather than dropped silently, and the reply is cleaned and saved without any LLM call.",
+          "tourOrder": 5
+        },
+        {
+          "title": "The tool-use loop",
+          "lineRange": [
+            1612,
+            1972
+          ],
+          "explanation": "A `while` loop bounded by `_max_iterations` builds a payload (system prompt, messages, tool schemas) and calls Claude. With no tool calls, it collects the text, also handling a plain-text 'Using tool:' fallback, and breaks. With tool calls, each one goes through the permission path. A gated call with an approval manager ends the turn through `_approval_response`, while the legacy path blocks on `PermissionRequest.wait`. Results are fed back as messages, and 'direct action' tools return early without a second LLM call. After the loop the reply is cleaned and saved to memory.",
+          "tourOrder": 5
+        },
+        {
+          "title": "Request fallback and control methods",
+          "lineRange": [
+            1974,
+            2040
+          ],
+          "explanation": "`_make_tool_request` delegates to `AIClient.make_tool_request`. The raw `urllib` fallback below it is only used for clients without that method, and it reads a private `_base_url` attribute that the current `AIClient` does not define, so it looks like dead legacy code. `respond_to_permission`, `cancel` and `clear_history` provide the control surface used by the UI and by shutdown.",
+          "tourOrder": 5
+        }
+      ]
+    },
+    "src/agent/memory.py": {
+      "overview": "Thread-safe short-term conversation memory. It keeps the last few messages as a JSON array in `memory.json` in the runtime directory, so context survives restarts. The executor reads it at the start of each turn to rebuild the conversation history.",
+      "sections": [
+        {
+          "title": "Construction and file setup",
+          "lineRange": [
+            1,
+            31
+          ],
+          "explanation": "The default location comes from `runtime_file(\"memory.json\")` (the runtime directory from the config step), though a custom path can be injected for tests. A `threading.Lock` guards all access, and `_ensure_file` creates the file with an empty JSON array when it is missing.",
+          "tourOrder": 5
+        },
+        {
+          "title": "Reading and writing",
+          "lineRange": [
+            33,
+            58
+          ],
+          "explanation": "`_read_messages` returns an empty list for a missing, empty, corrupt or non-list file. `_write_messages` trims to the last `max_messages` entries before saving. Both swallow all exceptions silently, which is robust against corrupt files but breaks the project's rule of logging at least at DEBUG.",
+          "tourOrder": 5
+        },
+        {
+          "title": "Public API",
+          "lineRange": [
+            60,
+            89
+          ],
+          "explanation": "`add_message` appends and trims under the lock, `get_recent_messages` returns the tail, `format_for_prompt` renders a 'User:/Altron:' transcript, and `clear` empties the file. The whole file is read and rewritten on every call, which is simple and fine for ten messages but would not scale to large histories.",
+          "tourOrder": 5
+        }
+      ]
+    },
+    "src/agent/__init__.py": {
+      "overview": "The agent package barrel. It re-exports the tool registry, executor, permission gate and conversation memory as one public API, so other code can import from `src.agent` instead of reaching into submodules.",
+      "sections": [
+        {
+          "title": "Re-exports and __all__",
+          "lineRange": [
+            1,
+            11
+          ],
+          "explanation": "Imports the main classes from `tools`, `executor`, `permissions` and `memory` and lists them in `__all__`. Note that `ApprovalManager` is not re-exported here, which is why `main.py` imports it from `src.agent.approvals` directly. Importing the package pulls in the executor and all tools, so it is heavier than importing one submodule.",
+          "tourOrder": 5
+        }
+      ]
+    },
+    "src/agent/tools.py": {
+      "overview": "The tool registry and every automation handler the agent executor can call: files, terminal, apps, windows, web fetch, system controls, YouTube, PDF, Telegram, clipboard and WhatsApp. It defines the Tool, ToolResult and ToolRegistry types, and ends with create_default_registry, which declares each tool's schema. It is the Step 6 centrepiece and enforces audit S3 (no forged approval), S7 (no shell=True) and the SSRF guard in web fetch.",
+      "sections": [
+        {
+          "title": "Imports and credential helper",
+          "lineRange": [
+            1,
+            34
+          ],
+          "explanation": "Pulls in the standard library pieces used by the handlers (subprocess, socket, urllib, ipaddress) plus the Telegram send helpers and the permission checks from permissions.py. `_telegram_credentials` resolves the bot token and chat id through `get_config_value`, so the tools follow the project-wide `.env > environment > default` precedence instead of reading `os.environ` directly."
+        },
+        {
+          "title": "Tool data models",
+          "lineRange": [
+            36,
+            128
+          ],
+          "explanation": "`ToolParameter`, `ToolResult` and `Tool` are dataclasses. `Tool.run` is the S3 choke point: it calls `strip_internal_keys` to drop every `_`-prefixed key from model-supplied input, and passes approval only as the out-of-band `approved=True` keyword, and only if the handler's signature accepts it. `to_api_schema` converts the definition to the Anthropic tool-use JSON schema.",
+          "tourOrder": 6
+        },
+        {
+          "title": "ToolRegistry",
+          "lineRange": [
+            130,
+            182
+          ],
+          "explanation": "A dict-backed registry. `register` raises ValueError when a tool claims `requires_permission=True` but its handler has no `approved` parameter, which would otherwise make the tool either run unprompted or never be approvable, so the mistake is caught at startup. `execute` normalizes the several kwarg shapes callers use (`params=`, `input=` or bare kwargs) and delegates to `Tool.run`.",
+          "tourOrder": 6
+        },
+        {
+          "title": "File system handlers",
+          "lineRange": [
+            186,
+            441
+          ],
+          "explanation": "Search, read, write, delete, copy, move and open handlers. The pattern is consistent: when `approved` is false and the call is risky, the handler returns a `ToolResult` with `requires_permission=True` and a human-readable `permission_message` instead of acting. `handle_file_read` only asks for sensitive paths (via `needs_approval_file_read`), while writes always ask, so the handler itself is the second line of defence behind the permission gate."
+        },
+        {
+          "title": "Terminal execution",
+          "lineRange": [
+            444,
+            482
+          ],
+          "explanation": "Runs a command only after approval. Arguments are passed as a list (`cmd.exe /c`, `powershell.exe -NoProfile -NonInteractive -Command`, or `/bin/sh -c`), never with `shell=True`, matching audit S7, and a timeout bounds execution. Output is returned as stdout, stderr and exit code."
+        },
+        {
+          "title": "Apps, windows and code edit",
+          "lineRange": [
+            485,
+            1144
+          ],
+          "explanation": "Handlers for opening and closing apps, browser launch, process and system info, Win32 window control and moving, desktop icon positions, and a targeted-replace `code_edit`. `handle_app_open` only auto-runs for plain application names, using the `needs_approval_app_open` rule. The window helpers use ctypes with `EnumWindows` callbacks to match a window by title."
+        },
+        {
+          "title": "Web fetch with SSRF guard",
+          "lineRange": [
+            1146,
+            1319
+          ],
+          "explanation": "Implements an SSRF-hardened fetcher. `_resolve_public` requires every resolved address to be globally routable, `_check_fetch_url` limits schemes to http(s), and custom connection classes call `_connect_public`, which connects to the already-validated address to close the DNS-rebinding gap between check and use. `_CheckedRedirectHandler` re-validates every redirect, the opener bypasses proxies, and the response is capped at 2 MB before HTML is stripped to readable text."
+        },
+        {
+          "title": "System, media, PDF, Telegram, clipboard, WhatsApp",
+          "lineRange": [
+            1322,
+            3040
+          ],
+          "explanation": "The long tail of capability handlers: volume and system controls, YouTube playback and transcript summarizing, PDF creation and sending, `handle_send_to_telegram` (conditional approval), screen capture, a clipboard manager using Win32 Unicode clipboard calls, and UI-automation-driven WhatsApp send and read. The last line aliases `whatsapp_read = handle_whatsapp_read`. These are large and platform-specific, but they all return the same `ToolResult` shape."
+        },
+        {
+          "title": "Default registry",
+          "lineRange": [
+            3045,
+            3391
+          ],
+          "explanation": "`create_default_registry` builds a `ToolRegistry` and registers each tool with its category, parameter schema, handler and `requires_permission` / `is_dangerous` flags. This is the single place where the tool surface the model sees is declared. Whether a tool needs approval is then decided by the tiers in permissions.py, with this registry flag enforced as a consistency check in `register`.",
+          "tourOrder": 6
+        }
+      ]
+    },
+    "src/agent/permissions.py": {
+      "overview": "Defines the permission gate that sorts tools into SAFE, CONDITIONAL and DANGEROUS tiers (audit S4), plus per-call input checks for conditional tools. The check functions decide whether a path is a secret location, whether a file is launchable, and whether an app name is plain. It is read together with approvals.py in Step 7.",
+      "sections": [
+        {
+          "title": "Permission enums and rules",
+          "lineRange": [
+            1,
+            23
+          ],
+          "explanation": "`PermissionLevel` has ASK, ALLOW and DENY, and `PermissionRule` is a small dataclass pairing a tool name with a level. These are the vocabulary used by session overrides below."
+        },
+        {
+          "title": "PermissionGate tiers",
+          "lineRange": [
+            25,
+            114
+          ],
+          "explanation": "The three tier sets are class constants: SAFE tools auto-run, CONDITIONAL tools (`file_read`, `file_open`, `app_open`, `send_to_telegram`) are checked per call, and DANGEROUS tools always ask. The comment explains why conditional tools must stay out of SAFE_TOOLS: that would pass `approved=True` unconditionally. `set_session_permission` silently refuses a blanket ALLOW for conditional tools, so remembering a choice can never switch off the per-call checks. `get_permission_message` builds the text shown to the approver.",
+          "tourOrder": 7
+        },
+        {
+          "title": "Sensitive path detection",
+          "lineRange": [
+            117,
+            160
+          ],
+          "explanation": "`is_sensitive_path` resolves the path with `realpath` (symlinks and `..`), lower-cases it, strips NTFS alternate-data-stream suffixes and trailing dots or spaces that Windows ignores, then matches secret file names, key suffixes, credential directories like `.ssh` and browser profile directories. Checking several resolved candidates (with and without environment expansion) is what makes obfuscated paths harder to slip past.",
+          "tourOrder": 7
+        },
+        {
+          "title": "Launchable files and app names",
+          "lineRange": [
+            162,
+            200
+          ],
+          "explanation": "`RISKY_OPEN_EXTENSIONS` lists executable and scriptable types; `needs_approval_file_open` asks for those and lets ordinary documents open. `needs_approval_app_open` is deliberately strict: any explicit path, separator, quote or shell metacharacter, or risky extension, forces approval, and only a plain name or an `ms-settings:` URI auto-opens.",
+          "tourOrder": 7
+        }
+      ]
+    },
+    "src/agent/approvals.py": {
+      "overview": "Implements the non-blocking, out-of-band approval flow (audit S5). Each request has an unguessable id, is bound to a SHA-256 hash of the tool name and arguments, expires, is single-use, and can only be resolved by allowed channels. Voice is never an approver. It sits behind the permission tiers from Step 7 and is resolved from the HUD or Telegram.",
+      "sections": [
+        {
+          "title": "Design notes and constants",
+          "lineRange": [
+            1,
+            56
+          ],
+          "explanation": "The docstring lists the invariants. `APPROVERS_BY_ORIGIN` maps the channel a request came from to the channels that may approve it, and voice-origin requests can only be approved from HUD or Telegram; no entry ever contains voice. The status and outcome constants are plain strings, so they can be returned straight through the HUD JSON API.",
+          "tourOrder": 7
+        },
+        {
+          "title": "Hashing and request models",
+          "lineRange": [
+            58,
+            120
+          ],
+          "explanation": "`args_hash` serializes the tool name and args as canonical JSON (sorted keys, compact separators) before hashing, so key order does not change the digest. `ApprovalRequest.public_view` exposes only what an approver needs to see, including the full hash for binding. `ResolveResult.ok` is true only for approved or denied outcomes.",
+          "tourOrder": 7
+        },
+        {
+          "title": "Manager setup and create_request",
+          "lineRange": [
+            122,
+            176
+          ],
+          "explanation": "`ApprovalManager` takes an injectable runner, ttl, clock and dispatch function, which keeps it testable. `create_request` deep-copies the args so later mutation by the caller cannot alter what was approved, generates the id with `secrets.token_urlsafe`, computes the hash and notifies listeners (such as the Telegram bridge). Listener failures are caught so a broken listener cannot break approvals.",
+          "tourOrder": 7
+        },
+        {
+          "title": "Listing, expiry and resolve",
+          "lineRange": [
+            178,
+            247
+          ],
+          "explanation": "`sweep` marks overdue pending requests as EXPIRED (a denial) and forgets long-finished ones. `resolve` runs under a lock and checks, in order, unknown id, expired, already used, forbidden channel, then the hash prefix using `hmac.compare_digest`. A hash mismatch is treated as tampering and denies the request. Only an approved outcome dispatches `_run`, which re-verifies the stored args against the hash and executes the stored copy, never caller-supplied args.",
+          "tourOrder": 7
+        },
+        {
+          "title": "Background sweeper",
+          "lineRange": [
+            249,
+            265
+          ],
+          "explanation": "`start_sweeper` runs a daemon thread that calls `sweep` every few seconds using `Event.wait(interval)` as both sleep and stop signal, so `stop()` ends it promptly. This ensures requests expire and notify even when nobody polls the HUD."
+        }
+      ]
+    },
+    "ui_server.py": {
+      "overview": "The Flask HUD server on 127.0.0.1:5000 (falling back to 5001). It serves the ui/ assets and a JSON API, and implements audit S1 and S2: a per-launch token, strict Host and Origin checks, JSON-only state changes, and no CORS headers. main.py starts it on a daemon thread and registers the command handler and approval manager.",
+      "sections": [
+        {
+          "title": "Security model and module state",
+          "lineRange": [
+            1,
+            52
+          ],
+          "explanation": "The docstring states the security model. A random `_HUD_TOKEN` is generated at import time, and `_API_PATHS` and `_JSON_ONLY_PATHS` define which routes need the token and which require `application/json`. `_CONFIG_FIELDS` whitelists the only settings the HUD may change. Registered callbacks and the approval manager live in module globals.",
+          "tourOrder": 8
+        },
+        {
+          "title": "Registration helpers and status payload",
+          "lineRange": [
+            54,
+            84
+          ],
+          "explanation": "Small setters wire in the command handler, config-updated callback and ApprovalManager, keeping this module free of imports from the orchestrator. `_get_status_payload_str` merges the in-memory HUD status with the masked AI config for `/status`."
+        },
+        {
+          "title": "Opening the HUD window",
+          "lineRange": [
+            86,
             140
           ],
-          "explanation": "Instantiates the floating ChatWindow capsule and connects it to the SystemTrayIcon for persistent desktop presence."
+          "explanation": "Reads the default browser from the Windows registry and, when it is Chromium-based, launches it with `--app=` for a chrome-less window. The browser is started with an argument list (no shell), and any failure falls back to `webbrowser.open`."
+        },
+        {
+          "title": "Request security gate",
+          "lineRange": [
+            142,
+            212
+          ],
+          "explanation": "`before_request` enforces the S1 checks on every request: Host must be `127.0.0.1:<port>` or `localhost:<port>` (a defence against DNS rebinding), any Origin must match, and API paths need an `X-HUD-Token` compared with `hmac.compare_digest`. POST endpoints in the JSON-only set must send `application/json`, which blocks cross-site form posts. `after_request` adds nosniff, a frame-ancestors CSP and no-cache headers. `_validate_config_payload` rejects unknown fields, non-strings, line breaks and non-ASCII keys.",
+          "tourOrder": 8
+        },
+        {
+          "title": "Page and config routes",
+          "lineRange": [
+            215,
+            262
+          ],
+          "explanation": "The index route reads `ui/index.html` and replaces `__HUD_TOKEN__` with the real token, so the token is only ever delivered inside the served page, with `no-store` caching. Other files go through `send_from_directory`. `/config` validates, saves via `save_ai_config` (a failed `.env` write returns 500 instead of being swallowed, per S6) and then fires the update callback.",
+          "tourOrder": 8
+        },
+        {
+          "title": "Test, command and approval API",
+          "lineRange": [
+            265,
+            341
+          ],
+          "explanation": "`/test_config` builds a short-lived AIClient to test credentials, falling back to the stored key when the supplied one is masked. `/command` runs the handler on a new daemon thread so the request returns immediately. `/approvals` lists pending requests, and `/approve` accepts only `id`, `decision` and `args_hash`, resolves with `via=\"hud\"`, and maps each outcome to an HTTP status through `_APPROVE_STATUS`.",
+          "tourOrder": 8
+        },
+        {
+          "title": "Server startup",
+          "lineRange": [
+            344,
+            403
+          ],
+          "explanation": "`start_hud_server` probes the port and moves up by one if it is taken, records the final port for the Host check, and runs `flask_app.run` on a daemon thread with the reloader off. It can also open the browser after a short delay. The `__main__` block makes the module runnable on its own for debugging."
         }
-      ],
-      "tourOrder": 2
+      ]
+    },
+    "src/services/hud_status.py": {
+      "overview": "Holds the HUD's live state in memory, with a ring of log lines and cached CPU, RAM, disk and battery metrics, and flushes a snapshot to status.json in the runtime directory. The Flask server reads it for `/status`, and the voice and agent code update it. It is the second file in Step 8.",
+      "sections": [
+        {
+          "title": "Module state and warn-once",
+          "lineRange": [
+            1,
+            35
+          ],
+          "explanation": "The authoritative state is the in-memory `_STATE` dict guarded by a lock, and status.json is only a snapshot. `_warn_once` logs the first occurrence of a recurring failure at WARNING and later ones at DEBUG, which prevents log spam from a once-per-second poll."
+        },
+        {
+          "title": "System metrics",
+          "lineRange": [
+            37,
+            80
+          ],
+          "explanation": "Reads psutil metrics but caches them for two seconds, so many pollers do not hammer the OS. Temperature falls back to a value derived from CPU frequency when sensors are unavailable, and a failure keeps serving the previous cache."
+        },
+        {
+          "title": "Atomic flush",
+          "lineRange": [
+            83,
+            103
+          ],
+          "explanation": "Writes the JSON to a temporary file in the same directory and swaps it in with `os.replace`, so readers never see a half-written file. Since Windows may briefly lock the target while a reader has it open, it retries a few times with a growing sleep and then skips the snapshot rather than crashing.",
+          "tourOrder": 8
+        },
+        {
+          "title": "Public state API",
+          "lineRange": [
+            106,
+            150
+          ],
+          "explanation": "`get_hud_status` returns a copy of the state with metrics merged in. `update_hud_status` changes the state and appends a log line, skipping consecutive duplicates and trimming to the last 50. `clear_hud_logs` and `init_hud_status` reset state. Every mutation flushes while holding the lock.",
+          "tourOrder": 8
+        }
+      ]
+    },
+    "ui/index.html": {
+      "overview": "The static page for the radar HUD. It lays out the header clock, a three-column dashboard (system stats and AI config, the radar core and command bar, and approvals, chat, events and reminders) and the settings modal. The `hud-token` meta tag holds the `__HUD_TOKEN__` placeholder that ui_server.py replaces at request time.",
+      "sections": [
+        {
+          "title": "Head and token placeholder",
+          "lineRange": [
+            1,
+            9
+          ],
+          "explanation": "Standard head, plus `<meta name=\"hud-token\" content=\"__HUD_TOKEN__\">`. The server substitutes the per-launch token here, and app.js reads it to authenticate every fetch. The stylesheet is loaded from style.css.",
+          "tourOrder": 9
+        },
+        {
+          "title": "Top header bar",
+          "lineRange": [
+            10,
+            36
+          ],
+          "explanation": "Brand, a clock and date filled in by `app.js`, and status and battery pills. The element ids are the hooks the script uses."
+        },
+        {
+          "title": "Left column: stats and AI config",
+          "lineRange": [
+            38,
+            118
+          ],
+          "explanation": "A greeting card, four stat rows (CPU, temperature, RAM, disk) each with a value label and progress bar, and an AI configuration card that opens the settings modal when clicked. All the numeric values are placeholders replaced by polled data.",
+          "tourOrder": 9
+        },
+        {
+          "title": "Center column: radar core and command bar",
+          "lineRange": [
+            120,
+            157
+          ],
+          "explanation": "The animated rings and orb whose colour is driven by the `state-*` class on the body, followed by the command form. The input uses `dir=\"auto\"` so Arabic and English both type correctly.",
+          "tourOrder": 9
+        },
+        {
+          "title": "Right column: approvals, chat, events",
+          "lineRange": [
+            159,
+            229
+          ],
+          "explanation": "The approvals card is `hidden` by default and only shown when requests are pending. The conversation card holds the chat feed with Clear and Export buttons. The events and reminders cards are static display content.",
+          "tourOrder": 9
+        },
+        {
+          "title": "Settings modal and script",
+          "lineRange": [
+            232,
+            272
+          ],
+          "explanation": "A modal form for model name, Anthropic API key (password input, no autocomplete) and language, with Test Connection, Cancel and Save buttons. The file ends by loading `app.js` after the DOM exists.",
+          "tourOrder": 9
+        }
+      ]
+    },
+    "ui/app.js": {
+      "overview": "The browser-side controller for the HUD, wrapped in an IIFE. It reads the injected token, updates the clock, polls `/status` and `/approvals` every second, renders chat logs and approvals, and posts commands and configuration. Every request carries `X-HUD-Token`, matching the server checks from Step 8.",
+      "sections": [
+        {
+          "title": "Token and DOM references",
+          "lineRange": [
+            1,
+            37
+          ],
+          "explanation": "Strict mode, then the token is read from the meta tag. All the DOM elements are looked up once at start. Later code guards each use with an existence check, so a missing element never breaks the script.",
+          "tourOrder": 9
+        },
+        {
+          "title": "Clock and greeting",
+          "lineRange": [
+            39,
+            87
+          ],
+          "explanation": "A once-per-second timer formats the time and date and picks a greeting by hour. It only writes the greeting when it changes, avoiding needless DOM work."
+        },
+        {
+          "title": "Status polling and rendering",
+          "lineRange": [
+            89,
+            176
+          ],
+          "explanation": "`fetchStatus` calls `/status` with a cache-busting query, `no-store`, and the token header. `renderState` maps the backend state text (listening, thinking, speaking) to a `state-*` class on the body, which the CSS uses to recolour the orb, and `renderMetrics` clamps values and sets bar widths. Network errors are ignored silently, because the HUD should simply recover when the server returns.",
+          "tourOrder": 9
+        },
+        {
+          "title": "Chat log rendering",
+          "lineRange": [
+            178,
+            246
+          ],
+          "explanation": "Compares a joined signature of the logs with the last one and skips the redraw if nothing changed. Prefixes such as `User:`, `Voice:`, `Telegram:` and `Altron:` pick the bubble style. Text always goes through `escapeHtml` before `innerHTML`, because log lines can contain model or user text."
+        },
+        {
+          "title": "Command, clear and export",
+          "lineRange": [
+            248,
+            335
+          ],
+          "explanation": "Submitting the form optimistically shows the user bubble, switches the display to Thinking, and POSTs JSON to `/command`. Clear calls `/clear_logs`, and Export builds a text file client-side with a Blob and a temporary download link."
+        },
+        {
+          "title": "AI configuration modal",
+          "lineRange": [
+            337,
+            506
+          ],
+          "explanation": "Loads the current config when the modal opens, but never fills in the key: it only changes the placeholder to show that one is configured. Saving POSTs `{model, api_key, language}` and gives button feedback, and Test Connection posts to `/test_config` and shows success or error. A blank key means keep the stored one, which matches the server's masked-key logic."
+        },
+        {
+          "title": "Approvals panel",
+          "lineRange": [
+            508,
+            599
+          ],
+          "explanation": "Request data comes from tool arguments, so the panel is built with `createElement` and `textContent` only, never `innerHTML`. Approve and Deny send the request id, decision and the `args_hash` the user was shown, which binds the decision to exactly those arguments (S5). An in-flight set stops double clicks, and a signature check avoids redrawing unchanged lists.",
+          "tourOrder": 9
+        },
+        {
+          "title": "Polling loop",
+          "lineRange": [
+            601,
+            606
+          ],
+          "explanation": "Fetches once immediately and then every second for status and approvals. This is plain `setInterval` polling rather than WebSockets, which is simple and adequate for a local dashboard."
+        }
+      ]
+    },
+    "ui/style.css": {
+      "overview": "The stylesheet for the cyan-glow sci-fi radar HUD. It defines the colour tokens as CSS variables, the three-column layout, animated radar rings, per-state orb colours, the chat bubbles, the modal and the approvals panel. State-specific looks are selected by `body.state-*` classes set from app.js.",
+      "sections": [
+        {
+          "title": "Design tokens and base",
+          "lineRange": [
+            1,
+            60
+          ],
+          "explanation": "`:root` defines the navy and cyan palette, accent colours and font stacks as variables, so the theme is changed in one place. The base rules fix the page to the viewport with hidden overflow, disable text selection, and add a faint grid overlay through `body::before`.",
+          "tourOrder": 9
+        },
+        {
+          "title": "Header and layout shell",
+          "lineRange": [
+            61,
+            229
+          ],
+          "explanation": "The top header bar with its pulsing status dot, the pills, the grid for `.dashboard-body`, and the shared `.panel` and `.card` look used by every column."
+        },
+        {
+          "title": "Left panel styles",
+          "lineRange": [
+            230,
+            389
+          ],
+          "explanation": "Greeting, stat rows with progress tracks and per-metric fill colours, the network indicator and the AI config rows."
+        },
+        {
+          "title": "Center core and command bar",
+          "lineRange": [
+            390,
+            632
+          ],
+          "explanation": "Concentric rotating rings, crosshairs and the orb with keyframe animations. The `body.state-listening`, `state-thinking` and `state-speaking` rules change the orb glow to green, amber and cyan, which is how the backend state becomes visible. The command bar and its action buttons follow.",
+          "tourOrder": 9
+        },
+        {
+          "title": "Right panel: chat, events, reminders",
+          "lineRange": [
+            633,
+            814
+          ],
+          "explanation": "Header buttons, the scrolling chat feed, user, altron and system bubble variants, and the event and reminder lists."
+        },
+        {
+          "title": "Settings modal",
+          "lineRange": [
+            815,
+            1012
+          ],
+          "explanation": "Backdrop and window with fade and scale-in animations, form controls, the loading, success and error variants of the test status, and primary and secondary buttons."
+        },
+        {
+          "title": "Approvals panel",
+          "lineRange": [
+            1013,
+            1082
+          ],
+          "explanation": "Styles for pending approval items: tool name, summary, a monospaced args preview, the expiry timer, and distinct approve and deny buttons.",
+          "tourOrder": 9
+        }
+      ]
+    },
+    "src/services/voice_service.py": {
+      "overview": "The always-on voice channel. It contains text cleanup for speech, wake-word parsing, a TTSManager that speaks with edge-tts or Piper plus fallbacks, two voice activity detectors, and SpeechRecognitionListener, a Qt-free loop that records speech, transcribes it with faster-whisper and emits the text. A thin QThread wrapper at the bottom keeps the legacy UI working. main.py runs the listener on a plain thread.",
+      "sections": [
+        {
+          "title": "Imports and echo gate",
+          "lineRange": [
+            1,
+            23
+          ],
+          "explanation": "Imports audio, threading and numpy tools. `is_speaking_event` is a global `threading.Event` set while TTS plays, and the listener discards microphone audio when it is set so Altron does not hear itself.",
+          "tourOrder": 10
+        },
+        {
+          "title": "Speech text helpers",
+          "lineRange": [
+            25,
+            76
+          ],
+          "explanation": "`clean_text_for_speech` strips markdown, code blocks and links and truncates to about 350 characters at a sentence boundary so replies sound natural. `WAKE_WORDS_PATTERN` matches Altron and its phonetic and Arabic variants, and `parse_wake_word` returns whether it was found plus the command that follows.",
+          "tourOrder": 10
+        },
+        {
+          "title": "TTSManager control",
+          "lineRange": [
+            78,
+            173
+          ],
+          "explanation": "A QObject with Qt signals for `speech_started` and `speech_finished`. Each `speak` call stops any current utterance and starts a fresh daemon worker thread, which avoids COM and event-loop problems across sequential utterances. `stop` clears the echo gate, resets the HUD to Idle and purges SAPI or terminates a Piper process.",
+          "tourOrder": 10
+        },
+        {
+          "title": "TTS backends and worker",
+          "lineRange": [
+            175,
+            398
+          ],
+          "explanation": "`_speak_edge_tts` streams MP3 from edge-tts (an Arabic voice when Arabic characters are present) and plays it with pygame. `_speak_piper` locates the Piper executable with `shutil.which` and passes an argument list. `_speak_worker` tries these in order with Windows fallbacks, and is built to emit `speech_finished` however it ends. Several backends swallow exceptions with bare handlers, which differs from the logging rule in CLAUDE.md.",
+          "tourOrder": 10
+        },
+        {
+          "title": "Voice activity detection",
+          "lineRange": [
+            400,
+            447
+          ],
+          "explanation": "`EnergyVAD` computes frame RMS against an adaptive threshold based on a running ambient-noise average. `FastVAD` prefers webrtcvad and falls back to the energy detector if it is missing or errors, so voice still works without the optional dependency.",
+          "tourOrder": 10
+        },
+        {
+          "title": "Listener setup and controls",
+          "lineRange": [
+            449,
+            492
+          ],
+          "explanation": "`SpeechRecognitionListener` exposes `CallbackSignal` attributes instead of Qt signals, so it works headless. Large Whisper model names are downgraded to `base` for CPU speed. `pause`, `resume` and `abort` are simple flags the loop polls.",
+          "tourOrder": 10
+        },
+        {
+          "title": "Startup: model, VAD, microphone",
+          "lineRange": [
+            494,
+            562
+          ],
+          "explanation": "Loads faster-whisper (CPU, int8) and runs a warm-up inference to avoid first-use latency, with a speech_recognition fallback. It then opens a 16 kHz mono stream through PyAudio, or sounddevice as a second choice, and uses a legacy loop if neither opens.",
+          "tourOrder": 10
+        },
+        {
+          "title": "Capture and transcription loop",
+          "lineRange": [
+            564,
+            712
+          ],
+          "explanation": "Reads 30 ms frames and keeps a pre-roll buffer so the start of a sentence is not clipped. Recording begins after enough speech frames and ends after about 0.8 s of silence or 15 s, and clips under about 0.4 s are dropped. The audio is transcribed in memory as float32, with checks before and after STT that discard it if TTS started speaking. Recognized text is emitted through `text_recognized`, and cleanup runs in `finally`.",
+          "tourOrder": 10
+        },
+        {
+          "title": "Legacy fallback and Qt wrapper",
+          "lineRange": [
+            714,
+            773
+          ],
+          "explanation": "`_run_legacy_fallback` uses the SpeechRecognition microphone when no low-latency stream is available. `SpeechRecognitionWorker` multiply inherits QThread and the listener, shadowing the signals with real Qt `Signal`s for the deprecated UI. It must be started with `start()`, not `run()`.",
+          "tourOrder": 10
+        }
+      ]
+    },
+    "src/services/signals.py": {
+      "overview": "A small Qt-free replacement for Qt signals so the voice and Telegram listeners can offer connect, disconnect and emit without importing PySide6 in the headless runtime. Slots run synchronously on the emitting thread. It is the descriptor example for the Step 10 language lesson.",
+      "sections": [
+        {
+          "title": "Module purpose and imports",
+          "lineRange": [
+            1,
+            13
+          ],
+          "explanation": "The docstring says the shim mimics `Qt.DirectConnection` semantics, and that the legacy QThread wrappers shadow these attributes with real Qt signals.",
+          "tourOrder": 10
+        },
+        {
+          "title": "Per-instance callback list",
+          "lineRange": [
+            15,
+            39
+          ],
+          "explanation": "`_BoundCallbacks` stores slots behind a lock. `emit` copies the slot list under the lock and calls the slots outside it, so a slot can connect or disconnect without deadlock. A failing slot is logged with `logger.exception` and does not stop the listener loop or other slots, the same as Qt. `connect` accepts and ignores a Qt connection-type argument for compatibility.",
+          "tourOrder": 10
+        },
+        {
+          "title": "CallbackSignal descriptor",
+          "lineRange": [
+            41,
+            54
+          ],
+          "explanation": "`__set_name__` records the attribute name, and `__get__` lazily creates a `_BoundCallbacks` object in the instance `__dict__`. A class-level declaration such as `text_recognized = CallbackSignal()` therefore gives every instance its own callback list rather than sharing one across the class.",
+          "tourOrder": 10
+        }
+      ]
+    },
+    "src/services/telegram_service.py": {
+      "overview": "Everything Telegram: message chunking and send helpers for text, documents and photos, a minimal Bot API caller, the TelegramApprovalBridge for inline-keyboard approvals, update-offset persistence, and TelegramRemoteListener, which long-polls for owner commands. It enforces the owner-only checks and secret redaction (S5, S6) described in Step 11.",
+      "sections": [
+        {
+          "title": "Imports and message chunking",
+          "lineRange": [
+            1,
+            53
+          ],
+          "explanation": "`chunk_message` splits text under Telegram's 4096-character limit, preferring paragraph breaks, then line breaks, sentence ends and spaces, and falling back to a hard cut. It re-exports `redact_secrets` from the log module for callers.",
+          "tourOrder": 11
+        },
+        {
+          "title": "Text send helpers",
+          "lineRange": [
+            56,
+            114
+          ],
+          "explanation": "`resolve_credentials` prefers explicit arguments and otherwise uses `get_config_value`. `send_telegram_message` posts each chunk as JSON and reports whether all succeeded. Errors are logged through `redact_secrets(..., bot_token)`, since the token appears in the URL. The async variant wraps it in a daemon thread.",
+          "tourOrder": 11
+        },
+        {
+          "title": "Document and photo uploads",
+          "lineRange": [
+            117,
+            207
+          ],
+          "explanation": "Defines size limits matching the Bot API (50 MB documents, 10 MB photos) and a caption limit, followed by the multipart `_post_file` helper and the document and photo senders, including an async photo variant."
+        },
+        {
+          "title": "Minimal Bot API client",
+          "lineRange": [
+            210,
+            243
+          ],
+          "explanation": "`TelegramBotApi.call` posts JSON to the Bot API and returns `{\"ok\": False}` on failure. It logs only the exception type and never the URL, because the token is in the URL. It is injectable, so tests can replace it and avoid the network.",
+          "tourOrder": 11
+        },
+        {
+          "title": "Approval bridge",
+          "lineRange": [
+            245,
+            344
+          ],
+          "explanation": "Posts each approval request as an inline keyboard whose callback data is `ap:<a|d>:<request id>:<16-char hash prefix>`. `handle_callback_query` honours a callback only when both the chat id and the sender user id are the owner's, then calls `manager.resolve(..., via=\"telegram\")`, so the nonce, hash and approver-channel checks from approvals.py also apply. Network replies run on a background dispatch so the polling thread never waits, and `on_resolved` edits the message to show the final status even when the HUD resolves it.",
+          "tourOrder": 11
+        },
+        {
+          "title": "Update offset persistence",
+          "lineRange": [
+            347,
+            376
+          ],
+          "explanation": "The getUpdates offset is stored in `telegram_offset.json` in the runtime directory, keyed by bot id, and written atomically with `os.replace`. A restart therefore does not replay old commands, and an unreadable file only logs a warning."
+        },
+        {
+          "title": "Remote command listener",
+          "lineRange": [
+            378,
+            462
+          ],
+          "explanation": "`run` long-polls `getUpdates`, and it saves the new offset before handling each update, giving at-most-once delivery. Callback queries go to the approval handler. For messages, any chat id other than the allowed one is ignored with a warning, and authorized text is emitted via the `CallbackSignal` `remote_command_received`. Polling errors back off for two seconds and are redacted before logging.",
+          "tourOrder": 11
+        },
+        {
+          "title": "Legacy Qt wrapper",
+          "lineRange": [
+            464,
+            478
+          ],
+          "explanation": "`TelegramRemoteWorker` combines QThread and the listener with a real Qt signal, for the deprecated PySide6 UI only. It must be started with `start()`.",
+          "tourOrder": 11
+        }
+      ]
+    },
+    "src/storage/db.py": {
+      "overview": "The SQLite storage layer. It defines dataclass row models and a Database class with tables for settings, conversations, messages, tool executions and permissions, and CRUD methods that map sqlite3 rows into typed objects. main.py opens it at startup, and the older services/database.py shim subclasses it.",
+      "sections": [
+        {
+          "title": "Row dataclasses",
+          "lineRange": [
+            1,
+            40
+          ],
+          "explanation": "`Conversation`, `ChatMessage` and `ToolExecution` are plain dataclasses used as typed rows. Dict-valued fields such as metadata and tool input and output use `field(default_factory=dict)` to avoid the shared mutable default pitfall.",
+          "tourOrder": 12
+        },
+        {
+          "title": "Connection and schema",
+          "lineRange": [
+            42,
+            122
+          ],
+          "explanation": "`initialize` opens the connection with `check_same_thread=False`, since the HUD, voice and Telegram threads share it, and sets `sqlite3.Row` so columns are accessible by name. `_create_tables` uses `CREATE TABLE IF NOT EXISTS` for all five tables, with foreign keys from messages and tool executions to conversations. `_migrate` is an empty placeholder for future schema changes. Note that SQLite does not enforce those foreign keys unless the pragma is enabled.",
+          "tourOrder": 12
+        },
+        {
+          "title": "Settings",
+          "lineRange": [
+            124,
+            146
+          ],
+          "explanation": "A key-value store. Non-string values are JSON-encoded on write and decoded on read, falling back to the raw string when the value is not valid JSON. Queries use `?` placeholders throughout, so values are never interpolated into SQL.",
+          "tourOrder": 12
+        },
+        {
+          "title": "Conversations and messages",
+          "lineRange": [
+            148,
+            263
+          ],
+          "explanation": "Create, get, list, update and delete conversations, and add and fetch messages. Deleting a conversation removes its messages and tool executions in one transaction, and `add_message` touches the conversation's `updated_at` so the list stays ordered by recent activity. Metadata is stored as JSON text and parsed defensively.",
+          "tourOrder": 12
+        },
+        {
+          "title": "Tool execution log",
+          "lineRange": [
+            265,
+            366
+          ],
+          "explanation": "`log_tool_execution` records a call as pending, `update_tool_execution` stores the output and final status, and the getters rebuild `ToolExecution` objects. `get_tool_executions` and `get_all_tool_executions` repeat the same JSON-decoding block, which could be factored into a helper, and the decode failures are swallowed silently.",
+          "tourOrder": 12
+        },
+        {
+          "title": "Permissions and close",
+          "lineRange": [
+            368,
+            400
+          ],
+          "explanation": "Stores a per-tool mode of ask, allow or deny, with `ask` as the default, and rejects any other mode with ValueError. `close` releases the connection. This table is the persisted side of the permission modes, while the in-memory PermissionGate decides what is actually enforced.",
+          "tourOrder": 12
+        }
+      ]
     },
     "src/services/database.py": {
-      "overview": "DatabaseService class in database.py (methods: __init__).",
+      "overview": "A tiny backward-compatibility shim. DatabaseService is just a subclass of src.storage.db.Database, kept so older imports (and the services barrel) keep working. New code should use the storage Database directly.",
+      "sections": [
+        {
+          "title": "Legacy Database wrapper",
+          "lineRange": [
+            1,
+            10
+          ],
+          "explanation": "The docstring marks the module as deprecated. DatabaseService adds no behaviour: its constructor only forwards db_path to the parent Database. It exists purely so `from src.services import DatabaseService` still resolves.",
+          "tourOrder": 12
+        }
+      ]
+    },
+    "src/services/desktop_icon_service.py": {
+      "overview": "Win32 ctypes helper that reads and moves Windows desktop icons by talking to Explorer's SysListView32 control. It lets a tool visually reposition icons by name or preset (including Arabic synonyms). It is exposed through the services barrel and used by the desktop automation tools.",
+      "sections": [
+        {
+          "title": "Win32 constants and LVITEMW",
+          "lineRange": [
+            1,
+            50
+          ],
+          "explanation": "Defines the list-view message ids, process memory access rights and the LVITEMW ctypes structure. These are needed because the desktop list view lives in Explorer's process, so structs must be marshalled across processes.",
+          "tourOrder": 13
+        },
+        {
+          "title": "Locating desktop window",
+          "lineRange": [
+            53,
+            95
+          ],
+          "explanation": "get_desktop_listview_hwnd tries Progman first, then enumerates WorkerW windows (used when a wallpaper engine or slideshow is active) to find SHELLDLL_DefView and then SysListView32. Non-Windows platforms return None or a default 1920x1080 resolution so the module imports safely everywhere.",
+          "tourOrder": 13
+        },
+        {
+          "title": "Reading icons across processes",
+          "lineRange": [
+            98,
+            168
+          ],
+          "explanation": "get_desktop_icons opens Explorer with VM read/write rights, allocates memory inside it with VirtualAllocEx, and sends LVM_GETITEMTEXTW and LVM_GETITEMPOSITION messages so results are written into that remote buffer, then copies them back with ReadProcessMemory. The finally block always frees the remote memory and closes the handle.",
+          "tourOrder": 13
+        },
+        {
+          "title": "Preset coordinate calculation",
+          "lineRange": [
+            171,
+            230
+          ],
+          "explanation": "Maps position names (English and Arabic synonyms) to pixel coordinates using screen size and margins, with a 4-column grid offset so several icons do not overlap. Results are clamped to stay on screen and unknown names default to center.",
+          "tourOrder": 13
+        },
+        {
+          "title": "position_desktop_icon",
+          "lineRange": [
+            233,
+            358
+          ],
+          "explanation": "The public entry point. It resolves the target through a cascade of matching strategies: exact name, name without extension, substring, then fuzzy difflib match with a 0.60 threshold, or 'all'. It moves each icon with LVM_SETITEMPOSITION (packing x/y into an LPARAM), forces a repaint, and returns a structured result dict with old and new coordinates or a helpful error listing available icons.",
+          "tourOrder": 13
+        }
+      ]
+    },
+    "src/services/omniroute_manager.py": {
+      "overview": "DEAD CODE. OmniRouteManager once launched and supervised a local OmniRoute proxy on localhost:20128. Since the Claude endpoint is now pinned to api.anthropic.com (audit S2), nothing in the official runtime needs it; it is only still imported by the services barrel and the legacy PySide6 app.",
+      "sections": [
+        {
+          "title": "Class setup and health check",
+          "lineRange": [
+            1,
+            45
+          ],
+          "explanation": "Defines the default URL, port and polling constants, and is_running, which probes GET /v1/models and treats any network error as 'not running'.",
+          "tourOrder": 13
+        },
+        {
+          "title": "Spawn and poll",
+          "lineRange": [
+            47,
+            89
+          ],
+          "explanation": "start_if_needed returns early if a server already responds, otherwise resolves the executable with shutil.which and starts it with a list of args (no shell=True, matching S7) and CREATE_NO_WINDOW. It then polls up to 8 seconds and stops the process on timeout.",
+          "tourOrder": 13
+        },
+        {
+          "title": "Stop and ownership",
+          "lineRange": [
+            91,
+            110
+          ],
+          "explanation": "stop terminates only a process this manager spawned, escalating to kill after 2 seconds. Note the bare `pass` on OSError, which goes against the project's no-silent-except rule. spawned_by_us exposes ownership.",
+          "tourOrder": 13
+        }
+      ]
+    },
+    "src/services/__init__.py": {
+      "overview": "Barrel module for the services package. It re-exports the database wrapper, AI client types, voice, Telegram and desktop-icon helpers, and the dead OmniRouteManager so callers can import from src.services. Because it imports everything eagerly, importing any service pulls in all of them (including legacy QThread wrappers).",
+      "sections": [
+        {
+          "title": "Eager re-exports",
+          "lineRange": [
+            1,
+            22
+          ],
+          "explanation": "Each import brings a service symbol into the package namespace. This includes the legacy SpeechRecognitionWorker and TelegramRemoteWorker QThread wrappers, which is why PySide6 is still bundled by the build.",
+          "tourOrder": 13
+        },
+        {
+          "title": "__all__ list",
+          "lineRange": [
+            24,
+            46
+          ],
+          "explanation": "Declares the public surface so `from src.services import *` and tooling see exactly these names.",
+          "tourOrder": 13
+        }
+      ]
+    },
+    "requirements.txt": {
+      "overview": "Python dependency list for Altron, grouped loosely by function: Qt for the legacy UI, voice stack, Windows automation, Flask for the HUD, and media/networking helpers. It is what a developer installs before running main.py or build_exe.py.",
+      "sections": [
+        {
+          "title": "GUI, config and system libs",
+          "lineRange": [
+            1,
+            3
+          ],
+          "explanation": "PySide6 is only needed by the deprecated capsule UI and legacy QThread wrappers. python-dotenv and psutil support configuration and system queries.",
+          "tourOrder": 14
+        },
+        {
+          "title": "Voice and Windows automation",
+          "lineRange": [
+            4,
+            12
+          ],
+          "explanation": "pyttsx3, edge-tts, pygame, SpeechRecognition, PyAudio cover TTS and audio, while pywin32 and comtypes are restricted to win32 using environment markers. yt-dlp and youtube-transcript-api support media tools.",
+          "tourOrder": 14
+        },
+        {
+          "title": "HUD, imaging, STT and VAD",
+          "lineRange": [
+            13,
+            22
+          ],
+          "explanation": "Flask serves the HUD, requests handles HTTP, Pillow and pyautogui provide screen capture/control, and sounddevice with faster-whisper does local speech-to-text. webrtcvad is split by platform: the prebuilt webrtcvad-wheels on Windows (still imported as webrtcvad) and the original package elsewhere.",
+          "tourOrder": 14
+        }
+      ]
+    },
+    "pytest.ini": {
+      "overview": "Pytest configuration that limits collection and disables the cache. It keeps the legacy manual GUI scripts out of test runs and avoids writing .pytest_cache into the OneDrive-synced folder.",
+      "sections": [
+        {
+          "title": "Collection and cache settings",
+          "lineRange": [
+            1,
+            7
+          ],
+          "explanation": "testpaths restricts collection to tests/ and test_agent.py, because the root test_app.py, test_chat_ui.py and similar files are manual PySide6 scripts. addopts passes `-p no:cacheprovider` so no cache directory is created.",
+          "tourOrder": 14
+        }
+      ]
+    },
+    "build_exe.py": {
+      "overview": "PyInstaller packaging script that bundles the official runtime (main.py plus the Flask HUD and ui/ assets) into an AIDesktopAssistant executable. It supports onedir (default) and --onefile, and is built as a console app so logs and Ctrl+C work.",
+      "sections": [
+        {
+          "title": "Docstring and setup",
+          "lineRange": [
+            1,
+            22
+          ],
+          "explanation": "Explains the bundle contents and usage, and configures simple logging for the build output instead of print.",
+          "tourOrder": 14
+        },
+        {
+          "title": "Hidden imports",
+          "lineRange": [
+            24,
+            62
+          ],
+          "explanation": "PyInstaller misses lazy and driver-style imports, so modules like ui_server, the new agent/config/service modules, win32 packages, pyttsx3 drivers and audio libraries are listed explicitly. PySide6 QtCore/QtGui are still included because legacy QThread wrappers import them at module level.",
+          "tourOrder": 14
+        },
+        {
+          "title": "Collect and exclude lists",
+          "lineRange": [
+            64,
+            79
+          ],
+          "explanation": "faster_whisper is fully collected, but ctranslate2 only gets binaries and data, since --collect-all would pull converters that import torch and add gigabytes. EXCLUDES keeps tests, PyInstaller itself and heavy ML stacks out.",
+          "tourOrder": 14
+        },
+        {
+          "title": "build() preparation",
+          "lineRange": [
+            82,
+            114
+          ],
+          "explanation": "Checks that the HUD assets (index.html, app.js, style.css) exist, then assembles the PyInstaller argument list, including --add-data so ui_server finds <bundle>/ui next to its module.",
+          "tourOrder": 14
+        },
+        {
+          "title": "Run and verify",
+          "lineRange": [
+            115,
+            147
+          ],
+          "explanation": "Appends hidden-import, collect and exclude flags, copies .env.example next to the exe (where resolve_env_path looks for .env), runs PyInstaller, and verifies the executable exists, reporting its size. The script exits 0 or 1 accordingly.",
+          "tourOrder": 14
+        }
+      ]
+    },
+    "src/app.py": {
+      "overview": "LEGACY, deprecated PySide6 application entry point, not the official runtime (use main.py). Application wires Settings, the database, OmniRoute auto-start, AIClient, AgentExecutor, the tray icon and the chat window inside a Qt event loop. It is kept only so old imports keep working.",
+      "sections": [
+        {
+          "title": "Imports and Application state",
+          "lineRange": [
+            1,
+            28
+          ],
+          "explanation": "Imports Qt, the services barrel and agent executor, and declares all components as Optional attributes populated later by initialize().",
+          "tourOrder": 15
+        },
+        {
+          "title": "initialize",
+          "lineRange": [
+            30,
+            79
+          ],
+          "explanation": "Creates the QApplication (quit-on-last-window-closed disabled for tray use), opens the SQLite Database, optionally starts OmniRoute, builds the AI client from legacy base_url settings, then the executor, tray and chat window, connecting Qt signals to handlers. This base_url flow conflicts with the current Claude-only hard-coded endpoint.",
+          "tourOrder": 15
+        },
+        {
+          "title": "run and shutdown",
+          "lineRange": [
+            81,
+            109
+          ],
+          "explanation": "run enters the Qt loop. shutdown cancels running work, closes windows, hides the tray, stops OmniRoute if spawned, and closes the database.",
+          "tourOrder": 15
+        },
+        {
+          "title": "Signal handlers",
+          "lineRange": [
+            111,
+            160
+          ],
+          "explanation": "Handlers for exit, settings (lazily created dialog), applying saved settings by poking private AIClient attributes, tray About balloons, and toggling the chat window visibility.",
+          "tourOrder": 15
+        },
+        {
+          "title": "main entry",
+          "lineRange": [
+            163,
+            175
+          ],
+          "explanation": "main builds the Application, runs it and then calls shutdown. The __main__ guard makes `python src/app.py` possible, though this is unsupported now.",
+          "tourOrder": 15
+        }
+      ]
+    },
+    "src/ui/system_tray.py": {
+      "overview": "LEGACY (deprecated PySide6 UI) system tray icon. SystemTrayIcon draws a simple blue 'AI' icon and offers a menu (Open Chat, About, Settings, Exit), translating clicks into Qt signals that the legacy Application handles.",
+      "sections": [
+        {
+          "title": "Signals and lifecycle",
+          "lineRange": [
+            1,
+            26
+          ],
+          "explanation": "Declares four signals (exit, settings, about, chat) so the tray stays decoupled from the app logic, and initialize creates the icon and menu then shows it.",
+          "tourOrder": 15
+        },
+        {
+          "title": "Icon and activation",
+          "lineRange": [
+            28,
+            46
+          ],
+          "explanation": "Builds a 64x64 pixmap in code, so no icon asset is needed, and emits chat_requested on a single or double click.",
+          "tourOrder": 15
+        },
+        {
+          "title": "Menu and notifications",
+          "lineRange": [
+            48,
+            81
+          ],
+          "explanation": "Creates the context menu whose actions emit the matching signals, plus helpers to show a balloon message and hide the icon.",
+          "tourOrder": 15
+        }
+      ]
+    },
+    "memory.py": {
+      "overview": "Root-level shim that only re-exports ConversationMemory from src.agent.memory, as stated in the project guide. It keeps older `import memory` paths working while the real implementation lives under src/agent.",
+      "sections": [
+        {
+          "title": "Re-export",
+          "lineRange": [
+            1,
+            4
+          ],
+          "explanation": "Imports ConversationMemory from the agent package and publishes it through __all__. No logic lives here.",
+          "tourOrder": 15
+        }
+      ]
+    },
+    "src/ui/chat_window.py": {
+      "overview": "LEGACY (deprecated PySide6 UI). A 1261-line floating 'dynamic island' chat window that collapses into a notch, runs always-on voice, accepts Telegram commands, and renders agent steps and permission cards. It bridges background executor callbacks to the GUI thread using Qt signals. The official runtime replaced it with main.py and the Flask HUD.",
+      "sections": [
+        {
+          "title": "Imports and AgentBridge",
+          "lineRange": [
+            1,
+            30
+          ],
+          "explanation": "Pulls in Qt, the executor types, TTS, and the QThread voice/Telegram worker wrappers. AgentBridge is a QObject with signals so executor callbacks from worker threads are delivered safely on the GUI thread.",
+          "tourOrder": 15
+        },
+        {
+          "title": "Message and step bubbles",
+          "lineRange": [
+            32,
+            158
+          ],
+          "explanation": "MessageBubble renders user/assistant text, and StepBubble shows each agent tool step as it arrives.",
+          "tourOrder": 15
+        },
+        {
+          "title": "PermissionCard",
+          "lineRange": [
+            160,
+            301
+          ],
+          "explanation": "A card asking the user to approve, allow for the session, or reject a tool call. Buttons call into the executor and disable themselves after a choice. This is the legacy in-window permission gate.",
+          "tourOrder": 15
+        },
+        {
+          "title": "ChatWindow geometry and notch",
+          "lineRange": [
+            303,
+            648
+          ],
+          "explanation": "Defines collapsed and expanded sizes and a QPropertyAnimation-driven notch. It custom-paints the window, polls the foreground app through ctypes to adapt, and avoids collapsing while a permission is pending.",
+          "tourOrder": 15
+        },
+        {
+          "title": "UI construction and hover",
+          "lineRange": [
+            649,
+            899
+          ],
+          "explanation": "_setup_ui builds the input field, status labels and scroll area, followed by enter/leave handlers and timers that expand and auto-collapse on hover.",
+          "tourOrder": 15
+        },
+        {
+          "title": "Voice and TTS handlers",
+          "lineRange": [
+            900,
+            1001
+          ],
+          "explanation": "Starts always-on voice via SpeechRecognitionWorker, handles wake word timeouts, recognized text, errors, and TTS start/finish notch status.",
+          "tourOrder": 15
+        },
+        {
+          "title": "Chat widgets and command dispatch",
+          "lineRange": [
+            1002,
+            1122
+          ],
+          "explanation": "Helper methods add bubbles and cards. _execute_command ignores input unless the executor is IDLE, marks source (text, voice, Telegram), shows a bubble and calls executor.process with callbacks that emit bridge signals.",
+          "tourOrder": 15
+        },
+        {
+          "title": "Response handling and shutdown",
+          "lineRange": [
+            1125,
+            1261
+          ],
+          "explanation": "Handlers process steps, permission requests, final responses (including replying to Telegram or speaking via TTS) and errors, then update model display and settings, and implement _permanent_quit and closeEvent.",
+          "tourOrder": 15
+        }
+      ]
+    },
+    "src/ui/settings_window.py": {
+      "overview": "LEGACY (deprecated PySide6 UI) settings dialog with gateway, permissions, system and audit tabs. It edits base_url, key and model, stores tool permissions in SQLite and toggles Windows startup via the registry. Its base_url and .env-writing behaviour predates the current security rules (S2 rejects base_url; .env is quoted on write).",
+      "sections": [
+        {
+          "title": "Imports and Windows startup helpers",
+          "lineRange": [
+            1,
+            65
+          ],
+          "explanation": "is_windows_startup_enabled and set_windows_startup read and write the HKCU Run registry key, pointing at the frozen exe or at app.py. set_windows_startup swallows all exceptions and returns False.",
+          "tourOrder": 15
+        },
+        {
+          "title": "Dialog setup and gateway tab",
+          "lineRange": [
+            67,
+            288
+          ],
+          "explanation": "SettingsWindow emits settings_saved(dict). It builds tabs and the gateway tab with endpoint, key, model, token and timeout inputs and a connection test.",
+          "tourOrder": 15
+        },
+        {
+          "title": "Permissions tab",
+          "lineRange": [
+            289,
+            407
+          ],
+          "explanation": "Populates a table of registered tools, each with a permission mode combo box and a reset-to-defaults action, drawn from create_default_registry.",
+          "tourOrder": 15
+        },
+        {
+          "title": "System and audit tabs",
+          "lineRange": [
+            408,
+            584
+          ],
+          "explanation": "System tab holds startup, OmniRoute and voice toggles. The audit tab loads and clears audit log records from the database.",
+          "tourOrder": 15
+        },
+        {
+          "title": "Load, test and clear",
+          "lineRange": [
+            585,
+            651
+          ],
+          "explanation": "Loads current values into widgets, tests the connection through AIClient, and clears conversation history.",
+          "tourOrder": 15
+        },
+        {
+          "title": "Saving settings",
+          "lineRange": [
+            652,
+            709
+          ],
+          "explanation": "Updates in-memory settings, rewrites the .env file as unquoted KEY=value lines (unlike the current quoted-write rule), saves tool permissions and flags to SQLite, applies startup, emits settings_saved and closes.",
+          "tourOrder": 15
+        }
+      ]
+    },
+    "src/config/__init__.py": {
+      "overview": "Config package barrel that re-exports the Settings class from src.config.settings.",
       "sections": []
     },
     "src/storage/__init__.py": {
-      "overview": "Storage package exports exposing database models and conversation repositories.",
+      "overview": "Storage package barrel that re-exports the SQLite Database class.",
       "sections": []
-    },
-    "src/storage/db.py": {
-      "overview": "Database class in db.py (methods: __init__, initialize, _create_tables, _migrate).",
-      "sections": [],
-      "tourOrder": 8
     },
     "src/ui/__init__.py": {
-      "overview": "UI module exports exposing capsule chat window and system tray components.",
+      "overview": "Barrel for the legacy PySide6 UI package, re-exporting SystemTrayIcon, ChatWindow and SettingsWindow.",
       "sections": []
     },
-    "src/ui/chat_window.py": {
-      "overview": "ChatWindow class in chat_window.py (methods: collapsed_width, collapsed_height, collapsed_y, __init__).",
-      "sections": [
-        {
-          "title": "Dynamic Island Capsule Layout",
-          "lineRange": [
-            200,
-            450
-          ],
-          "explanation": "Draws borderless, translucent floating capsule widget with smooth expansion animations and mouse drag handlers."
-        },
-        {
-          "title": "Message & Step Bubble Rendering",
-          "lineRange": [
-            451,
-            800
-          ],
-          "explanation": "Renders user prompts, markdown AI streaming text, tool execution step cards, and interactive permission prompts."
-        }
-      ],
-      "tourOrder": 3
-    },
-    "src/ui/system_tray.py": {
-      "overview": "SystemTrayIcon class in system_tray.py (methods: __init__, initialize, _create_icon, _on_activated).",
-      "sections": [],
-      "tourOrder": 3
-    },
-    "memory.py": {
-      "overview": "Compatibility bridge module redirecting top-level memory imports to src/agent/memory.py.",
-      "sections": []
-    },
-    "src/agent/__init__.py": {
-      "overview": "Agent package exports exposing AgentExecutor, AgentMemory, and permission classes.",
-      "sections": []
-    },
-    "src/agent/executor.py": {
-      "overview": "Function sanitize_final_reply(content, user_message) implementing core logic in executor.py.",
-      "sections": [
-        {
-          "title": "ReAct Reasoning Loop",
-          "lineRange": [
-            100,
-            450
-          ],
-          "explanation": "Manages conversation turns, formats system prompts with memory, and queries the AI model for thoughts and tool calls."
-        },
-        {
-          "title": "Tool Dispatch & Gatekeeper",
-          "lineRange": [
-            451,
-            850
-          ],
-          "explanation": "Inspects proposed tool calls, verifies security rules against PermissionGate, and executes approved automation actions."
-        }
-      ],
-      "tourOrder": 4
-    },
-    "src/agent/memory.py": {
-      "overview": "ConversationMemory class in memory.py (methods: __init__, _ensure_file, _read_messages, _write_messages).",
-      "sections": [],
-      "tourOrder": 4
-    },
-    "src/agent/permissions.py": {
-      "overview": "PermissionGate class in permissions.py (methods: __init__, is_safe, is_dangerous, requires_permission).",
-      "sections": [],
-      "tourOrder": 4
-    },
-    "src/agent/tools.py": {
-      "overview": "Function create_default_registry() implementing core logic in tools.py.",
-      "sections": [],
-      "tourOrder": 5
-    },
-    "src/config/__init__.py": {
-      "overview": "Configuration module initializer exporting global settings and environment helpers.",
-      "sections": []
-    },
-    "src/config/settings.py": {
-      "overview": "Function save_ai_config(provider, model, api_key) implementing core logic in settings.py.",
-      "sections": [],
-      "tourOrder": 8
-    },
-    "src/services/telegram_service.py": {
-      "overview": "Function send_telegram_photo_async(image_path, caption, token) implementing core logic in telegram_service.py.",
-      "sections": [
-        {
-          "title": "Long-Polling Telegram Worker",
-          "lineRange": [
-            30,
-            180
-          ],
-          "explanation": "Connects to Telegram Bot API, polls for incoming authorized chat messages, and converts them into agent commands."
-        },
-        {
-          "title": "Document & Message Dispatch",
-          "lineRange": [
-            181,
-            330
-          ],
-          "explanation": "Sends formatted Markdown replies and generated files (PDFs, screenshots) back to the user's Telegram chat."
-        }
-      ],
-      "tourOrder": 7
-    },
-    "src/ui/settings_window.py": {
-      "overview": "Function set_windows_startup(enabled) implementing core logic in settings_window.py.",
-      "sections": []
-    },
-    "main.py": {
-      "overview": "Function main() implementing core logic in main.py.",
-      "sections": [
-        {
-          "title": "Subsystem Initialization & Setup",
-          "lineRange": [
-            39,
-            140
-          ],
-          "explanation": "Initializes the Qt instance, database, HUD status, local OmniRoute proxy, and starts the background HUD server thread."
-        },
-        {
-          "title": "Voice Recognition & Telegram Listeners",
-          "lineRange": [
-            141,
-            275
-          ],
-          "explanation": "Spawns concurrent worker threads for ambient speech wake-word detection and remote Telegram command polling."
-        },
-        {
-          "title": "Graceful Teardown",
-          "lineRange": [
-            276,
-            311
-          ],
-          "explanation": "Blocks on shutdown_event and coordinates safe termination of active voice workers, Telegram polling, and agent executors."
-        }
-      ],
-      "tourOrder": 2
-    },
-    "src/services/hud_status.py": {
-      "overview": "Function init_hud_status() implementing core logic in hud_status.py.",
-      "sections": [],
-      "tourOrder": 6
-    },
-    "src/services/voice_service.py": {
-      "overview": "Function parse_wake_word(text) implementing core logic in voice_service.py.",
-      "sections": [
-        {
-          "title": "Wake-Word Detection",
-          "lineRange": [
-            50,
-            250
-          ],
-          "explanation": "Continuous audio recording using SpeechRecognition to listen for 'Altron' or '\u0623\u0644\u062a\u0631\u0648\u0646'."
-        },
-        {
-          "title": "TTS Speech Synthesis",
-          "lineRange": [
-            251,
-            550
-          ],
-          "explanation": "Streams text to Edge-TTS or SAPI while pausing input listening to eliminate microphone feedback loops."
-        }
-      ],
-      "tourOrder": 6
-    },
-    "ui_server.py": {
-      "overview": "Function start_hud_server(host, port, open_browser) implementing core logic in ui_server.py.",
-      "sections": [],
-      "tourOrder": 7
-    },
-    "src/services/__init__.py": {
-      "overview": "Services module initializer exposing AIClient, VoiceService, TelegramWorker, and automation managers.",
-      "sections": []
-    },
-    "src/services/ai_client.py": {
-      "overview": "Function _clean_schema_for_gemini(val) implementing core logic in ai_client.py.",
-      "sections": []
-    },
-    "src/services/desktop_icon_service.py": {
-      "overview": "Function position_desktop_icon(target, position, x) implementing core logic in desktop_icon_service.py.",
-      "sections": [],
-      "tourOrder": 5
-    },
-    "src/services/omniroute_manager.py": {
-      "overview": "OmniRouteManager class in omniroute_manager.py (methods: __init__, is_running, start_if_needed, stop).",
-      "sections": []
-    },
-    ".env.example": {
-      "overview": "Template configuration file defining required environment variables and API keys for Altron services.",
-      "sections": [],
-      "tourOrder": 8
-    },
-    "CLAUDE.md": {
-      "overview": "Project instructions and architectural guidelines for AI coding assistants working in the Altron repository.",
-      "sections": [],
-      "tourOrder": 1
-    },
-    "README.md": {
-      "overview": "Comprehensive project documentation detailing features, setup instructions, architecture, and Telegram bot configuration.",
-      "sections": [],
-      "tourOrder": 1
-    },
-    "memory.json": {
-      "overview": "Persistent JSON storage capturing long-term agent memory facts and user preferences.",
-      "sections": []
-    },
-    "requirements.txt": {
-      "overview": "Python package dependency manifest listing PySide6, Flask, Edge-TTS, and Windows automation libraries.",
-      "sections": [],
-      "tourOrder": 1
-    },
-    "status.json": {
-      "overview": "Runtime status cache capturing current agent activity and voice synthesis state.",
-      "sections": []
-    },
-    "build_exe.py": {
-      "overview": "Function build() implementing core logic in build_exe.py.",
-      "sections": []
-    },
-    "prompts/system_prompt.txt": {
-      "overview": "Core system prompt defining Altron personality, capabilities, tool usage instructions, and safety guardrails.",
+    ".gitattributes": {
+      "overview": "Git attributes file normalizing line endings for all text files via `* text=auto`.",
       "sections": []
     },
     "src/__init__.py": {
-      "overview": "Top-level source package root initializer.",
-      "sections": []
-    },
-    "ui/app.js": {
-      "overview": "Frontend JavaScript application powering HUD status updates, sound wave animations, and real-time polling.",
-      "sections": [],
-      "tourOrder": 7
-    },
-    "ui/index.html": {
-      "overview": "HTML template for the floating HUD status dashboard displaying system status, microphone wave, and activity log.",
-      "sections": []
-    },
-    "ui/style.css": {
-      "overview": "Dark modern glassmorphism stylesheet for the HUD dashboard with custom keyframe animations and status indicators.",
+      "overview": "Empty package marker for the top-level src package, containing only a docstring.",
       "sections": []
     }
   }
