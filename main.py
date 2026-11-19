@@ -145,6 +145,7 @@ def main() -> None:
         if not clean_cmd:
             return
         logger.info("HUD command received: %r", clean_cmd)
+        tts_manager.stop()  # a new command interrupts any speech still playing
         update_hud_status(state="Thinking", log_entry=f"User: {clean_cmd}")
 
         def _on_complete(res):
@@ -152,13 +153,16 @@ def main() -> None:
                 logger.info("Altron: %s", res.content)
                 update_hud_status(state="Idle", log_entry=f"Altron: {res.content}")
                 send_telegram_message_async(res.content)
-                if tts_manager.is_enabled and not tts_manager.is_muted:
+                # Sentences were already queued for speech while streaming.
+                if (tts_manager.is_enabled and not tts_manager.is_muted
+                        and not getattr(res, "streamed_speech", False)):
                     tts_manager.speak(res.content)
             else:
                 update_hud_status(state="Idle")
 
         executor.process(
             user_message=clean_cmd,
+            on_sentence=tts_manager.enqueue,
             on_step=lambda step: update_hud_status(
                 log_entry=f"Step: {step.content}"
             ) if getattr(step, "content", None) else None,
@@ -212,6 +216,7 @@ def main() -> None:
                     stt_dur = getattr(worker, "last_stt_duration", 0.0)
 
                     logger.info("Voice recognized: %r", clean_text)
+                    tts_manager.stop()
                     update_hud_status(state="Thinking", log_entry=f"Voice: {clean_text}")
 
                     t_agent_start = time.perf_counter()
@@ -221,6 +226,7 @@ def main() -> None:
                     try:
                         future = executor.process(
                             user_message=query,
+                            on_sentence=tts_manager.enqueue,
                             on_step=lambda step: update_hud_status(
                                 log_entry=f"Step: {step.content}"
                             ) if getattr(step, "content", None) else None,
@@ -235,7 +241,8 @@ def main() -> None:
                             send_telegram_message_async(response.content)
 
                             t_tts_start = time.perf_counter()
-                            tts_manager.speak(response.content)
+                            if not response.streamed_speech:  # else already spoken sentence by sentence
+                                tts_manager.speak(response.content)
                             tts_init_time = time.perf_counter() - t_tts_start
                     except Exception as proc_err:
                         agent_time = time.perf_counter() - t_agent_start

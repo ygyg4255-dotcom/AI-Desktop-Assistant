@@ -4,7 +4,8 @@
 Altron is an autonomous Windows desktop assistant: a headless Python orchestrator with a
 local Flask "radar" HUD in the browser, always-on voice (wake word, VAD, faster-whisper STT,
 TTS), desktop/file/app automation tools behind a permission gate, and remote control plus
-approvals over Telegram. It talks only to the Anthropic Claude API.
+approvals over Telegram. Chat and tools talk only to the Anthropic Claude API; an optional `GROQ_API_KEY` sends
+recorded speech (STT only) to Groq Whisper.
 
 ## Architecture (official runtime path)
 - Launch: `python main.py`. This is the only supported entry point.
@@ -18,7 +19,9 @@ approvals over Telegram. It talks only to the Anthropic Claude API.
   `permissions.py` (tiers), `approvals.py` (out-of-band approvals), `memory.py`
   (conversation memory). Root `memory.py` only re-exports `src.agent.memory`.
 - `src/services/`: `ai_client.py` (Claude Messages API), `voice_service.py`
-  (`SpeechRecognitionListener`, `TTSManager`), `telegram_service.py`
+  (`SpeechRecognitionListener`, queue-based `TTSManager`), `groq_stt.py` (optional Groq
+  Whisper with local faster-whisper fallback), `sentence_chunker.py` (streamed text ->
+  sentences for TTS), `telegram_service.py`
   (`TelegramRemoteListener`, `TelegramApprovalBridge`, send helpers), `hud_status.py`
   (in-memory HUD state, flushed atomically to `status.json`), `signals.py` (Qt-free
   `CallbackSignal`), plus desktop icon and OmniRoute helpers.
@@ -62,7 +65,9 @@ the OneDrive-synced project folder. It holds `memory.json`, `status.json`,
   `127.0.0.1:<port>`/`localhost:<port>`, and any Origin must match. No CORS headers.
 - **S2 Claude-only, JSON-only:** the API endpoint is hard-coded to `api.anthropic.com`, and
   `base_url`/`provider` are rejected. State-changing endpoints require
-  `Content-Type: application/json`. Config values cannot contain line breaks.
+  `Content-Type: application/json`. Config values cannot contain line breaks. The only
+  other host is `api.groq.com`, hard-coded in `groq_stt.py` and used solely for audio
+  transcription (never chat, never configurable).
 - **S3 approval cannot be forged:** `Tool.run` strips every `_`-prefixed key from model input.
   Approval arrives only as the executor's `approved=` kwarg.
 - **S4 tiers:** SAFE (auto), CONDITIONAL (per-call `needs_approval_*` check, no blanket

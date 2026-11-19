@@ -2,6 +2,7 @@
 import asyncio
 import collections
 import io
+import json
 import os
 import queue
 import re
@@ -81,11 +82,15 @@ def parse_wake_word(text: str) -> tuple[bool, str]:
 
 
 class TTSManager(QObject):
-    """Thread-safe Text-to-Speech manager.
+    """Thread-safe, non-blocking Text-to-Speech manager.
 
-    Spawns a fresh worker thread for every utterance with CoInitialize and
-    fresh Piper TTS / SAPI.SpVoice / pyttsx3 / PowerShell fallbacks,
-    guaranteeing that speech_finished always fires across all sequential tasks.
+    Sentences go into a ``queue.Queue`` drained by one dedicated worker thread,
+    so ``enqueue``/``speak`` return immediately and queued sentences play back
+    to back. ``speak`` interrupts whatever is playing first; ``enqueue`` appends
+    (used for streamed model text). Engines, in order: Piper (local, if
+    installed and ``PIPER_MODEL_PATH`` is set), edge-tts, SAPI, pyttsx3,
+    PowerShell System.Speech. The mic echo gate stays set while the queue has
+    pending sentences; ``speech_finished`` fires once the queue drains.
     """
 
     speech_started = Signal(str)
@@ -97,9 +102,22 @@ class TTSManager(QObject):
         self._enabled = enabled
         self._muted = False
         self._lock = threading.Lock()
-        self._stop_requested = False
         self._current_ps_proc: Optional[subprocess.Popen] = None
         self._active_sapi_voice = None
+        self._queue: "queue.Queue[tuple]" = queue.Queue()
+        self._worker: Optional[threading.Thread] = None
+        # stop() bumps _gen; each queued item remembers the generation it was
+        # queued in, so anything older than the current generation is stale.
+        self._gen = 0
+        self._item_gen = 0
+        self._piper_voice = None
+        self._piper_failed = False
+        self._piper_rate = 22050
+
+    @property
+    def _stop_requested(self) -> bool:
+        """True when the utterance being spoken was interrupted by stop()."""
+        return self._item_gen != self._gen
 
     @property
     def is_enabled(self) -> bool:
@@ -121,45 +139,59 @@ class TTSManager(QObject):
         if self._muted:
             self.stop()
 
-    def speak(self, text: str) -> None:
-        """Enqueue/speak cleaned text on a fresh worker thread."""
-        if not self._enabled or self._muted or not text:
-            try:
-                self.speech_finished.emit()
-            except Exception:
-                pass
-            return
-
-        cleaned = clean_text_for_speech(text)
+    def _prepare(self, text: str) -> str:
+        """Return speakable text, or "" after emitting speech_finished when nothing will play."""
+        cleaned = clean_text_for_speech(text) if (self._enabled and not self._muted and text) else ""
         if not cleaned:
             try:
                 self.speech_finished.emit()
-            except Exception:
-                pass
+            except Exception as err:
+                logger.debug("speech_finished emit failed: %s", err)
+        return cleaned
+
+    def speak(self, text: str) -> None:
+        """Interrupt anything playing, then speak ``text`` (non-blocking)."""
+        cleaned = self._prepare(text)
+        if not cleaned:
             return
-
-        # Stop any active utterance before starting the new one
         self.stop()
-        self._stop_requested = False
+        self._put(cleaned)
 
-        thread = threading.Thread(
-            target=self._speak_worker,
-            args=(cleaned,),
-            daemon=True
-        )
-        thread.start()
+    def enqueue(self, text: str) -> None:
+        """Append ``text`` to the playback queue without interrupting (non-blocking)."""
+        cleaned = self._prepare(text)
+        if cleaned:
+            self._put(cleaned)
+
+    def _put(self, cleaned: str) -> None:
+        with self._lock:
+            self._queue.put((self._gen, cleaned))
+            if self._worker is None or not self._worker.is_alive():
+                self._worker = threading.Thread(target=self._worker_loop, name="AltronTTSWorker", daemon=True)
+                self._worker.start()
 
     def stop(self) -> None:
         """Immediately stop speaking and discard pending speech."""
-        self._stop_requested = True
+        with self._lock:
+            self._gen += 1
+            while True:
+                try:
+                    self._queue.get_nowait()
+                except queue.Empty:
+                    break
         is_speaking_event.clear()
         update_hud_status(state="Idle")
         try:
             import pygame
             if pygame.mixer.get_init():
                 pygame.mixer.music.stop()
-        except Exception:
-            pass
+        except Exception as err:
+            logger.debug("pygame stop failed: %s", err)
+        try:
+            import sounddevice as sd
+            sd.stop()
+        except Exception as err:
+            logger.debug("sounddevice stop failed: %s", err)
 
         with self._lock:
             if self._active_sapi_voice is not None:
@@ -220,186 +252,229 @@ class TTSManager(QObject):
                 return False
 
             return True
-        except Exception:
+        except Exception as err:
+            logger.debug("edge-tts failed, falling back: %s", err)
             return False
 
-    def _speak_piper(self, text: str) -> bool:
-        """Attempt synthesis using Piper TTS if available."""
+    # -- Piper (local, fast) ------------------------------------------------
+    def _piper_model_path(self) -> str:
+        path = get_config_value("PIPER_MODEL_PATH")
+        return path if path and os.path.exists(path) else ""
+
+    def _load_piper_voice(self, model_path: str):
+        """Keep the Piper voice loaded between sentences (python ``piper-tts`` package)."""
+        if self._piper_voice is None and not self._piper_failed:
+            try:
+                from piper import PiperVoice
+                self._piper_voice = PiperVoice.load(model_path)
+            except Exception as err:
+                self._piper_failed = True
+                logger.debug("piper python package unavailable, using CLI if present: %s", err)
+        return self._piper_voice
+
+    def _piper_synthesize_lib(self, voice, text: str):
+        """Return (pcm_int16_bytes, sample_rate) across piper-tts 1.2 and 1.3+ APIs."""
+        if hasattr(voice, "synthesize_stream_raw"):
+            return b"".join(voice.synthesize_stream_raw(text)), int(voice.config.sample_rate)
+        chunks = list(voice.synthesize(text))
+        return b"".join(c.audio_int16_bytes for c in chunks), int(chunks[0].sample_rate)
+
+    def _piper_synthesize_cli(self, model_path: str, text: str):
         piper_exe = shutil.which("piper") or shutil.which("piper.exe")
         if not piper_exe:
-            return False
-        model_path = os.getenv("PIPER_MODEL_PATH", "")
-        if not model_path or not os.path.exists(model_path):
-            return False
+            return b"", self._piper_rate
+        rate = self._piper_rate
         try:
-            proc = subprocess.Popen(
-                [piper_exe, "--model", model_path, "--output-raw"],
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL
-            )
-            with self._lock:
-                self._current_ps_proc = proc
+            with open(model_path + ".json", encoding="utf-8") as fh:
+                rate = int(json.load(fh).get("audio", {}).get("sample_rate", rate))
+        except Exception as err:
+            logger.debug("piper model config unreadable, assuming %s Hz: %s", rate, err)
+        proc = subprocess.Popen(
+            [piper_exe, "--model", model_path, "--output-raw"],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+        )
+        with self._lock:
+            self._current_ps_proc = proc
+        try:
             raw_audio, _ = proc.communicate(input=text.encode("utf-8"), timeout=15.0)
-            if proc.returncode == 0 and raw_audio:
-                try:
-                    import sounddevice as sd
-                    samples = np.frombuffer(raw_audio, dtype=np.int16)
-                    sd.play(samples, samplerate=22050)
-                    sd.wait()
-                    return True
-                except Exception:
-                    pass
-        except Exception:
-            pass
         finally:
             with self._lock:
                 self._current_ps_proc = None
-        return False
+        return (raw_audio if proc.returncode == 0 else b""), rate
 
-    def _speak_worker(self, text: str) -> None:
-        """Per-utterance worker running in a fresh thread with COM isolation."""
+    def _speak_piper(self, text: str) -> bool:
+        """Speak with Piper when installed and PIPER_MODEL_PATH points at a voice; else False."""
+        model_path = self._piper_model_path()
+        if not model_path:
+            return False
         try:
-            # Echo prevention: set gate so mic listener pauses before playback begins
-            is_speaking_event.set()
-            update_hud_status(state="Speaking")
+            voice = self._load_piper_voice(model_path)
+            if voice is not None:
+                pcm, rate = self._piper_synthesize_lib(voice, text)
+            else:
+                pcm, rate = self._piper_synthesize_cli(model_path, text)
+            if not pcm or self._stop_requested:
+                return False
+            import sounddevice as sd
+            sd.play(np.frombuffer(pcm, dtype=np.int16), samplerate=rate)
+            sd.wait()
+            return not self._stop_requested
+        except Exception as err:
+            logger.debug("Piper TTS failed, falling back: %s", err)
+            return False
+
+    # -- queue worker -------------------------------------------------------
+    def _worker_loop(self) -> None:
+        """Drain the queue forever on one dedicated thread (sentences play back to back)."""
+        while True:
+            gen, text = self._queue.get()
             try:
-                self.speech_started.emit(text)
-            except Exception:
-                pass
-
-            # 1. Primary Fast Neural Male Voice (edge-tts: en-GB-RyanNeural)
-            if not self._stop_requested:
-                if self._speak_edge_tts(text):
-                    return
-
-            # 2. Piper TTS fallback if configured
-            if not self._stop_requested:
-                if self._speak_piper(text):
-                    return
-
-            co_init = False
-            try:
-                import pythoncom
-                pythoncom.CoInitialize()
-                co_init = True
-            except Exception:
-                try:
-                    import comtypes
-                    comtypes.CoInitialize()
-                except Exception:
-                    pass
-
-            try:
-                if not self._stop_requested:
-                    spoken = False
-
-                    # 3. Windows SAPI.SpVoice fallback with Male Voice Enforcement & Pitch Lowering
+                if gen == self._gen:  # skip sentences queued before a stop()
+                    self._item_gen = gen
+                    # Echo prevention: mic listener pauses while anything is playing/pending
+                    is_speaking_event.set()
+                    update_hud_status(state="Speaking")
                     try:
-                        import win32com.client
-                        speaker = win32com.client.Dispatch("SAPI.SpVoice")
+                        self.speech_started.emit(text)
+                    except Exception as err:
+                        logger.debug("speech_started emit failed: %s", err)
+                    self._speak_one(text)
+            except Exception:
+                logger.exception("TTS worker failed on one sentence")
+            finally:
+                if self._queue.empty():
+                    is_speaking_event.clear()
+                    update_hud_status(state="Idle")
+                    # Always fires when the queue drains so later tasks never deadlock
+                    try:
+                        self.speech_finished.emit()
+                    except Exception as err:
+                        logger.debug("speech_finished emit failed: %s", err)
 
-                        voices = speaker.GetVoices()
-                        male_voice = None
-                        for i in range(voices.Count):
-                            v = voices.Item(i)
-                            desc = v.GetDescription().lower()
-                            gender = v.GetAttribute("Gender").lower() if hasattr(v, "GetAttribute") else ""
-                            # Strictly avoid female voices (Zira, Hazel)
-                            if "zira" in desc or "hazel" in desc or gender == "female":
+    def _speak_one(self, text: str) -> None:
+        """Speak one sentence: Piper -> edge-tts -> system voices."""
+        if not self._stop_requested and self._speak_piper(text):
+            return
+        if not self._stop_requested and self._speak_edge_tts(text):
+            return
+        if not self._stop_requested:
+            self._speak_system_fallbacks(text)
+
+    def _speak_system_fallbacks(self, text: str) -> None:
+        """Windows SAPI, then pyttsx3, then PowerShell System.Speech (male voice enforced)."""
+        co_init = False
+        try:
+            import pythoncom
+            pythoncom.CoInitialize()
+            co_init = True
+        except Exception:
+            try:
+                import comtypes
+                comtypes.CoInitialize()
+            except Exception as err:
+                logger.debug("TTS fallback step failed: %s", err)
+
+        try:
+            if not self._stop_requested:
+                spoken = False
+
+                # 3. Windows SAPI.SpVoice fallback with Male Voice Enforcement & Pitch Lowering
+                try:
+                    import win32com.client
+                    speaker = win32com.client.Dispatch("SAPI.SpVoice")
+
+                    voices = speaker.GetVoices()
+                    male_voice = None
+                    for i in range(voices.Count):
+                        v = voices.Item(i)
+                        desc = v.GetDescription().lower()
+                        gender = v.GetAttribute("Gender").lower() if hasattr(v, "GetAttribute") else ""
+                        # Strictly avoid female voices (Zira, Hazel)
+                        if "zira" in desc or "hazel" in desc or gender == "female":
+                            continue
+                        if any(m in desc for m in ["david", "george", "mark", "james", "male"]) or gender == "male":
+                            male_voice = v
+                            break
+                    if male_voice is not None:
+                        speaker.Voice = male_voice
+
+                    speaker.Rate = -1
+                    with self._lock:
+                        self._active_sapi_voice = speaker
+
+                    escaped_text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                    sapi_xml = f"<pitch middle='-6'>{escaped_text}</pitch>"
+                    try:
+                        # 0 = Synchronous speak
+                        speaker.Speak(sapi_xml, 0)
+                    except Exception:
+                        speaker.Speak(text, 0)
+                    spoken = True
+                except Exception:
+                    spoken = False
+                finally:
+                    with self._lock:
+                        self._active_sapi_voice = None
+
+                # 4. Fresh pyttsx3 fallback with Male Voice Selection
+                if not spoken and not self._stop_requested:
+                    try:
+                        import pyttsx3
+                        engine = pyttsx3.init()
+                        for v in engine.getProperty("voices"):
+                            name_lower = v.name.lower()
+                            if "zira" in name_lower or "hazel" in name_lower:
                                 continue
-                            if any(m in desc for m in ["david", "george", "mark", "james", "male"]) or gender == "male":
-                                male_voice = v
+                            if any(m in name_lower for m in ["david", "george", "mark", "james", "male"]):
+                                engine.setProperty("voice", v.id)
                                 break
-                        if male_voice is not None:
-                            speaker.Voice = male_voice
-
-                        speaker.Rate = -1
-                        with self._lock:
-                            self._active_sapi_voice = speaker
-
-                        escaped_text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-                        sapi_xml = f"<pitch middle='-6'>{escaped_text}</pitch>"
-                        try:
-                            # 0 = Synchronous speak
-                            speaker.Speak(sapi_xml, 0)
-                        except Exception:
-                            speaker.Speak(text, 0)
+                        engine.setProperty("rate", 160)
+                        engine.say(text)
+                        engine.runAndWait()
+                        engine.stop()
                         spoken = True
                     except Exception:
                         spoken = False
-                    finally:
-                        with self._lock:
-                            self._active_sapi_voice = None
 
-                    # 4. Fresh pyttsx3 fallback with Male Voice Selection
-                    if not spoken and not self._stop_requested:
-                        try:
-                            import pyttsx3
-                            engine = pyttsx3.init()
-                            for v in engine.getProperty("voices"):
-                                name_lower = v.name.lower()
-                                if "zira" in name_lower or "hazel" in name_lower:
-                                    continue
-                                if any(m in name_lower for m in ["david", "george", "mark", "james", "male"]):
-                                    engine.setProperty("voice", v.id)
-                                    break
-                            engine.setProperty("rate", 160)
-                            engine.say(text)
-                            engine.runAndWait()
-                            engine.stop()
-                            spoken = True
-                        except Exception:
-                            spoken = False
-
-                    # 5. Subprocess PowerShell System.Speech fallback with Male Filter
-                    if not spoken and not self._stop_requested:
-                        try:
-                            ps_code = (
-                                "[Console]::InputEncoding = [System.Text.Encoding]::UTF8; "
-                                "Add-Type -AssemblyName System.Speech; "
-                                "$synth = New-Object System.Speech.Synthesis.SpeechSynthesizer; "
-                                "$male = $synth.GetInstalledVoices() | Where-Object { $_.VoiceInfo.Gender -eq 'Male' -and $_.VoiceInfo.Name -notmatch 'Zira|Hazel' } | Select-Object -First 1; "
-                                "if ($male) { $synth.SelectVoice($male.VoiceInfo.Name) }; "
-                                "$synth.Rate = -1; "
-                                "$t = [Console]::In.ReadToEnd(); "
-                                "if ($t) { $synth.Speak($t) }"
-                            )
-                            proc = subprocess.Popen(
-                                ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_code],
-                                stdin=subprocess.PIPE,
-                                stdout=subprocess.DEVNULL,
-                                stderr=subprocess.DEVNULL,
-                                text=True,
-                                encoding="utf-8"
-                            )
-                            with self._lock:
-                                self._current_ps_proc = proc
-
-                            proc.communicate(input=text, timeout=25.0)
-                            with self._lock:
-                                self._current_ps_proc = None
-                        except Exception:
-                            with self._lock:
-                                self._current_ps_proc = None
-            except Exception:
-                pass
-            finally:
-                if co_init:
+                # 5. Subprocess PowerShell System.Speech fallback with Male Filter
+                if not spoken and not self._stop_requested:
                     try:
-                        import pythoncom
-                        pythoncom.CoUninitialize()
+                        ps_code = (
+                            "[Console]::InputEncoding = [System.Text.Encoding]::UTF8; "
+                            "Add-Type -AssemblyName System.Speech; "
+                            "$synth = New-Object System.Speech.Synthesis.SpeechSynthesizer; "
+                            "$male = $synth.GetInstalledVoices() | Where-Object { $_.VoiceInfo.Gender -eq 'Male' -and $_.VoiceInfo.Name -notmatch 'Zira|Hazel' } | Select-Object -First 1; "
+                            "if ($male) { $synth.SelectVoice($male.VoiceInfo.Name) }; "
+                            "$synth.Rate = -1; "
+                            "$t = [Console]::In.ReadToEnd(); "
+                            "if ($t) { $synth.Speak($t) }"
+                        )
+                        proc = subprocess.Popen(
+                            ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_code],
+                            stdin=subprocess.PIPE,
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                            text=True,
+                            encoding="utf-8"
+                        )
+                        with self._lock:
+                            self._current_ps_proc = proc
+
+                        proc.communicate(input=text, timeout=25.0)
+                        with self._lock:
+                            self._current_ps_proc = None
                     except Exception:
-                        pass
+                        with self._lock:
+                            self._current_ps_proc = None
+        except Exception as err:
+            logger.debug("TTS fallback step failed: %s", err)
         finally:
-            # Echo prevention: clear gate immediately when playback finishes so listening resumes instantly
-            is_speaking_event.clear()
-            update_hud_status(state="Idle")
-            # 100% guarantee that speech_finished is emitted so subsequent tasks never deadlock
-            try:
-                self.speech_finished.emit()
-            except Exception:
-                pass
+            if co_init:
+                try:
+                    import pythoncom
+                    pythoncom.CoUninitialize()
+                except Exception as err:
+                    logger.debug("TTS fallback step failed: %s", err)
 
 
 # Post-speech silence before an utterance is closed: 20 frames * 30ms = 0.6s.

@@ -1,0 +1,167 @@
+"""Queued, non-blocking TTS: ordering, back-to-back playback, stop(), engine fallback."""
+import threading
+import time
+
+import pytest
+from PySide6.QtCore import Qt
+
+from src.services import voice_service
+from src.services.voice_service import TTSManager, is_speaking_event
+
+
+@pytest.fixture(autouse=True)
+def quiet(monkeypatch):
+    monkeypatch.setattr(voice_service, "update_hud_status", lambda *a, **k: None)
+    is_speaking_event.clear()
+    yield
+    is_speaking_event.clear()
+
+
+def wait_for(cond, timeout=3.0):
+    end = time.time() + timeout
+    while time.time() < end:
+        if cond():
+            return True
+        time.sleep(0.01)
+    return False
+
+
+@pytest.fixture
+def tts():
+    m = TTSManager(enabled=True)
+    m.finished = []
+    m.started = []
+    m.speech_finished.connect(lambda: m.finished.append(1), Qt.DirectConnection)
+    m.speech_started.connect(lambda t: m.started.append(t), Qt.DirectConnection)
+    return m
+
+
+def test_enqueue_returns_immediately_and_sentences_play_in_order(tts):
+    spoken, gate_during = [], []
+    release = threading.Event()
+
+    def engine(text):
+        gate_during.append(is_speaking_event.is_set())
+        spoken.append(text)
+        release.wait(2)
+
+    tts._speak_one = engine
+    t0 = time.perf_counter()
+    for s in ("First sentence.", "Second sentence.", "Third sentence."):
+        tts.enqueue(s)
+    assert time.perf_counter() - t0 < 0.5          # never blocks on playback
+    assert wait_for(lambda: spoken == ["First sentence."])
+    release.set()
+    assert wait_for(lambda: len(tts.finished) >= 1 and len(spoken) == 3)
+    assert spoken == ["First sentence.", "Second sentence.", "Third sentence."]
+    assert all(gate_during)                         # mic gate held for every sentence
+    assert wait_for(lambda: not is_speaking_event.is_set())
+    assert tts.finished == [1]                      # speech_finished only once the queue drained
+    assert tts.started == spoken
+
+
+def test_single_dedicated_worker_thread(tts):
+    names = set()
+    tts._speak_one = lambda text: names.add(threading.current_thread().name)
+    for i in range(4):
+        tts.enqueue(f"Sentence number {i}.")
+    assert wait_for(lambda: tts.finished)
+    assert names == {"AltronTTSWorker"}
+
+
+def test_stop_discards_pending_and_interrupts_current(tts):
+    spoken = []
+    started = threading.Event()
+    seen_stop = []
+
+    def engine(text):
+        spoken.append(text)
+        started.set()
+        seen_stop.append(wait_for(lambda: tts._stop_requested, timeout=2))
+
+    tts._speak_one = engine
+    tts.enqueue("Playing now.")
+    tts.enqueue("Never heard one.")
+    tts.enqueue("Never heard two.")
+    assert started.wait(2)
+    tts.stop()
+    assert wait_for(lambda: tts.finished)
+    assert spoken == ["Playing now."] and seen_stop == [True]
+    assert not is_speaking_event.is_set()
+
+
+def test_speak_interrupts_then_plays_new_text(tts):
+    spoken = []
+    started = threading.Event()
+
+    def engine(text):
+        spoken.append(text)
+        started.set()
+        if text.startswith("Old"):
+            wait_for(lambda: tts._stop_requested, timeout=2)
+
+    tts._speak_one = engine
+    tts.enqueue("Old sentence.")
+    assert started.wait(2)
+    tts.speak("Brand new.")
+    assert wait_for(lambda: "Brand new." in spoken)
+    assert spoken == ["Old sentence.", "Brand new."]
+
+
+def test_disabled_or_empty_text_is_not_queued_but_finishes(tts):
+    tts._speak_one = lambda text: pytest.fail("must not speak")
+    tts.is_muted = True
+    tts.enqueue("Muted.")
+    tts.is_muted = False
+    tts.enqueue("   ")
+    assert len(tts.finished) == 2 and tts._queue.empty()
+
+
+def test_engine_order_piper_then_edge_then_system(tts, monkeypatch):
+    calls = []
+    monkeypatch.setattr(tts, "_speak_piper", lambda t: calls.append("piper") or False)
+    monkeypatch.setattr(tts, "_speak_edge_tts", lambda t: calls.append("edge") or False)
+    monkeypatch.setattr(tts, "_speak_system_fallbacks", lambda t: calls.append("system"))
+    tts._speak_one("Hello there.")
+    assert calls == ["piper", "edge", "system"]
+
+
+def test_piper_success_short_circuits_other_engines(tts, monkeypatch):
+    monkeypatch.setattr(tts, "_speak_piper", lambda t: True)
+    monkeypatch.setattr(tts, "_speak_edge_tts", lambda t: pytest.fail("edge must not run"))
+    monkeypatch.setattr(tts, "_speak_system_fallbacks", lambda t: pytest.fail("system must not run"))
+    tts._speak_one("Hello there.")
+
+
+def test_piper_not_configured_falls_through_without_error(tts, monkeypatch):
+    monkeypatch.setattr(voice_service, "get_config_value", lambda *a, **k: "")
+    assert tts._speak_piper("Hello.") is False
+
+
+def test_piper_python_voice_is_used_and_played(tts, monkeypatch, tmp_path):
+    model = tmp_path / "v.onnx"
+    model.write_bytes(b"x")
+    monkeypatch.setattr(voice_service, "get_config_value", lambda *a, **k: str(model))
+
+    class Voice:
+        class config:
+            sample_rate = 16000
+
+        def synthesize_stream_raw(self, text):
+            yield b"\x01\x00" * 4
+
+    played = {}
+
+    class FakeSD:
+        @staticmethod
+        def play(samples, samplerate):
+            played.update(n=len(samples), rate=samplerate)
+
+        @staticmethod
+        def wait():
+            pass
+
+    monkeypatch.setattr(tts, "_load_piper_voice", lambda p: Voice())
+    monkeypatch.setitem(__import__("sys").modules, "sounddevice", FakeSD)
+    assert tts._speak_piper("Hello.") is True
+    assert played == {"n": 4, "rate": 16000}
