@@ -34,8 +34,9 @@ from src.services.voice_service import (
     TTSManager,
     SpeechRecognitionListener,
     is_speaking_event,
-    parse_wake_word,
 )
+from src.services.wake_gate import ACTION_ACK, ACTION_IGNORE, WakeGate
+from src.services.hotkey import GlobalHotkey
 from src.services.telegram_service import (
     TelegramApprovalBridge,
     TelegramBotApi,
@@ -161,6 +162,24 @@ def main() -> None:
         resume_listening=_resume_mic,
     )
 
+    wake_gate = WakeGate(
+        require_wake_word=get_config_value("ALTRON_REQUIRE_WAKE_WORD", default="true").lower()
+        not in ("0", "false", "no", "off")
+    )
+
+    def _on_hotkey() -> None:
+        """Alt+R: listen for the next utterance directly, without the wake word."""
+        if control.muted:
+            logger.info("Alt+R ignored: microphone is muted")
+            return
+        wake_gate.arm_direct()
+        tts_manager.stop()
+        update_hud_status(state="Listening", log_entry="Direct listening (Alt+R)")
+        logger.info("Alt+R pressed: listening without wake word")
+
+    hotkey = GlobalHotkey(_on_hotkey)
+    hotkey.start()
+
     def _reply_control(reply: str, speak: bool = True) -> None:
         logger.info("Altron: %s", reply)
         update_hud_status(state="Idle", log_entry=f"Altron: {reply}")
@@ -244,14 +263,16 @@ def main() -> None:
                     if not text or not text.strip():
                         return
                     clean_text = text.strip()
-                    has_wake_word, remainder = parse_wake_word(clean_text)
-                    if has_wake_word and remainder:
-                        query = remainder
-                    elif has_wake_word and not remainder:
-                        tts_manager.speak("Yes, sir? How may I assist you?")
+                    decision = wake_gate.evaluate(clean_text)
+                    if decision.action == ACTION_IGNORE:
+                        logger.debug("Ignored speech without wake word: %r", clean_text)
+                        update_hud_status(state="Idle")
                         return
-                    else:
-                        query = clean_text
+                    if decision.action == ACTION_ACK:
+                        update_hud_status(state="Listening", log_entry="Wake word heard")
+                        tts_manager.speak("Yes?")
+                        return
+                    query = decision.query
 
                     listen_vad = getattr(worker, "last_listen_duration", 0.0)
                     stt_dur = getattr(worker, "last_stt_duration", 0.0)
@@ -393,6 +414,10 @@ def main() -> None:
     except KeyboardInterrupt:
         logger.info("Shutting down gracefully...")
     shutdown_event.set()
+    try:
+        hotkey.stop()
+    except Exception as err:
+        logger.warning("Global hotkey did not stop cleanly: %s", err)
     if active_voice_worker[0]:
         try:
             active_voice_worker[0].abort()

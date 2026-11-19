@@ -608,10 +608,6 @@ body.state-speaking .core-orb { transform: scale(1.15); box-shadow: 0 0 50px var
   background-color: rgba(255, 255, 255, 0.08);
 }
 
-.mic-btn {
-  color: var(--accent-green);
-}
-
 .send-btn {
   background: var(--cyan-dim);
   color: #030710;
