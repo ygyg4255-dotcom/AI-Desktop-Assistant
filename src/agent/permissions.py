@@ -47,6 +47,21 @@ class PermissionGate:
         "set_reminder",
         "list_reminders",
         "cancel_reminder",
+        # Daily-driver tools: the owner asked for no approval on these (approval stays on
+        # file delete/move). Handlers validate inputs and run fixed argv commands only.
+        "media_control",
+        "play_music",
+        "network_control",
+        "power_control",
+        "todo_add",
+        "todo_list",
+        "todo_complete",
+        "todo_delete",
+        "note_save",
+        "note_list",
+        "note_read",
+        "open_url",
+        "web_search",
     }
 
     # Tools that auto-run only for low-risk inputs; the handler decides per call

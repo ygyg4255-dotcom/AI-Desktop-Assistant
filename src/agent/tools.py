@@ -16,6 +16,8 @@ import urllib.error
 import ipaddress
 import socket
 import http.client
+import json
+import webbrowser
 from pathlib import Path
 import html
 import inspect
@@ -24,7 +26,9 @@ from src.config.settings import get_config_value
 from src.config.log import get_logger, redact_secrets
 from src.agent import screen_geometry as geo
 from src.agent.vision import CameraError, capture_camera_jpeg, compress_image_file, image_block, jpeg_dimensions
+from src.services import media_service, network_service, web_search_service
 from src.services.camera_service import CameraServiceError, get_camera_service
+from src.services.notes_service import NotesError, get_notes_service
 from src.services.reminder_service import ReminderError, get_reminder_service, parse_when
 
 logger = get_logger(__name__)
@@ -2297,6 +2301,302 @@ def handle_cancel_reminder(params: Dict[str, Any]) -> ToolResult:
 
 
 # ---------------------------------------------------------------------------
+# Daily-driver tools: media, Wi-Fi/Bluetooth, power, to-do/notes, web. Per the owner's
+# request these run without approval; file delete/move remain the approval-gated file ops.
+# Input is validated here, and any OS command is a fixed argv list (S7), never a shell.
+# ---------------------------------------------------------------------------
+
+DAILY_MAX_QUERY_CHARS = 200
+POWER_ACTIONS = ("lock", "sleep", "shutdown", "restart", "cancel_shutdown")
+POWER_MAX_DELAY_MINUTES = 1440
+WEB_URL_MAX_CHARS = 2000
+WEB_PAGE_MAX_BYTES = 1024 * 1024
+
+
+def _tool_error(message: str) -> ToolResult:
+    return ToolResult(success=False, output=None, error=message)
+
+
+def _as_bool(value: Any) -> bool:
+    if isinstance(value, str):
+        return value.strip().lower() in ("true", "1", "yes", "y")
+    return bool(value)
+
+
+def _has_control_chars(text: str) -> bool:
+    return any(ord(ch) < 32 for ch in text)
+
+
+# --- Media ----------------------------------------------------------------
+
+_MEDIA_LABELS = {"play_pause": "play/pause", "next": "next track",
+                 "previous": "previous track", "stop": "stop"}
+
+
+def handle_media_control(params: Dict[str, Any]) -> ToolResult:
+    action = str(params.get("action", "")).strip().lower()
+    if action in _MEDIA_LABELS:
+        try:
+            media_service.press_playback(action)
+        except media_service.MediaError as err:
+            return _tool_error(str(err))
+        return ToolResult(success=True, output={
+            "action": action, "message": f"Sent {_MEDIA_LABELS[action]} to the active media session.",
+        })
+    if action == "now_playing":
+        info = media_service.now_playing()
+        if info.get("available"):
+            track = info.get("title") or "unknown title"
+            by = f" by {info['artist']}" if info.get("artist") else ""
+            msg = f"Now playing: {track}{by} ({info.get('status', 'unknown')})."
+        else:
+            msg = info.get("message", "No track information available.")
+        return ToolResult(success=True, output={**info, "message": msg})
+    return _tool_error("Unknown media action. Use play_pause, next, previous, stop or now_playing.")
+
+
+def handle_play_music(params: Dict[str, Any]) -> ToolResult:
+    query = str(params.get("query", "")).strip()
+    service = str(params.get("service") or "youtube").strip().lower()
+    if not query:
+        return _tool_error("A song or video name is required.")
+    if len(query) > DAILY_MAX_QUERY_CHARS or _has_control_chars(query):
+        return _tool_error("That song name is too long or contains control characters.")
+    if service == "youtube":
+        return handle_youtube_play({"query": query})
+    if service == "spotify":
+        encoded = urllib.parse.quote(query)
+        try:
+            os.startfile(f"spotify:search:{encoded}")  # type: ignore[attr-defined]  # Windows only
+        except (OSError, AttributeError) as err:
+            logger.debug("Spotify app not reachable (%s); using the web player", err)
+            webbrowser.open(f"https://open.spotify.com/search/{encoded}", new=2)
+        return ToolResult(success=True, output={
+            "service": "spotify", "query": query,
+            "message": f"Searching Spotify for '{query}'.",
+        })
+    return _tool_error("Unknown service. Use 'youtube' or 'spotify'.")
+
+
+# --- Wi-Fi / Bluetooth --------------------------------------------------
+
+def handle_network_control(params: Dict[str, Any]) -> ToolResult:
+    action = str(params.get("action", "")).strip().lower()
+    try:
+        if action == "wifi_status":
+            info = network_service.wifi_status()
+            msg = f"Wi-Fi is {info['state']}" + (f", connected to {info['ssid']}." if info["ssid"] else ".")
+            return ToolResult(success=True, output={**info, "message": msg})
+        if action in ("wifi_on", "wifi_off"):
+            adapter = network_service.wifi_set_enabled(action == "wifi_on")
+            word = "enabled" if action == "wifi_on" else "disabled"
+            return ToolResult(success=True, output={"adapter": adapter, "message": f"Wi-Fi adapter {word}."})
+        if action == "wifi_networks":
+            known = network_service.wifi_known_networks()
+            msg = f"{len(known)} saved Wi-Fi network(s)." if known else "No saved Wi-Fi networks."
+            return ToolResult(success=True, output={"networks": known, "message": msg})
+        if action == "wifi_connect":
+            ssid = network_service.wifi_connect(params.get("ssid", ""))
+            return ToolResult(success=True, output={"ssid": ssid, "message": f"Connecting to {ssid}."})
+        if action == "bluetooth_status":
+            info = network_service.bluetooth_status()
+            return ToolResult(success=True, output={**info, "message": f"Bluetooth service is {info['service']}."})
+        if action == "bluetooth_devices":
+            devices = network_service.bluetooth_devices()
+            msg = f"{len(devices)} Bluetooth device(s) ready." if devices else "No Bluetooth devices found."
+            return ToolResult(success=True, output={"devices": devices, "message": msg})
+        if action in ("bluetooth_on", "bluetooth_off"):
+            count = network_service.bluetooth_set_enabled(action == "bluetooth_on")
+            word = "enabled" if action == "bluetooth_on" else "disabled"
+            if count == 0:
+                return _tool_error("No Bluetooth adapter was found to change.")
+            return ToolResult(success=True, output={"adapters": count, "message": f"Bluetooth {word}."})
+    except network_service.NetworkError as err:
+        return _tool_error(str(err))
+    except (ValueError, json.JSONDecodeError) as err:
+        logger.debug("Unparseable network command output: %s", err)
+        return _tool_error("Could not read the network or Bluetooth state from Windows.")
+    return _tool_error(
+        "Unknown network action. Use wifi_status, wifi_on, wifi_off, wifi_networks, wifi_connect, "
+        "bluetooth_status, bluetooth_devices, bluetooth_on or bluetooth_off."
+    )
+
+
+# --- Power --------------------------------------------------------------
+
+def _run_system_command(argv: List[str]) -> subprocess.CompletedProcess:
+    exe = shutil.which(argv[0]) or argv[0]
+    return subprocess.run([exe, *argv[1:]], capture_output=True, text=True, timeout=15,
+                          creationflags=0x08000000)
+
+
+def _lock_workstation() -> bool:
+    import ctypes
+    return bool(ctypes.windll.user32.LockWorkStation())
+
+
+def _start_sleep() -> None:
+    exe = shutil.which("rundll32.exe") or "rundll32.exe"
+    subprocess.Popen([exe, "powrprof.dll,SetSuspendState", "0,1,0"],
+                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                     stderr=subprocess.DEVNULL, close_fds=True)
+
+
+def handle_power_control(params: Dict[str, Any]) -> ToolResult:
+    action = str(params.get("action", "")).strip().lower()
+    if action not in POWER_ACTIONS:
+        return _tool_error("Unknown power action. Use lock, sleep, shutdown, restart or cancel_shutdown.")
+    try:
+        delay = int(float(params.get("delay_minutes") or 0))
+    except (TypeError, ValueError):
+        return _tool_error("delay_minutes must be a whole number of minutes.")
+    if not 0 <= delay <= POWER_MAX_DELAY_MINUTES:
+        return _tool_error(f"delay_minutes must be between 0 and {POWER_MAX_DELAY_MINUTES}.")
+    if delay and action not in ("shutdown", "restart"):
+        return _tool_error("delay_minutes only applies to shutdown and restart.")
+    try:
+        if action == "lock":
+            if not _lock_workstation():
+                return _tool_error("Windows did not lock the workstation.")
+            return ToolResult(success=True, output={"message": "Workstation locked."})
+        if action == "sleep":
+            _start_sleep()
+            return ToolResult(success=True, output={"message": "Putting the PC to sleep."})
+        if action == "cancel_shutdown":
+            proc = _run_system_command(["shutdown", "/a"])
+            if proc.returncode != 0:
+                return _tool_error((proc.stderr or proc.stdout or "No shutdown is scheduled.").strip())
+            return ToolResult(success=True, output={"message": "Scheduled shutdown or restart cancelled."})
+        flag = "/s" if action == "shutdown" else "/r"
+        proc = _run_system_command(["shutdown", flag, "/t", str(delay * 60)])
+        if proc.returncode != 0:
+            return _tool_error((proc.stderr or proc.stdout or f"{action} failed.").strip())
+        when = "now" if delay == 0 else f"in {delay} minute(s)"
+        verb = "Shutting down" if action == "shutdown" else "Restarting"
+        return ToolResult(success=True, output={"message": f"{verb} {when}."})
+    except (OSError, subprocess.SubprocessError) as err:
+        logger.debug("power action %s failed: %s", action, err)
+        return _tool_error(f"Could not run '{action}' on this PC.")
+
+
+# --- To-do list and quick notes ---------------------------------------
+
+def handle_todo_add(params: Dict[str, Any]) -> ToolResult:
+    try:
+        item = get_notes_service().todo_add(params.get("task", ""), params.get("due") or None)
+    except NotesError as err:
+        return _tool_error(str(err))
+    due = f" (due {item['due']})" if item["due"] else ""
+    return ToolResult(success=True, output={"todo": item, "message": f"Added to-do {item['id']}: {item['task']}{due}."})
+
+
+def handle_todo_list(params: Dict[str, Any]) -> ToolResult:
+    items = get_notes_service().todo_list(include_done=_as_bool(params.get("include_done", False)))
+    msg = f"{len(items)} to-do item(s)." if items else "Nothing on the to-do list."
+    return ToolResult(success=True, output={"todos": items, "message": msg})
+
+
+def handle_todo_complete(params: Dict[str, Any]) -> ToolResult:
+    try:
+        item = get_notes_service().todo_complete(params.get("task_id", ""))
+    except NotesError as err:
+        return _tool_error(str(err))
+    return ToolResult(success=True, output={"todo": item, "message": f"Marked '{item['task']}' as done."})
+
+
+def handle_todo_delete(params: Dict[str, Any]) -> ToolResult:
+    try:
+        item = get_notes_service().todo_delete(params.get("task_id", ""))
+    except NotesError as err:
+        return _tool_error(str(err))
+    return ToolResult(success=True, output={"message": f"Deleted to-do '{item['task']}'."})
+
+
+def handle_note_save(params: Dict[str, Any]) -> ToolResult:
+    try:
+        note = get_notes_service().note_save(params.get("title", ""), params.get("content", ""))
+    except NotesError as err:
+        return _tool_error(str(err))
+    return ToolResult(success=True, output={"note": {"id": note["id"], "title": note["title"]},
+                                            "message": f"Saved note '{note['title']}'."})
+
+
+def handle_note_list(params: Dict[str, Any]) -> ToolResult:
+    notes = get_notes_service().note_list()
+    msg = f"{len(notes)} note(s)." if notes else "No notes saved."
+    return ToolResult(success=True, output={"notes": notes, "message": msg})
+
+
+def handle_note_read(params: Dict[str, Any]) -> ToolResult:
+    try:
+        note = get_notes_service().note_read(params.get("title_or_id", ""))
+    except NotesError as err:
+        return _tool_error(str(err))
+    return ToolResult(success=True, output={"note": note, "message": f"Note '{note['title']}'."})
+
+
+# --- Web: open a URL, search, and read results --------------------------
+
+def _validate_web_url(url: str) -> Optional[str]:
+    if not url or len(url) > WEB_URL_MAX_CHARS or any(ch.isspace() or ord(ch) < 32 for ch in url):
+        return "That is not a valid web address."
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        return "Only http:// and https:// addresses can be opened."
+    if parsed.username or parsed.password:
+        return "Addresses with embedded credentials are not opened."
+    return None
+
+
+def handle_open_url(params: Dict[str, Any]) -> ToolResult:
+    url = str(params.get("url", "")).strip()
+    problem = _validate_web_url(url)
+    if problem:
+        return _tool_error(problem)
+    if not webbrowser.open(url, new=2):
+        return _tool_error("Could not open the default browser.")
+    return ToolResult(success=True, output={"url": url, "message": f"Opened {url} in the default browser."})
+
+
+def _public_get_text(url: str) -> str:
+    """GET a public page through the SSRF-checked opener and return it decoded."""
+    headers = {
+        "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                       "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"),
+        "Accept-Language": "en-US,en;q=0.9",
+    }
+    req = urllib.request.Request(url, headers=headers)
+    with _build_public_opener().open(req, timeout=15) as response:
+        raw = response.read(WEB_PAGE_MAX_BYTES)
+    return raw.decode("utf-8", errors="replace")
+
+
+def handle_web_search(params: Dict[str, Any]) -> ToolResult:
+    query = str(params.get("query", "")).strip()
+    try:
+        limit = int(params.get("max_results") or 5)
+    except (TypeError, ValueError):
+        return _tool_error("max_results must be a whole number.")
+    try:
+        results = web_search_service.search(query, fetch=_public_get_text, limit=limit)
+    except web_search_service.WebSearchError as err:
+        return _tool_error(str(err))
+    except (OSError, http.client.HTTPException) as err:
+        logger.debug("web search request failed: %s", err)
+        return _tool_error("The web search request failed. Check the internet connection and try again.")
+
+    output: Dict[str, Any] = {"query": query, "results": results}
+    if not results:
+        output["message"] = f"No results found for '{query}'."
+        return ToolResult(success=True, output=output)
+    if _as_bool(params.get("fetch_top", False)):
+        page = handle_web_fetch({"url": results[0]["url"], "max_chars": 3000})
+        output["top_page"] = page.output if page.success else {"error": page.error}
+    output["message"] = f"{len(results)} result(s) for '{query}'."
+    return ToolResult(success=True, output=output)
+
+
+# ---------------------------------------------------------------------------
 # GUI automation (pyautogui). gui_type / gui_hotkey are DANGEROUS (S4): the handler only
 # acts when the executor passes ``approved=True`` out-of-band after the user approved
 # the exact arguments. Input is validated *before* asking, so bad calls never prompt.
@@ -3828,6 +4128,135 @@ def create_default_registry() -> ToolRegistry:
         category=ToolCategory.UTILITY,
         parameters=[ToolParameter("reminder_id", "string", "Id of the reminder to cancel")],
         handler=handle_cancel_reminder,
+        requires_permission=False,
+    ))
+
+    # Daily-driver tools (no approval; see the section above handle_media_control).
+    registry.register(Tool(
+        name="media_control",
+        description="Control Windows media playback: play_pause, next, previous, stop (sent to whichever app holds the media session), or now_playing to read the current track title/artist if available.",
+        category=ToolCategory.SYSTEM,
+        parameters=[ToolParameter("action", "string", "One of: play_pause, next, previous, stop, now_playing",
+                                  enum=["play_pause", "next", "previous", "stop", "now_playing"])],
+        handler=handle_media_control,
+        requires_permission=False,
+    ))
+    registry.register(Tool(
+        name="play_music",
+        description="Open and play a requested song or video directly: YouTube (first matching video) by default, or Spotify search. Use for 'play X'.",
+        category=ToolCategory.BROWSER,
+        parameters=[
+            ToolParameter("query", "string", "Song, artist or video to play"),
+            ToolParameter("service", "string", "'youtube' (default) or 'spotify'", required=False, default="youtube",
+                          enum=["youtube", "spotify"]),
+        ],
+        handler=handle_play_music,
+        requires_permission=False,
+    ))
+    registry.register(Tool(
+        name="network_control",
+        description="Check or toggle Wi-Fi and Bluetooth on Windows. Actions: wifi_status, wifi_on, wifi_off, wifi_networks (saved profiles), wifi_connect (join a saved network; needs ssid), bluetooth_status, bluetooth_devices, bluetooth_on, bluetooth_off. Turning adapters on/off may require Altron to run as administrator.",
+        category=ToolCategory.SYSTEM,
+        parameters=[
+            ToolParameter("action", "string", "Network action to perform",
+                          enum=["wifi_status", "wifi_on", "wifi_off", "wifi_networks", "wifi_connect",
+                                "bluetooth_status", "bluetooth_devices", "bluetooth_on", "bluetooth_off"]),
+            ToolParameter("ssid", "string", "Saved Wi-Fi network name (only for wifi_connect)", required=False, default=""),
+        ],
+        handler=handle_network_control,
+        requires_permission=False,
+    ))
+    registry.register(Tool(
+        name="power_control",
+        description="Power the PC: lock (lock immediately), sleep, shutdown or restart (optional delay_minutes; 0 means now), cancel_shutdown (cancels a scheduled shutdown or restart).",
+        category=ToolCategory.SYSTEM,
+        parameters=[
+            ToolParameter("action", "string", "Power action", enum=list(POWER_ACTIONS)),
+            ToolParameter("delay_minutes", "number", "Minutes before shutdown or restart (0 = now, max 1440). Only for shutdown/restart.", required=False, default=0),
+        ],
+        handler=handle_power_control,
+        requires_permission=False,
+    ))
+    registry.register(Tool(
+        name="todo_add",
+        description="Add an item to the persistent daily to-do list, with an optional free-text due date or time.",
+        category=ToolCategory.UTILITY,
+        parameters=[
+            ToolParameter("task", "string", "What needs to be done"),
+            ToolParameter("due", "string", "Optional due date/time, e.g. '2026-11-21 18:00' or 'tomorrow morning'", required=False, default=""),
+        ],
+        handler=handle_todo_add,
+        requires_permission=False,
+    ))
+    registry.register(Tool(
+        name="todo_list",
+        description="List the to-do items (open ones by default; include_done=true also shows completed ones).",
+        category=ToolCategory.UTILITY,
+        parameters=[ToolParameter("include_done", "boolean", "Include completed items", required=False, default=False)],
+        handler=handle_todo_list,
+        requires_permission=False,
+    ))
+    registry.register(Tool(
+        name="todo_complete",
+        description="Mark a to-do item as done by its id (see todo_list).",
+        category=ToolCategory.UTILITY,
+        parameters=[ToolParameter("task_id", "string", "Id of the to-do item")],
+        handler=handle_todo_complete,
+        requires_permission=False,
+    ))
+    registry.register(Tool(
+        name="todo_delete",
+        description="Delete a to-do item by its id (see todo_list).",
+        category=ToolCategory.UTILITY,
+        parameters=[ToolParameter("task_id", "string", "Id of the to-do item")],
+        handler=handle_todo_delete,
+        requires_permission=False,
+    ))
+    registry.register(Tool(
+        name="note_save",
+        description="Save a quick note. If a note with the same title exists, its content is replaced.",
+        category=ToolCategory.UTILITY,
+        parameters=[
+            ToolParameter("title", "string", "Short note title"),
+            ToolParameter("content", "string", "Note text"),
+        ],
+        handler=handle_note_save,
+        requires_permission=False,
+    ))
+    registry.register(Tool(
+        name="note_list",
+        description="List saved quick notes (id, title, last updated).",
+        category=ToolCategory.UTILITY,
+        parameters=[],
+        handler=handle_note_list,
+        requires_permission=False,
+    ))
+    registry.register(Tool(
+        name="note_read",
+        description="Read a saved quick note by its exact title, its id, or a unique part of its title.",
+        category=ToolCategory.UTILITY,
+        parameters=[ToolParameter("title_or_id", "string", "Note title or id")],
+        handler=handle_note_read,
+        requires_permission=False,
+    ))
+    registry.register(Tool(
+        name="open_url",
+        description="Open an http(s) web address directly in the default browser.",
+        category=ToolCategory.BROWSER,
+        parameters=[ToolParameter("url", "string", "Full web address, starting with http:// or https://")],
+        handler=handle_open_url,
+        requires_permission=False,
+    ))
+    registry.register(Tool(
+        name="web_search",
+        description="Search the web and return the top results (title, url, snippet) so questions about live information can be answered without opening a browser. Set fetch_top=true to also read the text of the top result.",
+        category=ToolCategory.BROWSER,
+        parameters=[
+            ToolParameter("query", "string", "What to search for"),
+            ToolParameter("max_results", "number", "How many results to return (1-8, default 5)", required=False, default=5),
+            ToolParameter("fetch_top", "boolean", "Also fetch and return the readable text of the top result", required=False, default=False),
+        ],
+        handler=handle_web_search,
         requires_permission=False,
     ))
 
