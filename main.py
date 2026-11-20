@@ -45,6 +45,8 @@ from src.services.telegram_service import (
 )
 from src.services.camera_service import get_camera_service
 from src.services.reminder_service import format_reminder_speech, get_reminder_service
+from src.services.alarm_chime import play_alarm_chime
+from src.services.desktop_notify import show_desktop_notification
 from ui_server import start_hud_server, stop_hud_server
 
 logger = get_logger("main")
@@ -97,18 +99,52 @@ def make_approval_listener(bridge_ref: list, notify_telegram=send_telegram_messa
     return _listener
 
 
-def make_reminder_handler(tts, notify_telegram=send_telegram_message_async):
-    """Callback for ReminderService: speak the reminder, log it to the HUD chat, ping Telegram.
+def _run_guarded(label: str, fn, *args) -> None:
+    """Run one alarm step; a failure is logged and never stops the remaining steps."""
+    try:
+        fn(*args)
+    except Exception:
+        logger.exception("Reminder %s failed", label)
 
-    Telegram sends are skipped silently when it is not configured (the sender returns False).
+
+def make_reminder_handler(tts, notify_telegram=send_telegram_message_async,
+                          chime=play_alarm_chime, notify_desktop=show_desktop_notification,
+                          run_async: bool = True):
+    """Callback for ReminderService: act like a PC alarm.
+
+    On fire: log to the HUD chat and send the Telegram alert (both synchronous and cheap), then
+    on a background thread show a native desktop notification, play the alarm chime and speak
+    the reminder. The reminder scheduler is never blocked by audio or the toast.
+
+    Mute (``tts.is_muted`` or TTS disabled) silences the chime and the speech; the HUD log says
+    so. The desktop notification is still shown, since it is visual. Telegram is skipped
+    silently when it is not configured.
     """
+    def _in_background(label: str, fn, *args) -> None:
+        if run_async:
+            threading.Thread(target=_run_guarded, args=(label, fn, *args), daemon=True,
+                             name=f"AltronReminder-{label}").start()
+        else:
+            _run_guarded(label, fn, *args)
+
+    def _alarm(rem, text: str, silenced: bool) -> None:
+        # The toast blocks for its display time, so it runs on its own thread while the chime plays.
+        _in_background("notification", notify_desktop, "Altron reminder", rem.message)
+        if silenced:
+            return
+        _run_guarded("chime", chime)  # blocks for the chime's length, then speech follows it
+        _run_guarded("speech", tts.speak, text)
+
     def _fire(rem) -> None:
         text = format_reminder_speech(rem)
+        silenced = (not tts.is_enabled) or tts.is_muted
         logger.info("Reminder fired: %s", text)
-        update_hud_status(log_entry=f"Altron: {text}")
+        log_text = f"Altron: {text}"
+        if silenced:
+            log_text += " (muted: alarm sound and voice skipped)"
+        update_hud_status(log_entry=log_text)
         notify_telegram(f"⏰ {text}")
-        if tts.is_enabled and not tts.is_muted:
-            tts.speak(text)
+        _in_background("alarm", _alarm, rem, text, silenced)
     return _fire
 
 

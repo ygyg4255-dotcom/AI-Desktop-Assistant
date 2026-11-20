@@ -250,9 +250,12 @@ def test_set_reminder_tool_supports_delay_seconds_and_reports_errors(data_dir):
 def test_fire_handler_speaks_logs_to_hud_and_sends_telegram(monkeypatch):
     hud = []
     monkeypatch.setattr(main_mod, "update_hud_status", lambda **k: hud.append(k))
-    tts, tg = MagicMock(is_enabled=True, is_muted=False), MagicMock()
-    main_mod.make_reminder_handler(tts, notify_telegram=tg)(Reminder("a1", "drink water", time.time(), time.time()))
+    tts, tg, chime, toast = MagicMock(is_enabled=True, is_muted=False), MagicMock(), MagicMock(), MagicMock()
+    main_mod.make_reminder_handler(tts, notify_telegram=tg, chime=chime, notify_desktop=toast,
+                                   run_async=False)(Reminder("a1", "drink water", time.time(), time.time()))
+    chime.assert_called_once_with()
     tts.speak.assert_called_once_with("Reminder: drink water")
+    toast.assert_called_once_with("Altron reminder", "drink water")
     tg.assert_called_once()
     assert "drink water" in tg.call_args.args[0]
     assert hud == [{"log_entry": "Altron: Reminder: drink water"}]
@@ -261,10 +264,13 @@ def test_fire_handler_speaks_logs_to_hud_and_sends_telegram(monkeypatch):
 def test_fire_handler_stays_quiet_when_muted_but_still_logs(monkeypatch):
     hud = []
     monkeypatch.setattr(main_mod, "update_hud_status", lambda **k: hud.append(k))
-    tts = MagicMock(is_enabled=True, is_muted=True)
-    main_mod.make_reminder_handler(tts, notify_telegram=MagicMock())(Reminder("a1", "x", time.time(), time.time()))
+    tts, chime, toast = MagicMock(is_enabled=True, is_muted=True), MagicMock(), MagicMock()
+    main_mod.make_reminder_handler(tts, notify_telegram=MagicMock(), chime=chime, notify_desktop=toast,
+                                   run_async=False)(Reminder("a1", "x", time.time(), time.time()))
     tts.speak.assert_not_called()
-    assert hud
+    chime.assert_not_called()
+    toast.assert_called_once()  # visual notification still shows
+    assert hud and "muted" in hud[0]["log_entry"]
 
 
 # --- post-approval conversation history ------------------------------------------------
