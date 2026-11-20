@@ -1224,7 +1224,8 @@ Available tools are provided in the tool definitions. Use them responsibly."""
         self._steps: List[AgentStep] = []
         self._pending_permission: Optional[PermissionRequest] = None
         self._cancel_flag = False
-        self._max_iterations = 10
+        # Worst-case Steam add-to-cart: search + open + 5 inspects + 4 scrolls + click + reply.
+        self._max_iterations = 20
 
         # Clean up any temporary inspect_wa/ocr files in root directory
         for tmp_f in (Path("inspect_wa.ps1"), Path("inspect_wa_out.json"), Path("inspect_ocr.ps1"), Path("inspect_ocr_out.json")):
