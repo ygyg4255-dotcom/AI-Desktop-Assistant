@@ -22,6 +22,49 @@
 - **Remote Telegram Control**: Send commands and receive responses or generated documents directly on your phone via Telegram long-polling.
 - **Anthropic Claude Backend**: Uses the Claude Messages API directly (default model `claude-sonnet-5-5`, fast model `claude-haiku-5-5`). The endpoint is fixed to `api.anthropic.com` by design.
 - **Out-of-band Approvals**: Dangerous actions (file writes and deletes, terminal commands, closing apps, ...) never run unprompted. You approve or deny each request in the HUD or with Telegram inline buttons.
+- **Autonomous Multi-Step Execution**: Give one request and Altron chains tool calls until the task is done (up to 20 tool iterations per turn) instead of stopping after the first step or asking "shall I continue?". It only pauses for an approval or when something genuinely blocks it (for example a login or credential prompt).
+
+### Integrations
+
+#### Artcraft Suite (native CLI integration)
+Altron reads and writes the Artcraft apps directly from Python, with no GUI clicking. Writes are staged and verified before an existing file is replaced.
+
+| App | Tools |
+|---|---|
+| DeckCraft (slides) | `deckcraft_create`, `deckcraft_read`, `deckcraft_edit` |
+| WordCraft (documents) | `wordcraft_create`, `wordcraft_read`, `wordcraft_edit` |
+| GridCraft (spreadsheets) | `gridcraft_create`, `gridcraft_read`, `gridcraft_edit` |
+| PdfCraft (PDF) | `pdfcraft_read`, `pdfcraft_merge`, `pdfcraft_split` |
+
+Relative paths resolve against your Desktop.
+
+#### Steam
+- `steam_list_installed`: scans the local library for installed games.
+- `steam_launch_game`: launches a game by validated numeric appid.
+- `steam_search_store`: searches the public Steam store.
+- `steam_open_store_page`: opens a store page in the Steam client.
+- `steam_add_to_cart`: one atomic call that searches, opens the page, scrolls, locates the "Add to Cart" button by vision and clicks it (bounded to five attempts).
+- **Safety guardrail:** Altron never checks out. Buttons labelled Checkout, Purchase or "Add to Cart and Pay" are refused, so you always complete payment yourself. Steam URIs are built only from a numeric appid, never from free text.
+
+#### Telegram File Sharing
+`telegram_send_file` sends any local file (`.deckcraft`, `.docx`, `.xlsx`, `.pdf`, images, ...) to your Telegram chat through the Bot API `sendDocument` endpoint. It falls back to your Desktop for relative paths and enforces Telegram's 50 MB limit.
+
+#### Wi-Fi Vault
+`network_control` manages Wi-Fi and Bluetooth, and keeps saved Wi-Fi passwords in a local vault (`wifi_vault.json` in the runtime directory):
+- `wifi_get_password`: reads a saved network's password and stores it in the vault.
+- `wifi_forget`: backs the password up to the vault, then deletes the Windows profile.
+- `wifi_connect_new`: adds and joins a network with a password, or reuses the vault's.
+
+The vault file is local only and is never logged or committed.
+
+### Approval Policy
+| Tier | Behaviour | Examples |
+|---|---|---|
+| Safe | Runs automatically | Artcraft tools, Steam tools (including `steam_add_to_cart`), `telegram_send_file`, `network_control`, media and power control, notes and to-dos, reminders, `web_search`, `open_url`, `gui_click`, `gui_scroll`, camera, PDF creation |
+| Conditional | Auto-runs for low-risk input, asks otherwise (never a blanket "allow") | `file_read`, `file_open`, `app_open`, `send_to_telegram` (sensitive paths ask) |
+| Dangerous | Always asks, per call | `file_write`, `file_delete`, `file_move`, `file_copy`, `terminal_execute`, `app_close`, `code_edit`, `gui_type`, `gui_hotkey` |
+
+Approvals are given in the HUD or with Telegram inline buttons. Voice can never approve. New tools default to Dangerous.
 
 ### Local voice (Piper)
 Piper runs offline and is the preferred voice. Altron uses `en_US-joe-medium` for English and `ar_JO-kareem-medium` for Arabic, and applies the `ALTRON_VOICE_FX=ultron` chain to both Piper and edge-tts. Install the package and download the two voices once (Windows, from the project folder):
@@ -38,8 +81,9 @@ Altron looks for the models in that folder automatically. To use other files, se
 |---|---|
 | `main.py` | **Official entry point.** Starts and supervises the HUD server, the voice listener and the Telegram listener on plain Python threads. |
 | `ui_server.py` + `ui/` | Flask HUD server on `127.0.0.1:5000` (5001 if busy) and its web front end. |
-| `src/agent/` | Agent executor, tool registry, permission tiers, approval manager, conversation memory. |
-| `src/services/` | Claude client, voice (VAD + faster-whisper STT, TTS), Telegram, HUD status, desktop automation. |
+| `src/agent/` | Agent executor (autonomous tool loop), tool registry, permission tiers, approval manager, conversation memory, vision and screen-coordinate helpers. |
+| `src/services/` | Claude client, voice (VAD + faster-whisper or Groq STT, TTS), Telegram, HUD status, desktop icons, reminders, camera, media, network and Wi-Fi vault, notes, web search, `artcraft_service.py`, `steam_service.py`. |
+| `tests/` | pytest suite (see *Run the Tests*). |
 | `src/config/` | Settings (single config precedence), runtime paths, central logging. |
 | `src/app.py`, `src/ui/` | **Legacy, deprecated** PySide6 capsule UI. These are kept so old imports still work. They are no longer the supported way to run Altron. |
 
@@ -53,6 +97,8 @@ Altron keeps all mutable state out of the project folder, which matters because 
 | `memory.json` | Short-term conversation memory |
 | `status.json` | Snapshot of the HUD state |
 | `telegram_offset.json` | Last processed Telegram update (prevents replaying commands after a restart) |
+| `conversation_history.json` | Redacted, capped, reference-only cross-session history |
+| `wifi_vault.json` | Saved Wi-Fi passwords (local only) |
 | `assistant.db` | Settings and history database |
 | `altron.log` | Rotating log, 1 MB × 3 backups, with secrets redacted. Set `ALTRON_LOG_LEVEL=DEBUG` for more detail |
 
@@ -123,7 +169,19 @@ Copy `.env.example` to `.env`:
 ```bash
 copy .env.example .env
 ```
-Edit `.env` to set your Anthropic API key (`AI_API_KEY`), optionally `AI_MODEL`, and your Telegram bot credentials. You can also change the model, key and language later from the HUD settings panel.
+Edit `.env` (see `.env.example`) to set:
+
+| Variable | Purpose |
+|---|---|
+| `ANTHROPIC_API_KEY` | Claude API key (required) |
+| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | Telegram remote control, approvals and file sending |
+| `GROQ_API_KEY` | Optional. Sends recorded speech (STT only) to Groq Whisper; local faster-whisper is the fallback |
+| `ALTRON_MIC_DEVICE`, `ALTRON_REQUIRE_WAKE_WORD` | Optional microphone and wake-word behaviour |
+| `ALTRON_CAMERA_AUTOSTART` | Optional webcam warm-up (frames stay in RAM) |
+| `ALTRON_VOICE_FX`, `PIPER_MODEL_PATH`, `PIPER_MODEL_PATH_AR`, `PIPER_LENGTH_SCALE` | Optional voice settings |
+| `ALTRON_DATA_DIR`, `ALTRON_LOG_LEVEL` | Optional runtime directory and log level |
+
+You can also change the model, key and language later from the HUD settings panel. Steam tools need the Steam client installed; Artcraft tools need the Artcraft apps.
 
 #### 6. ⚠️ Important Windows Desktop Setting
 To allow Altron to move and position desktop icons:
@@ -144,7 +202,7 @@ The HUD opens in your browser at `http://127.0.0.1:5000`, and the console prints
 pip install pytest
 pytest -p no:cacheprovider
 ```
-`pytest.ini` limits collection to `tests/` and `test_agent.py` and disables the pytest cache, so nothing is written into the synced project folder. Tests use a temporary `ALTRON_DATA_DIR` and never touch your real `.env` or the network.
+`pytest.ini` limits collection to `tests/` and `test_agent.py` and disables the pytest cache, so nothing is written into the synced project folder. Tests use a temporary `ALTRON_DATA_DIR` and never touch your real `.env` or the network. Current status: **782 passed**. The root `test_app.py`, `test_chat_ui.py`, `test_step3_final.py` and `test_ui_integration.py` are manual GUI scripts for the legacy UI, not part of the suite.
 
 ---
 
@@ -161,6 +219,12 @@ pytest -p no:cacheprovider
 - **إنشاء مستندات PDF احترافية**: توليد تقارير منسقة تدعم اللغة العربية (من اليمين لليسار RTL) والإنجليزية.
 - **تحكم عن بُعد عبر تيليجرام**: إرسال الأوامر واستقبال الردود والمستندات المنشأة مباشرة على هاتفك أينما كنت.
 - **نماذج Claude من Anthropic**: يتصل مباشرة بواجهة Anthropic Claude API فقط (النموذج الافتراضي `claude-sonnet-5-5`).
+- **حزمة Artcraft**: إنشاء وقراءة وتعديل ملفات DeckCraft وWordCraft وGridCraft ودمج وتقسيم PdfCraft مباشرة عبر بايثون دون نقرات واجهة.
+- **تكامل Steam**: فحص المكتبة المثبتة وتشغيل الألعاب والبحث في المتجر وفتح صفحات المتجر، والأداة `steam_add_to_cart` تضيف اللعبة إلى السلة فقط ولا تُكمل الدفع أبداً.
+- **مشاركة الملفات عبر تيليجرام**: الأداة `telegram_send_file` ترسل أي ملف محلي إلى محادثتك (حد أقصى 50 ميغابايت).
+- **خزنة Wi-Fi**: قراءة كلمات مرور الشبكات المحفوظة (`wifi_get_password`) ونسيان الشبكات مع نسخة احتياطية (`wifi_forget`) والاتصال بشبكة جديدة (`wifi_connect_new`).
+- **تنفيذ مستقل متعدد الخطوات**: يُكمل المهمة بسلسلة من الأدوات (حتى 20 خطوة في الدور الواحد) دون توقف بعد أول خطوة.
+- **سياسة الموافقات**: الأدوات الآمنة تعمل تلقائياً، أما الكتابة والحذف والنقل والنسخ وأوامر الطرفية وإغلاق التطبيقات والكتابة بلوحة المفاتيح فتتطلب موافقتك دائماً.
 - **ملفات التشغيل**: تُحفظ الذاكرة والحالة والسجل (`altron.log`) في المجلد `‎%USERPROFILE%\.ai-desktop-assistant\` خارج مجلد المشروع.
 
 ---
