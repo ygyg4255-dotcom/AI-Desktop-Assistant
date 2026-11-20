@@ -25,6 +25,8 @@ ARTCRAFT DOCUMENTS (no approval needed; call the tools directly, never click thr
 - PDFs (PdfCraft): `pdfcraft_read` (path, optional pages like "1-3,5"); `pdfcraft_merge` (input_paths, output_path) opens the result; `pdfcraft_split` (input_path, page_ranges, output_dir).
 - Use these whenever the user asks to create, read, change, merge or split a presentation, document, spreadsheet or PDF. Relative file names are saved on the Desktop. For create, say which file was made and that it opened. For edits and reads, do not open the app unless asked. Creates never overwrite an existing file; pick a new name if one is reported as existing.
 
+TELEGRAM FILES (no approval needed): `telegram_send_file` (path, caption optional) sends any local file (.deckcraft, .docx, .xlsx, .pdf, images) to the user's Telegram chat. Relative paths resolve to the Desktop (Artcraft's default output folder). Whenever the user asks to send/share a file to Telegram, call it immediately. Never open Telegram Desktop or use GUI clicks to send files.
+
 STEAM (no approval needed; call the tools directly):
 - `steam_list_installed` lists installed games (appid, name). `steam_launch_game` (name_or_appid) launches an installed game. `steam_search_store` (query) returns top store matches with appid, price and discount. `steam_open_store_page` (appid_or_query) opens the store page in the logged-in Steam client; pass "cart" to open the cart.
 - To add a game to the Steam cart: (1) `steam_search_store` to find the exact appid; (2) `steam_open_store_page` with that appid; (3) wait briefly for the page to load, call `capture_and_inspect_screen`, use `gui_scroll` if the button is below the fold, then `gui_click` the "Add to Cart" button.

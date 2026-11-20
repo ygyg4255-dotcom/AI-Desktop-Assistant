@@ -1986,6 +1986,17 @@ def handle_create_and_send_pdf(params: Dict[str, Any]) -> ToolResult:
         )
 
 
+def handle_telegram_send_file(params: Dict[str, Any]) -> ToolResult:
+    """Send a local file to the owner's Telegram chat (fixed destination, auto-approved)."""
+    from src.services.telegram_service import send_file
+    path = str(params.get("path") or "").strip()
+    caption = str(params.get("caption") or "").strip() or None
+    ok, msg = send_file(path, caption)
+    if not ok:
+        return ToolResult(success=False, output=None, error=msg)
+    return ToolResult(success=True, output={"message": f"✅ Sent '{msg}' to your Telegram."})
+
+
 def handle_send_to_telegram(params: Dict[str, Any], approved: bool = False) -> ToolResult:
     """Send text messages (auto) or local files (requires permission) to the authorized Telegram chat."""
     bot_token, chat_id = _telegram_credentials()
@@ -4189,6 +4200,18 @@ def create_default_registry() -> ToolRegistry:
         ],
         handler=handle_send_to_telegram,
         requires_permission=True
+    ))
+
+    registry.register(Tool(
+        name="telegram_send_file",
+        description="Send any local file (.deckcraft, .docx, .xlsx, .pdf, images...) to the user's Telegram chat. Relative paths resolve to the Desktop.",
+        category=ToolCategory.UTILITY,
+        parameters=[
+            ToolParameter("path", "string", "File path (absolute, or relative to the Desktop)", required=True),
+            ToolParameter("caption", "string", "Optional caption", required=False, default=""),
+        ],
+        handler=handle_telegram_send_file,
+        requires_permission=False
     ))
 
     # Screen Capture & Vision Tools

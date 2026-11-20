@@ -78,6 +78,7 @@ class PermissionGate:
         "pdfcraft_split",
         # Steam: read-only library scan, public store search, and steam:// URIs built only
         # from a validated numeric appid (never free text).
+        "telegram_send_file",
         "steam_list_installed",
         "steam_launch_game",
         "steam_search_store",

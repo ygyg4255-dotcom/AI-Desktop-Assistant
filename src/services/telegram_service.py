@@ -175,6 +175,47 @@ def send_telegram_document(
     return _post_file("sendDocument", "document", file_path, caption, token, chat_id, MAX_DOCUMENT_BYTES)
 
 
+def resolve_send_path(file_path: str) -> Path:
+    """Expand a user path; a relative path missing from the cwd falls back to the Desktop."""
+    path = Path(str(file_path).strip().strip('"')).expanduser()
+    if path.is_absolute() or path.exists():
+        return path
+    return Path.home() / "Desktop" / path
+
+
+def send_file(
+    file_path: str,
+    caption: Optional[str] = None,
+    token: Optional[str] = None,
+    chat_id: Optional[str] = None,
+) -> tuple[bool, str]:
+    """Send any local file to the configured chat via sendDocument.
+
+    Returns (ok, message); message is the sent filename on success, else a clear error.
+    """
+    if not str(file_path or "").strip():
+        return False, "No file path given."
+    bot_token, target_chat_id = resolve_credentials(token, chat_id)
+    if not bot_token or not target_chat_id:
+        return False, "Telegram is not configured: set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in .env."
+    path = resolve_send_path(file_path)
+    if not path.is_file():
+        return False, f"File not found: {path}"
+    try:
+        size = path.stat().st_size
+    except OSError as err:
+        return False, f"Cannot read file '{path}': {err}"
+    if size > MAX_DOCUMENT_BYTES:
+        return False, (
+            f"File '{path.name}' is {size / (1024 * 1024):.1f} MB, over Telegram's "
+            f"{MAX_DOCUMENT_BYTES // (1024 * 1024)} MB bot upload limit."
+        )
+    if not _post_file("sendDocument", "document", str(path), caption or "",
+                      bot_token, target_chat_id, MAX_DOCUMENT_BYTES):
+        return False, f"Telegram rejected or failed to receive '{path.name}'."
+    return True, path.name
+
+
 def send_telegram_photo(
     image_path: str,
     caption: str = "",
