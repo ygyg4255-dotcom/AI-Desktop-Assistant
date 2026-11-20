@@ -62,6 +62,20 @@ class PermissionGate:
         "note_read",
         "open_url",
         "web_search",
+        # Artcraft apps (DeckCraft, WordCraft, GridCraft, PdfCraft): the owner asked for no
+        # approval on these. Writes are staged and verified before replacing a file.
+        "deckcraft_create",
+        "deckcraft_read",
+        "deckcraft_edit",
+        "wordcraft_create",
+        "wordcraft_read",
+        "wordcraft_edit",
+        "gridcraft_create",
+        "gridcraft_read",
+        "gridcraft_edit",
+        "pdfcraft_read",
+        "pdfcraft_merge",
+        "pdfcraft_split",
     }
 
     # Tools that auto-run only for low-risk inputs; the handler decides per call

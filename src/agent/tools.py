@@ -26,7 +26,7 @@ from src.config.settings import get_config_value
 from src.config.log import get_logger, redact_secrets
 from src.agent import screen_geometry as geo
 from src.agent.vision import CameraError, capture_camera_jpeg, compress_image_file, image_block, jpeg_dimensions
-from src.services import media_service, network_service, web_search_service
+from src.services import artcraft_service, media_service, network_service, web_search_service
 from src.services.camera_service import CameraServiceError, get_camera_service
 from src.services.notes_service import NotesError, get_notes_service
 from src.services.reminder_service import ReminderError, get_reminder_service, parse_when
@@ -3750,6 +3750,83 @@ whatsapp_read = handle_whatsapp_read
 
 # === Create Default Registry ===
 
+# ---------------------------------------------------------------- Artcraft (DeckCraft, WordCraft, GridCraft, PdfCraft)
+
+def _artcraft_call(fn: Callable[..., Dict[str, Any]], *args, **kwargs) -> ToolResult:
+    try:
+        result = fn(*args, **kwargs)
+    except artcraft_service.ArtcraftError as err:
+        return _tool_error(str(err))
+    return ToolResult(success=True, output=result)
+
+
+def _open_flag(params: Dict[str, Any], default: bool) -> bool:
+    value = params.get("open_after", default)
+    if isinstance(value, str):
+        return value.strip().lower() in ("true", "1", "yes")
+    return bool(value)
+
+
+def handle_deckcraft_create(params: Dict[str, Any]) -> ToolResult:
+    return _artcraft_call(artcraft_service.deckcraft_create, params.get("output_path", ""),
+                          params.get("title", ""), params.get("slides") or [],
+                          open_after=_open_flag(params, True))
+
+
+def handle_deckcraft_read(params: Dict[str, Any]) -> ToolResult:
+    return _artcraft_call(artcraft_service.deckcraft_read, params.get("path", ""))
+
+
+def handle_deckcraft_edit(params: Dict[str, Any]) -> ToolResult:
+    return _artcraft_call(artcraft_service.deckcraft_edit, params.get("path", ""),
+                          params.get("operations") or [], open_after=_open_flag(params, False))
+
+
+def handle_wordcraft_create(params: Dict[str, Any]) -> ToolResult:
+    return _artcraft_call(artcraft_service.wordcraft_create, params.get("output_path", ""),
+                          params.get("title", ""), params.get("sections") or [],
+                          open_after=_open_flag(params, True))
+
+
+def handle_wordcraft_read(params: Dict[str, Any]) -> ToolResult:
+    return _artcraft_call(artcraft_service.wordcraft_read, params.get("path", ""))
+
+
+def handle_wordcraft_edit(params: Dict[str, Any]) -> ToolResult:
+    return _artcraft_call(artcraft_service.wordcraft_edit, params.get("path", ""),
+                          params.get("operations") or [], open_after=_open_flag(params, False))
+
+
+def handle_gridcraft_create(params: Dict[str, Any]) -> ToolResult:
+    return _artcraft_call(artcraft_service.gridcraft_create, params.get("output_path", ""),
+                          params.get("sheets") or None, open_after=_open_flag(params, True))
+
+
+def handle_gridcraft_read(params: Dict[str, Any]) -> ToolResult:
+    return _artcraft_call(artcraft_service.gridcraft_read, params.get("path", ""),
+                          sheet=params.get("sheet") or None, max_rows=params.get("max_rows", 200))
+
+
+def handle_gridcraft_edit(params: Dict[str, Any]) -> ToolResult:
+    return _artcraft_call(artcraft_service.gridcraft_edit, params.get("path", ""),
+                          params.get("operations") or [], open_after=_open_flag(params, False))
+
+
+def handle_pdfcraft_read(params: Dict[str, Any]) -> ToolResult:
+    return _artcraft_call(artcraft_service.pdfcraft_read, params.get("path", ""),
+                          pages=params.get("pages") or None)
+
+
+def handle_pdfcraft_merge(params: Dict[str, Any]) -> ToolResult:
+    return _artcraft_call(artcraft_service.pdfcraft_merge, params.get("input_paths") or [],
+                          params.get("output_path", ""), open_after=_open_flag(params, True))
+
+
+def handle_pdfcraft_split(params: Dict[str, Any]) -> ToolResult:
+    return _artcraft_call(artcraft_service.pdfcraft_split, params.get("input_path", ""),
+                          params.get("page_ranges") or [], output_dir=params.get("output_dir") or None)
+
+
 def create_default_registry() -> ToolRegistry:
     """Create and populate the default tool registry."""
     registry = ToolRegistry()
@@ -4329,6 +4406,147 @@ def create_default_registry() -> ToolRegistry:
         ],
         handler=handle_whatsapp_read,
         requires_permission=False
+    ))
+
+    # Artcraft apps: native engines behind each app's own CLI (see src/services/artcraft_service.py).
+    _ARTCRAFT_OPS = ("Each op is an object: add {title, bullets}, update {index, title?, bullets?} "
+                     "(omitted fields keep their value), delete {index}, move {from, to}. Indices start at 0.")
+    registry.register(Tool(
+        name="deckcraft_create",
+        description="Create a DeckCraft presentation (.deckcraft) with a title slide and one slide per item, then open it in DeckCraft. Each slide is {title, bullets: [..]}. Default output folder is the Desktop.",
+        category=ToolCategory.FILE_SYSTEM,
+        parameters=[
+            ToolParameter("output_path", "string", "Where to save, e.g. 'Q3 review.deckcraft' (Desktop) or a full path"),
+            ToolParameter("title", "string", "Presentation title (also the title slide)"),
+            ToolParameter("slides", "array", "Slides, each {title, bullets: [..]}", required=False, default=[]),
+            ToolParameter("open_after", "boolean", "Open in DeckCraft when done (default true)", required=False, default=True),
+        ],
+        handler=handle_deckcraft_create,
+        requires_permission=False,
+    ))
+    registry.register(Tool(
+        name="deckcraft_read",
+        description="Read a .deckcraft presentation: each slide's index, title and body text.",
+        category=ToolCategory.FILE_SYSTEM,
+        parameters=[ToolParameter("path", "string", "Path to the .deckcraft file (relative paths are on the Desktop)")],
+        handler=handle_deckcraft_read,
+        requires_permission=False,
+    ))
+    registry.register(Tool(
+        name="deckcraft_edit",
+        description="Add, update, delete or move slides in an existing .deckcraft file, in place. " + _ARTCRAFT_OPS,
+        category=ToolCategory.FILE_SYSTEM,
+        parameters=[
+            ToolParameter("path", "string", "Path to the .deckcraft file"),
+            ToolParameter("operations", "array", "Ordered list of operations", ),
+            ToolParameter("open_after", "boolean", "Open in DeckCraft afterwards (default false)", required=False, default=False),
+        ],
+        handler=handle_deckcraft_edit,
+        requires_permission=False,
+    ))
+    registry.register(Tool(
+        name="wordcraft_create",
+        description="Create a WordCraft document (.docx) with a title, sections of headings, paragraphs and bullets, then open it in WordCraft. Default output folder is the Desktop.",
+        category=ToolCategory.FILE_SYSTEM,
+        parameters=[
+            ToolParameter("output_path", "string", "Where to save, e.g. 'Report.docx' (Desktop) or a full path"),
+            ToolParameter("title", "string", "Document title"),
+            ToolParameter("sections", "array", "Sections: {heading, level 1-3, paragraphs: [..], bullets: [..]}", required=False, default=[]),
+            ToolParameter("open_after", "boolean", "Open in WordCraft when done (default true)", required=False, default=True),
+        ],
+        handler=handle_wordcraft_create,
+        requires_permission=False,
+    ))
+    registry.register(Tool(
+        name="wordcraft_read",
+        description="Read a .docx document: title, page count, and every paragraph with its style.",
+        category=ToolCategory.FILE_SYSTEM,
+        parameters=[ToolParameter("path", "string", "Path to the .docx file")],
+        handler=handle_wordcraft_read,
+        requires_permission=False,
+    ))
+    registry.register(Tool(
+        name="wordcraft_edit",
+        description="Append headings, paragraphs, bullets or page breaks to a .docx, or find and replace text, in place. Ops: append_heading {text, level}, append_paragraph {text}, append_bullets {items}, page_break, replace {find, replace}.",
+        category=ToolCategory.FILE_SYSTEM,
+        parameters=[
+            ToolParameter("path", "string", "Path to the .docx file"),
+            ToolParameter("operations", "array", "Ordered list of operations"),
+            ToolParameter("open_after", "boolean", "Open in WordCraft afterwards (default false)", required=False, default=False),
+        ],
+        handler=handle_wordcraft_edit,
+        requires_permission=False,
+    ))
+    registry.register(Tool(
+        name="gridcraft_create",
+        description="Create a GridCraft spreadsheet (.xlsx) from sheets of rows, then open it in GridCraft. Strings starting with '=' become formulas. Default output folder is the Desktop.",
+        category=ToolCategory.FILE_SYSTEM,
+        parameters=[
+            ToolParameter("output_path", "string", "Where to save, e.g. 'Budget.xlsx' (Desktop) or a full path"),
+            ToolParameter("sheets", "array", "Sheets: {name, rows: [[cell, ...], ...]}", required=False, default=[]),
+            ToolParameter("open_after", "boolean", "Open in GridCraft when done (default true)", required=False, default=True),
+        ],
+        handler=handle_gridcraft_create,
+        requires_permission=False,
+    ))
+    registry.register(Tool(
+        name="gridcraft_read",
+        description="Read a spreadsheet (.xlsx or .csv): sheet names and cell values as rows. Use sheet to read one sheet; max_rows caps the rows returned.",
+        category=ToolCategory.FILE_SYSTEM,
+        parameters=[
+            ToolParameter("path", "string", "Path to the .xlsx or .csv file"),
+            ToolParameter("sheet", "string", "Only this sheet", required=False, default=""),
+            ToolParameter("max_rows", "number", "Most rows to return per sheet (1-1000, default 200)", required=False, default=200),
+        ],
+        handler=handle_gridcraft_read,
+        requires_permission=False,
+    ))
+    registry.register(Tool(
+        name="gridcraft_edit",
+        description="Set cell values or formulas, add, rename or delete sheets in an existing .xlsx, in place. Ops: set {sheet?, range e.g. 'B4' or 'A1:C2', values: [[..]]}, add_sheet {name}, rename_sheet {sheet, name}, delete_sheet {sheet}.",
+        category=ToolCategory.FILE_SYSTEM,
+        parameters=[
+            ToolParameter("path", "string", "Path to the .xlsx file"),
+            ToolParameter("operations", "array", "Ordered list of operations"),
+            ToolParameter("open_after", "boolean", "Open in GridCraft afterwards (default false)", required=False, default=False),
+        ],
+        handler=handle_gridcraft_edit,
+        requires_permission=False,
+    ))
+    registry.register(Tool(
+        name="pdfcraft_read",
+        description="Read a PDF: page count, title, author, and the text of each page (or only the pages given, e.g. '1-3,5').",
+        category=ToolCategory.FILE_SYSTEM,
+        parameters=[
+            ToolParameter("path", "string", "Path to the PDF"),
+            ToolParameter("pages", "string", "Pages to read, e.g. '1-3,5' (default all)", required=False, default=""),
+        ],
+        handler=handle_pdfcraft_read,
+        requires_permission=False,
+    ))
+    registry.register(Tool(
+        name="pdfcraft_merge",
+        description="Merge two or more PDFs, in the order given, into one new PDF, then open it in PdfCraft.",
+        category=ToolCategory.FILE_SYSTEM,
+        parameters=[
+            ToolParameter("input_paths", "array", "PDF paths in merge order (at least two)"),
+            ToolParameter("output_path", "string", "Where to save the merged PDF"),
+            ToolParameter("open_after", "boolean", "Open in PdfCraft when done (default true)", required=False, default=True),
+        ],
+        handler=handle_pdfcraft_merge,
+        requires_permission=False,
+    ))
+    registry.register(Tool(
+        name="pdfcraft_split",
+        description="Split a PDF by page ranges: each range becomes its own new PDF, e.g. ['1-3', '5'] makes two files. Files are never overwritten.",
+        category=ToolCategory.FILE_SYSTEM,
+        parameters=[
+            ToolParameter("input_path", "string", "Path to the PDF"),
+            ToolParameter("page_ranges", "array", "One page range per output file, e.g. ['1-3', '5']"),
+            ToolParameter("output_dir", "string", "Folder for the new files (default: a '<name>_split' folder next to the PDF)", required=False, default=""),
+        ],
+        handler=handle_pdfcraft_split,
+        requires_permission=False,
     ))
 
     return registry
