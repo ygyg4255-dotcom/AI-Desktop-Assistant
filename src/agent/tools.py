@@ -22,7 +22,8 @@ import inspect
 from src.services.telegram_service import send_telegram_message, send_telegram_message_async, send_telegram_document, send_telegram_photo_async
 from src.config.settings import get_config_value
 from src.config.log import get_logger, redact_secrets
-from src.agent.vision import CameraError, capture_camera_jpeg, compress_image_file, image_block
+from src.agent import screen_geometry as geo
+from src.agent.vision import CameraError, capture_camera_jpeg, compress_image_file, image_block, jpeg_dimensions
 from src.services.camera_service import CameraServiceError, get_camera_service
 from src.services.reminder_service import ReminderError, get_reminder_service, parse_when
 
@@ -2148,10 +2149,18 @@ def handle_capture_and_inspect_screen(params: Dict[str, Any]) -> ToolResult:
 
     # 4. Compressed copy for the model's own eyes (max 1280px wide, JPEG q75)
     image = None
+    image_size = None
     try:
-        image = image_block(compress_image_file(screenshot_path))
+        jpeg = compress_image_file(screenshot_path)
+        image = image_block(jpeg)
+        image_size = jpeg_dimensions(jpeg)
     except Exception as e:
         logger.warning("Could not prepare screenshot for vision: %s", e)
+
+    # Clicks the model picks on this image are scaled from image pixels to real screen pixels
+    # by gui_click. No image attached means no coordinates to map, so the record is cleared.
+    geo.record_screenshot(image_size)
+    screen = geo.screen_size()
 
     top_apps = ", ".join(visible_windows[:8]) if visible_windows else "None detected"
     summary = (
@@ -2170,6 +2179,8 @@ def handle_capture_and_inspect_screen(params: Dict[str, Any]) -> ToolResult:
             "screenshot_path": str(screenshot_path),
             "sent_to_telegram": sent_telegram,
             "image_attached": image is not None,
+            "screenshot_size": list(image_size) if image_size else None,
+            "screen_size": list(screen) if screen else None,
             "summary": summary,
             "message": f"✅ Captured screen. Active window is '{active_window}'.{telegram_status}"
         },
@@ -2309,7 +2320,8 @@ _CREDENTIAL_WINDOW = re.compile(
 
 
 def _load_pyautogui():
-    """Import pyautogui with the fail-safe on (mouse to a screen corner aborts) and a short pause."""
+    """Import pyautogui with DPI awareness, the fail-safe on (mouse to a screen corner aborts) and a short pause."""
+    geo.ensure_dpi_aware()  # before pyautogui reads metrics, so its coordinates are physical pixels
     import pyautogui
     pyautogui.FAILSAFE = True
     pyautogui.PAUSE = 0.1
@@ -2345,6 +2357,7 @@ def _run_gui(action) -> ToolResult:
 
 
 def handle_gui_click(params: Dict[str, Any]) -> ToolResult:
+    """Click at x, y. After a capture, x and y are pixels of that screenshot and are scaled to the screen."""
     try:
         x, y = int(params.get("x")), int(params.get("y"))
         clicks = int(params.get("clicks", 1) or 1)
@@ -2356,14 +2369,17 @@ def handle_gui_click(params: Dict[str, Any]) -> ToolResult:
     if not 1 <= clicks <= 3:
         return ToolResult(success=False, output=None, error="clicks must be 1, 2 or 3.")
     if x < 0 or y < 0:
-        return ToolResult(success=False, output=None, error="x and y must be non-negative screen coordinates.")
+        return ToolResult(success=False, output=None, error="x and y must be non-negative coordinates.")
 
     def _do(pg):
         width, height = pg.size()
-        if x >= width or y >= height:
-            return ToolResult(success=False, output=None, error=f"({x}, {y}) is outside the {width}x{height} screen.")
-        pg.click(x=x, y=y, button=button, clicks=clicks)
-        return ToolResult(success=True, output={"message": f"Clicked {button} x{clicks} at ({x}, {y})."})
+        sx, sy = geo.map_to_screen(x, y, (width, height))
+        if sx < 0 or sy < 0 or sx >= width or sy >= height:
+            return ToolResult(success=False, output=None,
+                              error=f"({x}, {y}) is outside the {width}x{height} screen.")
+        pg.click(x=sx, y=sy, button=button, clicks=clicks)
+        where = f"({sx}, {sy})" if (sx, sy) == (x, y) else f"({sx}, {sy}) (from screenshot point ({x}, {y}))"
+        return ToolResult(success=True, output={"message": f"Clicked {button} x{clicks} at {where}."})
 
     return _run_gui(_do)
 

@@ -150,6 +150,10 @@ def make_reminder_handler(tts, notify_telegram=send_telegram_message_async,
 
 def main() -> None:
     """Coordinate and supervise all Altron subsystems concurrently."""
+    # Per-monitor DPI awareness before any screen metrics are read, so GUI clicks and screenshots
+    # share physical pixel coordinates on scaled displays.
+    from src.agent.screen_geometry import ensure_dpi_aware
+    ensure_dpi_aware()
     log_path = setup_logging()
     logger.info("Starting Altron (log file: %s)", log_path)
 

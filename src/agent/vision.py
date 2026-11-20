@@ -10,7 +10,7 @@ import base64
 import io
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Union
+from typing import Any, Dict, List, Tuple, Union
 
 from src.config.log import get_logger
 
@@ -36,6 +36,14 @@ def compress_image(img, max_width: int = MAX_WIDTH, quality: int = JPEG_QUALITY)
     buf = io.BytesIO()
     img.save(buf, format="JPEG", quality=quality, optimize=True)
     return buf.getvalue()
+
+
+def jpeg_dimensions(jpeg_bytes: bytes) -> Tuple[int, int]:
+    """Pixel (width, height) of encoded image bytes, read from the header only."""
+    from PIL import Image
+
+    with Image.open(io.BytesIO(jpeg_bytes)) as img:
+        return img.size
 
 
 def compress_image_file(path: Union[str, Path], max_width: int = MAX_WIDTH, quality: int = JPEG_QUALITY) -> bytes:
