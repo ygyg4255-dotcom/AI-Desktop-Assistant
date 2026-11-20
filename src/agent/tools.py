@@ -26,7 +26,7 @@ from src.config.settings import get_config_value
 from src.config.log import get_logger, redact_secrets
 from src.agent import screen_geometry as geo
 from src.agent.vision import CameraError, capture_camera_jpeg, compress_image_file, image_block, jpeg_dimensions
-from src.services import artcraft_service, media_service, network_service, web_search_service
+from src.services import artcraft_service, media_service, network_service, steam_service, web_search_service
 from src.services.camera_service import CameraServiceError, get_camera_service
 from src.services.notes_service import NotesError, get_notes_service
 from src.services.reminder_service import ReminderError, get_reminder_service, parse_when
@@ -3827,6 +3827,80 @@ def handle_pdfcraft_split(params: Dict[str, Any]) -> ToolResult:
                           params.get("page_ranges") or [], output_dir=params.get("output_dir") or None)
 
 
+# ---------------------------------------------------------------- Steam
+
+def _steam_open_uri(uri: str) -> Optional[str]:
+    """Launch a steam:// URI through the registered protocol handler; return an error or None."""
+    if not uri.startswith("steam://"):
+        return "Only steam:// addresses can be opened."
+    if platform.system() != "Windows":
+        return "Steam control is only supported on Windows."
+    try:
+        os.startfile(uri)  # type: ignore[attr-defined]  # Windows only
+    except OSError as err:
+        logger.debug("Steam URI launch failed: %s", err)
+        return "Could not open Steam. Is it installed?"
+    return None
+
+
+def handle_steam_list_installed(params: Dict[str, Any]) -> ToolResult:
+    try:
+        games = steam_service.list_installed()
+    except steam_service.SteamError as err:
+        return _tool_error(str(err))
+    return ToolResult(success=True, output={"count": len(games), "games": games})
+
+
+def handle_steam_launch_game(params: Dict[str, Any]) -> ToolResult:
+    try:
+        game = steam_service.resolve_installed(params.get("name_or_appid", ""), steam_service.list_installed())
+        uri = steam_service.launch_uri(game["appid"])
+    except steam_service.SteamError as err:
+        return _tool_error(str(err))
+    problem = _steam_open_uri(uri)
+    if problem:
+        return _tool_error(problem)
+    return ToolResult(success=True, output={"appid": game["appid"], "name": game["name"],
+                                            "message": f"Launching {game['name']} through Steam."})
+
+
+def handle_steam_search_store(params: Dict[str, Any]) -> ToolResult:
+    try:
+        results = steam_service.search_store(params.get("query", ""), fetch=_public_get_text,
+                                             limit=params.get("max_results") or 5)
+    except steam_service.SteamError as err:
+        return _tool_error(str(err))
+    except (OSError, http.client.HTTPException, ValueError) as err:
+        logger.debug("Steam store search failed: %s", err)
+        return _tool_error("Could not reach the Steam store right now.")
+    return ToolResult(success=True, output={"count": len(results), "results": results})
+
+
+def handle_steam_open_store_page(params: Dict[str, Any]) -> ToolResult:
+    target = str(params.get("appid_or_query", "")).strip()
+    name = ""
+    try:
+        if target.lower() in ("cart", "my cart", "basket"):
+            uri = steam_service.cart_uri()
+        elif target.isdigit():
+            uri = steam_service.store_uri(target)
+        else:
+            results = steam_service.search_store(target, fetch=_public_get_text, limit=1)
+            if not results:
+                return _tool_error(f"No Steam store result for '{target}'.")
+            uri, name = steam_service.store_uri(results[0]["appid"]), results[0]["name"]
+    except steam_service.SteamError as err:
+        return _tool_error(str(err))
+    except (OSError, http.client.HTTPException, ValueError) as err:
+        logger.debug("Steam store lookup failed: %s", err)
+        return _tool_error("Could not reach the Steam store right now.")
+    problem = _steam_open_uri(uri)
+    if problem:
+        return _tool_error(problem)
+    return ToolResult(success=True, output={"uri": uri, "name": name,
+                                            "message": f"Opened {name or target or 'the page'} in the Steam client."})
+
+
 def create_default_registry() -> ToolRegistry:
     """Create and populate the default tool registry."""
     registry = ToolRegistry()
@@ -4546,6 +4620,43 @@ def create_default_registry() -> ToolRegistry:
             ToolParameter("output_dir", "string", "Folder for the new files (default: a '<name>_split' folder next to the PDF)", required=False, default=""),
         ],
         handler=handle_pdfcraft_split,
+        requires_permission=False,
+    ))
+
+    # Steam: library scan, launch, public store search and in-client store pages.
+    registry.register(Tool(
+        name="steam_list_installed",
+        description="List installed Steam games (appid and name) by scanning the local Steam library folders.",
+        category=ToolCategory.SYSTEM,
+        parameters=[],
+        handler=handle_steam_list_installed,
+        requires_permission=False,
+    ))
+    registry.register(Tool(
+        name="steam_launch_game",
+        description="Launch an installed Steam game by name or appid via steam://rungameid.",
+        category=ToolCategory.SYSTEM,
+        parameters=[ToolParameter("name_or_appid", "string", "Installed game name (or part of it) or numeric appid")],
+        handler=handle_steam_launch_game,
+        requires_permission=False,
+    ))
+    registry.register(Tool(
+        name="steam_search_store",
+        description="Search the public Steam store and return top matches with appid, name, price and discount.",
+        category=ToolCategory.BROWSER,
+        parameters=[
+            ToolParameter("query", "string", "Game name to search for"),
+            ToolParameter("max_results", "number", "How many results (default 5, max 10)", required=False, default=5),
+        ],
+        handler=handle_steam_search_store,
+        requires_permission=False,
+    ))
+    registry.register(Tool(
+        name="steam_open_store_page",
+        description="Open a game's store page inside the Steam desktop client (steam://store/<appid>). Pass an appid, a game name, or 'cart' to open the cart.",
+        category=ToolCategory.SYSTEM,
+        parameters=[ToolParameter("appid_or_query", "string", "Numeric appid, game name, or 'cart'")],
+        handler=handle_steam_open_store_page,
         requires_permission=False,
     ))
 

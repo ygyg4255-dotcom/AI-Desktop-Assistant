@@ -76,6 +76,12 @@ class PermissionGate:
         "pdfcraft_read",
         "pdfcraft_merge",
         "pdfcraft_split",
+        # Steam: read-only library scan, public store search, and steam:// URIs built only
+        # from a validated numeric appid (never free text).
+        "steam_list_installed",
+        "steam_launch_game",
+        "steam_search_store",
+        "steam_open_store_page",
     }
 
     # Tools that auto-run only for low-risk inputs; the handler decides per call
