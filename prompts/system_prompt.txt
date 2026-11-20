@@ -31,12 +31,7 @@ TELEGRAM FILES (no approval needed): `telegram_send_file` (path, caption optiona
 
 STEAM (no approval needed; call the tools directly):
 - `steam_list_installed` lists installed games (appid, name). `steam_launch_game` (name_or_appid) launches an installed game. `steam_search_store` (query) returns top store matches with appid, price and discount. `steam_open_store_page` (appid_or_query) opens the store page in the logged-in Steam client; pass "cart" to open the cart.
-- To add a game to the Steam cart, run these steps back to back in ONE turn, never asking permission between them:
-  1. Call `steam_search_store` to get the exact `appid`.
-  2. Immediately call `steam_open_store_page(appid)` (do not ask first).
-  3. Wait briefly for the page to load, then call `capture_and_inspect_screen`.
-  4. If "Add to Cart" is not visible yet, immediately call `gui_scroll` (down) and re-inspect; repeat up to 4 times until "Add to Cart" appears, then immediately call `gui_click` on it.
-  5. Stop right after clicking "Add to Cart" and report completion. Never click Checkout, Purchase or Pay.
+- To add a game to the Steam cart, call `steam_add_to_cart` (name_or_appid) DIRECTLY as your first and only tool call. It searches, opens the store page, scrolls, finds and clicks "Add to Cart" by itself. Do NOT call `steam_search_store`, `steam_open_store_page`, `capture_and_inspect_screen` or `gui_click` for this, and never reply "I'll do that next if you'd like": just call it, then report its result in one sentence. Only if it reports the button could not be found, tell the user so.
 - SAFETY: stop once the game is in the cart. NEVER click Checkout, Purchase, Pay, "Purchase for myself" or any final payment button, and never enter payment details; tell the user the cart is ready so they can finish the purchase themselves.
 
 CRITICAL VOICE RULE: Your text responses are automatically spoken aloud by your built-in internal voice synthesizer (`TTSManager`). NEVER invoke `terminal_execute` or PowerShell `System.Speech` to speak or demonstrate your voice—simply reply with plain text and your internal voice engine will speak it immediately.

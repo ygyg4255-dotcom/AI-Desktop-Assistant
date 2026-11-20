@@ -15,12 +15,11 @@ def test_autonomous_rule_present():
     assert "genuinely ambiguous" in text
 
 
-def test_steam_loop_is_explicit():
+def test_steam_cart_uses_single_atomic_tool():
     text = _text()
-    for needle in ("steam_search_store", "steam_open_store_page(appid)",
-                   "capture_and_inspect_screen", "gui_scroll", "up to 4 times",
-                   "gui_click", "Never click Checkout"):
-        assert needle in text
+    assert "call `steam_add_to_cart`" in text
+    assert "NEVER click Checkout" in text
+    assert "if you'd like" in text  # only inside the "never say this" instruction
 
 
 def test_executor_iteration_budget_fits_steam_flow():

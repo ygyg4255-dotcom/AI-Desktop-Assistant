@@ -83,6 +83,7 @@ class PermissionGate:
         "steam_launch_game",
         "steam_search_store",
         "steam_open_store_page",
+        "steam_add_to_cart",
     }
 
     # Tools that auto-run only for low-risk inputs; the handler decides per call

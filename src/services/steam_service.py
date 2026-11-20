@@ -226,3 +226,74 @@ def search_store(query: str, fetch: Callable[[str], str], limit: int = 5) -> Lis
     if not isinstance(payload, dict):
         raise SteamError("Steam returned an unexpected search response.")
     return parse_search_results(payload, limit)
+
+
+# ---------------------------------------------------------------- Atomic add-to-cart
+
+ADD_TO_CART_ATTEMPTS = 5
+PAGE_LOAD_WAIT_S = 3.0
+SCROLL_WAIT_S = 1.0
+_ADD_TO_CART = re.compile(r"add\s+to\s+(?:your\s+)?cart", re.IGNORECASE)
+_PAYMENT_WORDS = re.compile(r"check\s*out|purchase|\bpay\b|buy\s+now|place\s+order", re.IGNORECASE)
+
+
+def is_add_to_cart_label(label: str) -> bool:
+    """True only for an 'Add to Cart' label that is not also a checkout/purchase/pay control."""
+    label = label or ""
+    return bool(_ADD_TO_CART.search(label)) and not _PAYMENT_WORDS.search(label)
+
+
+def add_to_cart(
+    name_or_appid: str,
+    *,
+    search: Callable[[str], List[Dict[str, Any]]],
+    open_uri: Callable[[str], Optional[str]],
+    locate: Callable[[], Optional[Dict[str, Any]]],
+    click: Callable[[int, int], Optional[str]],
+    scroll: Callable[[], Optional[str]],
+    sleep: Callable[[float], None],
+    attempts: int = ADD_TO_CART_ATTEMPTS,
+) -> Dict[str, Any]:
+    """Open a game's store page in the Steam client and click 'Add to Cart', all in one call.
+
+    ``locate`` captures the screen and returns ``{"label", "x", "y"}`` for a visible 'Add to Cart'
+    button (or None). It is clicked at most once and the function returns immediately afterwards;
+    anything that is not an 'Add to Cart' label (Checkout, Purchase, Pay...) is never clicked.
+    Returns ``{"added": bool, "message": str, ...}``; raises SteamError for invalid input.
+    """
+    target = str(name_or_appid or "").strip()
+    if not target:
+        raise SteamError("Give a game name or appid.")
+    name = ""
+    if target.isdigit():
+        appid = _valid_appid(target)
+    else:
+        results = search(target)
+        if not results:
+            raise SteamError(f"No Steam store result for '{target}'.")
+        appid, name = _valid_appid(results[0]["appid"]), str(results[0].get("name", ""))
+    label = name or f"app {appid}"
+
+    problem = open_uri(store_uri(appid))
+    if problem:
+        raise SteamError(problem)
+    sleep(PAGE_LOAD_WAIT_S)
+
+    for attempt in range(1, max(1, attempts) + 1):
+        hit = locate()
+        if hit and is_add_to_cart_label(str(hit.get("label", ""))):
+            err = click(int(hit["x"]), int(hit["y"]))
+            if err:
+                return {"added": False, "appid": appid, "name": name,
+                        "message": f"Found 'Add to Cart' for {label} but the click failed: {err}"}
+            return {"added": True, "appid": appid, "name": name, "attempts": attempt,
+                    "message": f"Added {label} to your Steam cart. Checkout was not touched; "
+                               "finish the purchase yourself."}
+        if attempt < attempts:
+            err = scroll()
+            if err:
+                logger.debug("Steam page scroll failed: %s", err)
+            sleep(SCROLL_WAIT_S)
+    return {"added": False, "appid": appid, "name": name, "attempts": attempts,
+            "message": f"Opened {label} in Steam but could not find an 'Add to Cart' button "
+                       f"after {attempts} attempts (it may be owned, free, or need a purchase option)."}

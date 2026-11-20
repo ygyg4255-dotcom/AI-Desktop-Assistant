@@ -3912,6 +3912,84 @@ def handle_steam_open_store_page(params: Dict[str, Any]) -> ToolResult:
                                             "message": f"Opened {name or target or 'the page'} in the Steam client."})
 
 
+_LOCATE_PROMPT = (
+    "This is a screenshot of the Steam client showing a game's store page. Find the green "
+    "'Add to Cart' button. Reply with ONLY JSON: {\"found\": true, \"label\": \"<exact button text>\", "
+    "\"x\": <int>, \"y\": <int>} using pixel coordinates of this image, or {\"found\": false}. "
+    "Never return Checkout, Purchase, Pay or Buy Now buttons."
+)
+
+
+def _steam_locate_add_to_cart() -> Optional[Dict[str, Any]]:
+    """Screenshot the desktop and ask Claude vision where the 'Add to Cart' button is."""
+    import time
+    from PIL import ImageGrab
+    from src.services.ai_client import AIClient
+    from src.config.settings import DEFAULT_FAST_MODEL
+
+    path = Path.home() / ".ai-desktop-assistant" / "screenshots" / f"steam_cart_{int(time.time())}.png"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    ImageGrab.grab(all_screens=True).save(str(path), format="PNG")
+    jpeg = compress_image_file(path)
+    geo.record_screenshot(jpeg_dimensions(jpeg))
+    client = AIClient(
+        api_key=get_config_value("AI_API_KEY", "ANTHROPIC_API_KEY", default=""),
+        model=get_config_value("AI_FAST_MODEL", default=DEFAULT_FAST_MODEL),
+        max_tokens=200, timeout=45.0,
+    )
+    response = client.make_tool_request({
+        "max_tokens": 200,
+        "messages": [{"role": "user", "content": [image_block(jpeg), {"type": "text", "text": _LOCATE_PROMPT}]}],
+    })
+    text = "".join(b.get("text", "") for b in response.get("content", []) if isinstance(b, dict))
+    match = re.search(r"\{.*\}", text, re.DOTALL)
+    if not match:
+        return None
+    try:
+        data = json.loads(match.group(0))
+        if data.get("found"):
+            return {"label": str(data.get("label", "")), "x": int(data["x"]), "y": int(data["y"])}
+    except (ValueError, KeyError, TypeError) as err:
+        logger.debug("Unreadable Steam locate reply: %s", err)
+    return None
+
+
+def _steam_scroll_down() -> Optional[str]:
+    def _do(pg):
+        width, height = pg.size()
+        pg.moveTo(width // 2, height // 2)  # wheel events go to the window under the cursor
+        pg.scroll(-10 * 120 if platform.system() == "Windows" else -10)
+        return ToolResult(success=True, output={})
+    result = _run_gui(_do)
+    return None if result.success else result.error
+
+
+def _steam_click(x: int, y: int) -> Optional[str]:
+    result = handle_gui_click({"x": x, "y": y})
+    return None if result.success else result.error
+
+
+def handle_steam_add_to_cart(params: Dict[str, Any]) -> ToolResult:
+    import time
+    try:
+        outcome = steam_service.add_to_cart(
+            str(params.get("name_or_appid", "")),
+            search=lambda q: steam_service.search_store(q, fetch=_public_get_text, limit=1),
+            open_uri=_steam_open_uri,
+            locate=_steam_locate_add_to_cart,
+            click=_steam_click,
+            scroll=_steam_scroll_down,
+            sleep=time.sleep,
+        )
+    except steam_service.SteamError as err:
+        return _tool_error(str(err))
+    except (OSError, http.client.HTTPException, ConnectionError) as err:
+        logger.debug("Steam add-to-cart failed: %s", err)
+        return _tool_error("Could not reach the Steam store or the vision service right now.")
+    return ToolResult(success=outcome["added"], output=outcome,
+                      error=None if outcome["added"] else outcome["message"])
+
+
 def create_default_registry() -> ToolRegistry:
     """Create and populate the default tool registry."""
     registry = ToolRegistry()
@@ -4680,6 +4758,14 @@ def create_default_registry() -> ToolRegistry:
         category=ToolCategory.SYSTEM,
         parameters=[ToolParameter("appid_or_query", "string", "Numeric appid, game name, or 'cart'")],
         handler=handle_steam_open_store_page,
+        requires_permission=False,
+    ))
+    registry.register(Tool(
+        name="steam_add_to_cart",
+        description="Add a game to the Steam cart in ONE call: finds the appid, opens its store page in the Steam client, scrolls until 'Add to Cart' is visible and clicks it. Never checks out or pays.",
+        category=ToolCategory.SYSTEM,
+        parameters=[ToolParameter("name_or_appid", "string", "Game name or numeric appid")],
+        handler=handle_steam_add_to_cart,
         requires_permission=False,
     ))
 
