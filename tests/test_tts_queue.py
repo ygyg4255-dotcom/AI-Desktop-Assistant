@@ -1,4 +1,5 @@
 """Queued, non-blocking TTS: ordering, back-to-back playback, stop(), engine fallback."""
+import sys
 import threading
 import time
 
@@ -10,8 +11,11 @@ from src.services.voice_service import TTSManager, is_speaking_event
 
 
 @pytest.fixture(autouse=True)
-def quiet(monkeypatch):
+def quiet(monkeypatch, tmp_path):
+    from src.services import piper_voices
     monkeypatch.setattr(voice_service, "update_hud_status", lambda *a, **k: None)
+    # Never read real Piper voices from the user's data dir during tests.
+    monkeypatch.setattr(piper_voices, "default_voices_dir", lambda: tmp_path / "no-voices")
     is_speaking_event.clear()
     yield
     is_speaking_event.clear()
@@ -134,8 +138,10 @@ def test_piper_success_short_circuits_other_engines(tts, monkeypatch):
     tts._speak_one("Hello there.")
 
 
-def test_piper_not_configured_falls_through_without_error(tts, monkeypatch):
+def test_piper_not_configured_falls_through_without_error(tts, monkeypatch, tmp_path):
+    from src.services import piper_voices
     monkeypatch.setattr(voice_service, "get_config_value", lambda *a, **k: "")
+    monkeypatch.setattr(piper_voices, "default_voices_dir", lambda: tmp_path / "none")  # no real voices
     assert tts._speak_piper("Hello.") is False
 
 
@@ -148,7 +154,8 @@ def test_piper_python_voice_is_used_and_played(tts, monkeypatch, tmp_path):
         class config:
             sample_rate = 16000
 
-        def synthesize_stream_raw(self, text):
+        def synthesize_stream_raw(self, text, length_scale=None):
+            assert length_scale == pytest.approx(1.06)
             yield b"\x01\x00" * 4
 
     played = {}
@@ -186,7 +193,7 @@ def test_multi_sentence_speak_is_split_and_ordered(tts):
 
 
 def test_next_sentence_is_prefetched_while_current_plays(tts, monkeypatch):
-    monkeypatch.setattr(tts, "_piper_model_path", lambda: "")
+    monkeypatch.setattr(tts, "_piper_model_path", lambda *a, **k: "")
     synthesized, release = [], threading.Event()
     tts._synthesize = lambda text: synthesized.append(text) or ("dry", text.encode())
     playing = threading.Event()
@@ -208,7 +215,7 @@ def test_next_sentence_is_prefetched_while_current_plays(tts, monkeypatch):
 
 
 def test_stop_cancels_prefetched_sentences_midqueue(tts, monkeypatch):
-    monkeypatch.setattr(tts, "_piper_model_path", lambda: "")
+    monkeypatch.setattr(tts, "_piper_model_path", lambda *a, **k: "")
     monkeypatch.setattr(tts, "_speak_piper", lambda t: False)
     gate, played = threading.Event(), []
     tts._synthesize = lambda text: gate.wait(2) and ("dry", b"x")
@@ -232,7 +239,7 @@ def test_stop_cancels_prefetched_sentences_midqueue(tts, monkeypatch):
 
 
 # -- startup-latency work ----------------------------------------------------
-def test_split_first_clause_splits_long_first_sentence_after_60_chars():
+def test_split_first_clause_splits_long_first_sentence_after_30_chars():
     from src.services.voice_service import split_first_clause
     s = "x" * 65 + ", and then the rest of the sentence continues here."
     head, tail = split_first_clause(s)
@@ -294,3 +301,142 @@ def test_first_sentence_latency_stages_account_for_total(caplog):
     assert t["total_to_play_ms"] == pytest.approx(named + t["other_ms"], abs=1.0)
     assert t["handoff_to_play_ms"] >= 400
     assert "TTS first-sentence latency" in caplog.text
+
+
+# -- Piper: prefetch, fallback, per-language voices, warm-up ----------------
+class FakeVoice:
+    """Stands in for a piper-tts 1.2 voice; records (text, length_scale) per call."""
+
+    class config:
+        sample_rate = 16000
+
+    def __init__(self, fail=False):
+        self.calls = []
+        self.fail = fail
+
+    def synthesize_stream_raw(self, text, length_scale=None):
+        self.calls.append((text, length_scale))
+        if self.fail:
+            raise RuntimeError("piper exploded")
+        yield b"\x01\x00" * 800
+
+
+class FakeSoundDevice:
+    def __init__(self):
+        self.played = []
+
+    def play(self, samples, samplerate):
+        self.played.append((len(samples), samplerate))
+
+    def wait(self):
+        pass
+
+
+def _cfg(values):
+    def get(*keys, default=None, **_):
+        for key in keys:
+            if key in values:
+                return values[key]
+        return default
+    return get
+
+
+@pytest.fixture
+def piper_env(tts, monkeypatch, tmp_path):
+    """Isolate Piper: no real voices folder, a fake sounddevice, and a model file that exists."""
+    from src.services import piper_voices
+    monkeypatch.setattr(piper_voices, "default_voices_dir", lambda: tmp_path / "no-voices")
+    en_model = tmp_path / "en.onnx"
+    en_model.write_bytes(b"x")
+    sd = FakeSoundDevice()
+    monkeypatch.setitem(sys.modules, "sounddevice", sd)
+    base = {"PIPER_MODEL_PATH": str(en_model), "ALTRON_VOICE_FX": "none"}
+    return {"tts": tts, "mp": monkeypatch, "model": en_model, "sd": sd, "base": base, "tmp": tmp_path}
+
+
+def test_piper_is_rendered_ahead_by_prefetch_and_rendered_once(piper_env):
+    env, mp = piper_env, piper_env["mp"]
+    tts = env["tts"]
+    voice = FakeVoice()
+    mp.setattr(voice_service, "get_config_value", _cfg(env["base"]))
+    mp.setattr(tts, "_load_piper_voice", lambda p: voice)
+    tts._synthesize = lambda text: pytest.fail("edge-tts must not run when Piper renders")
+    tts.enqueue("Hello there. Second line.")
+    assert wait_for(lambda: len(env["sd"].played) == 2)
+    assert [c[0] for c in voice.calls] == ["Hello there.", "Second line."]
+    assert all(rate == 16000 for _, rate in env["sd"].played)
+
+
+def test_piper_failure_falls_back_to_prefetched_edge_audio(piper_env):
+    env, mp = piper_env, piper_env["mp"]
+    tts = env["tts"]
+    mp.setattr(voice_service, "get_config_value", _cfg(env["base"]))
+    mp.setattr(tts, "_load_piper_voice", lambda p: FakeVoice(fail=True))
+    edge_calls = []
+    tts._synthesize = lambda text: edge_calls.append(text) or ("dry", b"mp3")
+    played = []
+    mp.setattr(tts, "_play_prepared", lambda prepared: played.append(prepared) or True)
+    tts.enqueue("Only one sentence here.")
+    assert wait_for(lambda: tts.finished)
+    assert edge_calls == ["Only one sentence here."]
+    assert played == [("dry", b"mp3")]
+    assert env["sd"].played == []
+
+
+def test_arabic_text_never_uses_the_english_voice(piper_env):
+    env, mp = piper_env, piper_env["mp"]
+    tts = env["tts"]
+    mp.setattr(voice_service, "get_config_value", _cfg(env["base"]))
+    mp.setattr(tts, "_load_piper_voice", lambda p: pytest.fail("English voice must not read Arabic"))
+    assert tts._speak_piper("مرحبا بك") is False
+
+
+def test_warm_up_preloads_both_voices_with_probe_and_length_scale(piper_env, tmp_path):
+    env, mp = piper_env, piper_env["mp"]
+    tts = env["tts"]
+    ar_model = tmp_path / "ar.onnx"
+    ar_model.write_bytes(b"x")
+    values = dict(env["base"], PIPER_MODEL_PATH_AR=str(ar_model))
+    mp.setattr(voice_service, "get_config_value", _cfg(values))
+    loaded = {}
+
+    def load(path):
+        loaded[path] = FakeVoice()
+        return loaded[path]
+
+    mp.setattr(tts, "_load_piper_voice", load)
+    tts._preload_piper()
+    assert set(loaded) == {str(env["model"]), str(ar_model)}
+    assert loaded[str(env["model"])].calls == [("Ready.", pytest.approx(1.06))]
+    (ar_text, ar_scale), = loaded[str(ar_model)].calls
+    assert ar_text and ar_scale == pytest.approx(1.06)
+
+
+def test_length_scale_is_read_from_config(piper_env):
+    env, mp = piper_env, piper_env["mp"]
+    tts = env["tts"]
+    voice = FakeVoice()
+    mp.setattr(voice_service, "get_config_value", _cfg(dict(env["base"], PIPER_LENGTH_SCALE="1.2")))
+    mp.setattr(tts, "_load_piper_voice", lambda p: voice)
+    rendered = tts._piper_render("Hi.")
+    assert rendered is not None
+    assert voice.calls == [("Hi.", pytest.approx(1.2))]
+
+
+def test_piper_13_api_receives_synthesis_config_length_scale(tts):
+    pytest.importorskip("piper")
+    seen = {}
+
+    class Voice13:
+        def synthesize(self, text, syn_config=None, include_alignments=False):
+            seen["length_scale"] = syn_config.length_scale
+
+            class Chunk:
+                audio_int16_bytes = b"\x00\x00" * 10
+                sample_rate = 22050
+
+            yield Chunk()
+
+    pcm, rate = tts._piper_synthesize_lib(Voice13(), "Hi.", 1.06)
+    assert seen["length_scale"] == pytest.approx(1.06)
+    assert rate == 22050 and len(pcm) == 20

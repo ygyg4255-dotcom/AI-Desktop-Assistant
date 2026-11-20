@@ -23,6 +23,7 @@ from src.services.audio_input import (
 from src.services.groq_stt import GroqTranscriber
 from src.services.sentence_chunker import SentenceChunker
 from src.services.signals import CallbackSignal
+from src.services import piper_voices
 from src.services.voice_fx import FX_NONE, FX_ULTRON, apply_voice_fx, normalize_fx_name
 
 from src.services.hud_status import update_hud_status
@@ -89,18 +90,21 @@ def parse_wake_word(text: str) -> tuple[bool, str]:
 class _AudioSlot:
     """Hand-off cell between the prefetch thread (fills ``audio``) and the player."""
 
-    __slots__ = ("ready", "audio", "first", "t_enqueue", "timing", "t_prefetch_done")
+    __slots__ = ("ready", "audio", "first", "t_enqueue", "timing", "t_prefetch_done",
+                 "piper_tried", "piper_audio")
 
     def __init__(self, first: bool = False) -> None:
         self.t_prefetch_done = 0.0
         self.ready = threading.Event()
         self.audio = None
+        self.piper_tried = False   # prefetch attempted Piper for this sentence
+        self.piper_audio = None    # (int16 samples, rate) rendered ahead by Piper, or None
         self.first = first  # first sentence of an utterance: emit latency timings
         self.t_enqueue = time.monotonic()
         self.timing: dict = {}  # filled by the synthesizer (ms values)
 
 
-FIRST_CLAUSE_MIN_CHARS = 60
+FIRST_CLAUSE_MIN_CHARS = 30  # short first clause: sentence one renders in ~1-1.5 s of audio
 
 
 def split_first_clause(sentence: str, min_chars: int = FIRST_CLAUSE_MIN_CHARS) -> tuple[str, str]:
@@ -158,8 +162,9 @@ class TTSManager(QObject):
         # queued in, so anything older than the current generation is stale.
         self._gen = 0
         self._item_gen = 0
-        self._piper_voice = None
-        self._piper_failed = False
+        self._piper_voices: dict = {}    # model path -> loaded PiperVoice, kept warm
+        self._piper_failed: set = set()  # model paths that could not load (not retried)
+        self._piper_lock = threading.Lock()
         self._piper_rate = 22050
         self._synth_timing: dict = {}
         if warm_up and enabled:
@@ -180,6 +185,21 @@ class TTSManager(QObject):
                 pygame.mixer.init()
         except Exception as err:
             logger.debug("mixer warm-up failed (will retry lazily): %s", err)
+        self._preload_piper()
+
+    def _preload_piper(self) -> None:
+        """Load each configured Piper voice and run one tiny synthesis so sentence one is hot."""
+        for lang, probe in (("en", "Ready."), ("ar", "\u062c\u0627\u0647\u0632.")):
+            model_path = self._piper_model_path(lang)
+            if not model_path:
+                continue
+            try:
+                voice = self._load_piper_voice(model_path)
+                if voice is not None:
+                    self._piper_synthesize_lib(voice, probe, self._piper_length_scale())
+                    logger.debug("Piper %s voice warmed up", lang)
+            except Exception as err:
+                logger.debug("Piper warm-up failed for %s, edge-tts will be used: %s", lang, err)
 
     @property
     def _stop_requested(self) -> bool:
@@ -431,13 +451,17 @@ class TTSManager(QObject):
         while True:
             gen, text, slot = self._prefetch_q.get()
             try:
-                if gen == self._gen and not self._piper_model_path():
+                if gen == self._gen:
                     self._synth_timing = {}
                     slot.timing["enqueue_to_prefetch_start_ms"] = (time.monotonic() - slot.t_enqueue) * 1000
-                    prepared = self._synthesize(text)
-                    slot.timing.update(self._synth_timing)
-                    if gen == self._gen:
-                        slot.audio = prepared
+                    if self._piper_model_path(piper_voices.language_for_text(text)):
+                        slot.piper_tried = True
+                        slot.piper_audio = self._piper_render(text)
+                    if slot.piper_audio is None:
+                        prepared = self._synthesize(text)
+                        slot.timing.update(self._synth_timing)
+                        if gen == self._gen:
+                            slot.audio = prepared
             except Exception:
                 logger.exception("TTS prefetch failed on one sentence")
             finally:
@@ -445,29 +469,43 @@ class TTSManager(QObject):
                 slot.ready.set()
 
     # -- Piper (local, fast) ------------------------------------------------
-    def _piper_model_path(self) -> str:
-        path = get_config_value("PIPER_MODEL_PATH")
-        return path if path and os.path.exists(path) else ""
+    def _piper_model_path(self, lang: str = "en") -> str:
+        """Model file for ``lang``: PIPER_MODEL_PATH (en) / PIPER_MODEL_PATH_AR, else the defaults."""
+        key = "PIPER_MODEL_PATH_AR" if lang == "ar" else "PIPER_MODEL_PATH"
+        return piper_voices.resolve_model_path(lang, get_config_value(key) or "")
+
+    @staticmethod
+    def _piper_length_scale() -> float:
+        return piper_voices.parse_length_scale(get_config_value("PIPER_LENGTH_SCALE"))
 
     def _load_piper_voice(self, model_path: str):
-        """Keep the Piper voice loaded between sentences (python ``piper-tts`` package)."""
-        if self._piper_voice is None and not self._piper_failed:
+        """Load once and keep the voice in RAM (python ``piper-tts`` package); None on failure."""
+        with self._piper_lock:
+            if model_path in self._piper_voices:
+                return self._piper_voices[model_path]
+            if model_path in self._piper_failed:
+                return None
             try:
                 from piper import PiperVoice
-                self._piper_voice = PiperVoice.load(model_path)
+                self._piper_voices[model_path] = PiperVoice.load(model_path)
             except Exception as err:
-                self._piper_failed = True
-                logger.debug("piper python package unavailable, using CLI if present: %s", err)
-        return self._piper_voice
+                self._piper_failed.add(model_path)
+                logger.debug("piper package/voice unavailable (%s), using CLI or edge-tts: %s",
+                             model_path, err)
+            return self._piper_voices.get(model_path)
 
-    def _piper_synthesize_lib(self, voice, text: str):
+    def _piper_synthesize_lib(self, voice, text: str, length_scale: float):
         """Return (pcm_int16_bytes, sample_rate) across piper-tts 1.2 and 1.3+ APIs."""
-        if hasattr(voice, "synthesize_stream_raw"):
-            return b"".join(voice.synthesize_stream_raw(text)), int(voice.config.sample_rate)
-        chunks = list(voice.synthesize(text))
+        if hasattr(voice, "synthesize_stream_raw"):  # piper-tts 1.2
+            pcm = b"".join(voice.synthesize_stream_raw(text, length_scale=length_scale))
+            return pcm, int(voice.config.sample_rate)
+        from piper import SynthesisConfig  # piper-tts 1.3+
+        chunks = list(voice.synthesize(text, syn_config=SynthesisConfig(length_scale=length_scale)))
+        if not chunks:
+            return b"", self._piper_rate
         return b"".join(c.audio_int16_bytes for c in chunks), int(chunks[0].sample_rate)
 
-    def _piper_synthesize_cli(self, model_path: str, text: str):
+    def _piper_synthesize_cli(self, model_path: str, text: str, length_scale: float):
         piper_exe = shutil.which("piper") or shutil.which("piper.exe")
         if not piper_exe:
             return b"", self._piper_rate
@@ -478,7 +516,7 @@ class TTSManager(QObject):
         except Exception as err:
             logger.debug("piper model config unreadable, assuming %s Hz: %s", rate, err)
         proc = subprocess.Popen(
-            [piper_exe, "--model", model_path, "--output-raw"],
+            [piper_exe, "--model", model_path, "--output-raw", "--length_scale", str(length_scale)],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
         )
         with self._lock:
@@ -490,29 +528,55 @@ class TTSManager(QObject):
                 self._current_ps_proc = None
         return (raw_audio if proc.returncode == 0 else b""), rate
 
-    def _speak_piper(self, text: str) -> bool:
-        """Speak with Piper when installed and PIPER_MODEL_PATH points at a voice; else False."""
-        model_path = self._piper_model_path()
+    def _piper_render(self, text: str):
+        """Synthesize ``text`` with Piper and apply the Ultron FX. Returns (int16 samples, rate) or None."""
+        model_path = self._piper_model_path(piper_voices.language_for_text(text))
         if not model_path:
-            return False
+            return None
         try:
+            length_scale = self._piper_length_scale()
             voice = self._load_piper_voice(model_path)
             if voice is not None:
-                pcm, rate = self._piper_synthesize_lib(voice, text)
+                pcm, rate = self._piper_synthesize_lib(voice, text, length_scale)
             else:
-                pcm, rate = self._piper_synthesize_cli(model_path, text)
-            if not pcm or self._stop_requested:
-                return False
-            import sounddevice as sd
+                pcm, rate = self._piper_synthesize_cli(model_path, text, length_scale)
+            if not pcm:
+                return None
             samples = np.frombuffer(pcm, dtype=np.int16)
             fx = normalize_fx_name(get_config_value("ALTRON_VOICE_FX", default=FX_ULTRON))
             if fx != FX_NONE:
                 samples = apply_voice_fx(samples, rate, fx)  # same Ultron FX as edge-tts
+            return samples, rate
+        except Exception as err:
+            logger.debug("Piper TTS failed, falling back: %s", err)
+            return None
+
+    def _speak_piper(self, text: str) -> bool:
+        """Play Piper audio for ``text`` (prefetched when possible); False -> caller uses edge-tts."""
+        if not self._piper_model_path(piper_voices.language_for_text(text)):
+            return False
+        slot = self._current_slot
+        if slot is not None:
+            while not slot.ready.wait(0.03):
+                if self._stop_requested:
+                    return False
+        if slot is not None and slot.piper_tried:
+            rendered = slot.piper_audio  # rendered ahead by the prefetch thread (None = failed)
+        else:
+            rendered = self._piper_render(text)
+        if rendered is None or self._stop_requested:
+            return False
+        samples, rate = rendered
+        if slot is not None and slot.first:
+            logger.info("Piper first sentence ready %d ms after enqueue",
+                        round((time.monotonic() - slot.t_enqueue) * 1000))
+        try:
+            import sounddevice as sd
             sd.play(samples, samplerate=rate)
             sd.wait()
             return not self._stop_requested
         except Exception as err:
-            logger.debug("Piper TTS failed, falling back: %s", err)
+            logger.debug("Piper playback failed, falling back: %s", err)
             return False
 
     # -- queue worker -------------------------------------------------------

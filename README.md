@@ -16,12 +16,22 @@
 ### Key Capabilities
 - **Radar HUD**: Local web dashboard (opened in app mode in Chromium browsers) showing live status, conversation log, hardware metrics, AI settings, and pending approval requests.
 - **Voice Wake-Word & Continuous Listening**: Always-on ambient listener triggered by saying *"Altron"* (or *"ألترون"* in Arabic), with automatic pause during speech playback to avoid audio feedback.
-- **Conditional Text-to-Speech (TTS)**: Context-aware voice responses using Windows SAPI / COM with automatic Markdown and code-block stripping.
+- **Conditional Text-to-Speech (TTS)**: Context-aware voice responses with automatic Markdown and code-block stripping. Local Piper voices are preferred (fast, offline); edge-tts and Windows SAPI are fallbacks. See *Local voice (Piper)* below.
 - **Desktop Icon Control**: Direct Win32 manipulation (`SysListView32`) to inspect, organize, and visually move desktop icons (center, corners, patterns, or precise coordinates).
 - **PDF Generation & Reporting**: Creates beautifully formatted, styled PDF reports supporting RTL Arabic and LTR English layouts.
 - **Remote Telegram Control**: Send commands and receive responses or generated documents directly on your phone via Telegram long-polling.
 - **Anthropic Claude Backend**: Uses the Claude Messages API directly (default model `claude-sonnet-5-5`, fast model `claude-haiku-5-5`). The endpoint is fixed to `api.anthropic.com` by design.
 - **Out-of-band Approvals**: Dangerous actions (file writes and deletes, terminal commands, closing apps, ...) never run unprompted. You approve or deny each request in the HUD or with Telegram inline buttons.
+
+### Local voice (Piper)
+Piper runs offline and is the preferred voice. Altron uses `en_US-joe-medium` for English and `ar_JO-kareem-medium` for Arabic, and applies the `ALTRON_VOICE_FX=ultron` chain to both Piper and edge-tts. Install the package and download the two voices once (Windows, from the project folder):
+
+```powershell
+pip install "piper-tts>=1.3.0"
+python -m piper.download_voices en_US-joe-medium ar_JO-kareem-medium --download-dir "$env:USERPROFILE\.ai-desktop-assistant\voices"
+```
+
+Altron looks for the models in that folder automatically. To use other files, set `PIPER_MODEL_PATH` (English), `PIPER_MODEL_PATH_AR` (Arabic) or `PIPER_LENGTH_SCALE` (default `1.06`) in `.env`. If Piper or a model is missing, Altron falls back to edge-tts, so nothing breaks.
 
 ### Architecture
 | Component | Role |

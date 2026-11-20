@@ -21,3 +21,5 @@ faster-whisper>=1.0.0
 # Prebuilt wheels of webrtcvad (the module is still imported as 'webrtcvad'); optional, voice VAD
 webrtcvad-wheels>=2.0.14; sys_platform == 'win32'
 webrtcvad>=2.0.10; sys_platform != 'win32'
+# Local Piper TTS (optional at runtime: Altron falls back to edge-tts without it)
+piper-tts>=1.3.0
