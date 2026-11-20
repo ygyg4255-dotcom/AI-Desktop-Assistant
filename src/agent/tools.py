@@ -2398,6 +2398,31 @@ def handle_network_control(params: Dict[str, Any]) -> ToolResult:
         if action == "wifi_connect":
             ssid = network_service.wifi_connect(params.get("ssid", ""))
             return ToolResult(success=True, output={"ssid": ssid, "message": f"Connecting to {ssid}."})
+        if action == "wifi_get_password":
+            ssid = network_service.validate_ssid(params.get("ssid", ""))
+            password = network_service.wifi_get_password(ssid)
+            # The password is returned as a field only. The message stays free of it, because
+            # the message is what gets spoken aloud and shown in the HUD.
+            return ToolResult(success=True, output={
+                "ssid": ssid, "password": password,
+                "message": f"Saved the Wi-Fi password for {ssid} in the Wi-Fi vault.",
+            })
+        if action == "wifi_forget":
+            info = network_service.wifi_forget(params.get("ssid", ""))
+            if info["backed_up"]:
+                msg = f"Forgot {info['ssid']}. Its password is backed up, so I can reconnect later."
+            else:
+                msg = f"Forgot {info['ssid']}. Its password was not backed up: {info['reason']}"
+            return ToolResult(success=True, output={**info, "message": msg})
+        if action == "wifi_connect_new":
+            password = str(params.get("password", "") or "")
+            try:
+                ssid = network_service.wifi_connect_new(params.get("ssid", ""), password or None)
+            except network_service.NetworkError as err:
+                raise network_service.NetworkError(redact_secrets(str(err), password)) from err
+            return ToolResult(success=True, output={
+                "ssid": ssid, "message": f"Connecting to {ssid}. Its password is stored in the Wi-Fi vault.",
+            })
         if action == "bluetooth_status":
             info = network_service.bluetooth_status()
             return ToolResult(success=True, output={**info, "message": f"Bluetooth service is {info['service']}."})
@@ -2418,7 +2443,8 @@ def handle_network_control(params: Dict[str, Any]) -> ToolResult:
         return _tool_error("Could not read the network or Bluetooth state from Windows.")
     return _tool_error(
         "Unknown network action. Use wifi_status, wifi_on, wifi_off, wifi_networks, wifi_connect, "
-        "bluetooth_status, bluetooth_devices, bluetooth_on or bluetooth_off."
+        "wifi_get_password, wifi_forget, wifi_connect_new, bluetooth_status, bluetooth_devices, "
+        "bluetooth_on or bluetooth_off."
     )
 
 
@@ -4155,13 +4181,15 @@ def create_default_registry() -> ToolRegistry:
     ))
     registry.register(Tool(
         name="network_control",
-        description="Check or toggle Wi-Fi and Bluetooth on Windows. Actions: wifi_status, wifi_on, wifi_off, wifi_networks (saved profiles), wifi_connect (join a saved network; needs ssid), bluetooth_status, bluetooth_devices, bluetooth_on, bluetooth_off. Turning adapters on/off may require Altron to run as administrator.",
+        description="Check or toggle Wi-Fi and Bluetooth on Windows. Actions: wifi_status, wifi_on, wifi_off, wifi_networks (saved profiles), wifi_connect (join a saved network; needs ssid), wifi_get_password (read a saved network's password, needs ssid; stored in the Wi-Fi vault), wifi_forget (back up the password to the vault, then delete the profile; needs ssid), wifi_connect_new (add and join a network with password, or with no password reuse the vault's; needs ssid), bluetooth_status, bluetooth_devices, bluetooth_on, bluetooth_off. Turning adapters on/off may require Altron to run as administrator.",
         category=ToolCategory.SYSTEM,
         parameters=[
             ToolParameter("action", "string", "Network action to perform",
                           enum=["wifi_status", "wifi_on", "wifi_off", "wifi_networks", "wifi_connect",
+                                "wifi_get_password", "wifi_forget", "wifi_connect_new",
                                 "bluetooth_status", "bluetooth_devices", "bluetooth_on", "bluetooth_off"]),
-            ToolParameter("ssid", "string", "Saved Wi-Fi network name (only for wifi_connect)", required=False, default=""),
+            ToolParameter("ssid", "string", "Wi-Fi network name (for wifi_connect, wifi_get_password, wifi_forget, wifi_connect_new)", required=False, default=""),
+            ToolParameter("password", "string", "Wi-Fi password (only for wifi_connect_new; omit to reuse the vault's password)", required=False, default=""),
         ],
         handler=handle_network_control,
         requires_permission=False,
