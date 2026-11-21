@@ -20,6 +20,32 @@ ANTHROPIC_VERSION = "2023-06-01"
 from src.config.settings import DEFAULT_MODEL, DEFAULT_FAST_MODEL  # noqa: E402
 
 
+CACHE_CONTROL = {"type": "ephemeral"}
+
+
+def apply_prompt_caching(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Return a copy of ``payload`` with Anthropic prompt-cache breakpoints set.
+
+    The system prompt becomes a text block and the last tool definition each get
+    ``cache_control: ephemeral``, so repeated turns reuse the cached prefix
+    (tools + system) and the time to first token drops. The input is not mutated.
+    """
+    out = dict(payload)
+    system = out.get("system")
+    if isinstance(system, str) and system.strip():
+        out["system"] = [{"type": "text", "text": system, "cache_control": dict(CACHE_CONTROL)}]
+    elif isinstance(system, list) and system and isinstance(system[-1], dict):
+        blocks = [dict(b) if isinstance(b, dict) else b for b in system]
+        blocks[-1].setdefault("cache_control", dict(CACHE_CONTROL))
+        out["system"] = blocks
+    tools = out.get("tools")
+    if isinstance(tools, list) and tools and isinstance(tools[-1], dict):
+        new_tools = list(tools)
+        new_tools[-1] = {**tools[-1], "cache_control": dict(CACHE_CONTROL)}
+        out["tools"] = new_tools
+    return out
+
+
 class ConnectionStatus(Enum):
     """Connection status to AI API."""
     DISCONNECTED = "disconnected"
@@ -232,7 +258,7 @@ class AIClient:
     ) -> Dict[str, Any]:
         """Execute a (tool-enabled) Messages API request."""
         self._cancel_flag = False
-        req_payload = dict(payload)
+        req_payload = apply_prompt_caching(payload)
         req_payload["model"] = self._model
         return self._dispatch_http_json(
             self._get_endpoint_url(), self._get_headers(), req_payload, max_attempts, backoff
@@ -252,7 +278,7 @@ class AIClient:
         rather than replayed, so nothing is spoken twice.
         """
         self._cancel_flag = False
-        req_payload = dict(payload)
+        req_payload = apply_prompt_caching(payload)
         req_payload["model"] = self._model
         req_payload["stream"] = True
         headers = dict(self._get_headers())
