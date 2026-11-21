@@ -72,6 +72,27 @@ def test_command_flags_and_no_shell(env):
     assert kw["timeout"] == 300
 
 
+def test_anthropic_overrides_stripped_from_cli_env(env, monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "http://127.0.0.1:20128")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test-not-real")
+    monkeypatch.setenv("ANTHROPIC_MODEL", "claude-haiku-5-5")
+    monkeypatch.setenv("ALTRON_KEEP_ME", "yes")
+    svc.run_claude_code("x", project_path="p")
+    passed = env.run.call_args.kwargs["env"]
+    for name in ("ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY", "ANTHROPIC_MODEL"):
+        assert name not in passed
+    assert passed["ALTRON_KEEP_ME"] == "yes"
+    assert "ANTHROPIC_BASE_URL" in svc.os.environ  # parent env is untouched
+
+
+def test_nonzero_exit_logs_stderr(env, caplog):
+    env.run.return_value = SimpleNamespace(
+        returncode=1, stdout="", stderr="API Error: connect ECONNREFUSED 127.0.0.1:20128")
+    with caplog.at_level("WARNING", logger=svc.logger.name):
+        svc.run_claude_code("x", project_path="p")
+    assert "ECONNREFUSED" in caplog.text and "code 1" in caplog.text
+
+
 def test_open_in_vscode(env):
     out = svc.run_claude_code("x", project_path="p", open_in_vscode=True)
     assert out["opened_in_vscode"]

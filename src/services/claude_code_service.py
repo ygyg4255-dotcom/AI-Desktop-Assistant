@@ -5,12 +5,24 @@ import subprocess
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from src.config.log import get_logger
+from src.config.log import get_logger, redact_secrets
 
 logger = get_logger(__name__)
 
 MAX_OUTPUT_CHARS = 3500
+MAX_LOGGED_STDERR_CHARS = 1500
 _TRUNCATION_NOTE = "\n...[output truncated]"
+
+# Altron's own Anthropic overrides (loaded from its .env) must not leak into the
+# Claude Code CLI: a local ANTHROPIC_BASE_URL makes it fail with ECONNREFUSED, and
+# the CLI should use its own native auth and default model.
+_STRIPPED_ENV_VARS = ("ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY", "ANTHROPIC_MODEL")
+
+
+def build_cli_env() -> Dict[str, str]:
+    """Copy of the process environment without Altron's Anthropic overrides."""
+    blocked = {name.upper() for name in _STRIPPED_ENV_VARS}
+    return {k: v for k, v in os.environ.items() if k.upper() not in blocked}
 
 
 def _candidate_paths(names: tuple, extra_dirs: list) -> list:
@@ -96,7 +108,7 @@ def run_claude_code(prompt: str, project_path: Optional[str] = None,
         proc = subprocess.run(
             cmd, cwd=str(target), capture_output=True, text=True,
             encoding="utf-8", errors="replace", timeout=timeout_seconds,
-            stdin=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL, env=build_cli_env(),
         )
     except subprocess.TimeoutExpired:
         return _result(False, f"Claude Code timed out after {timeout_seconds}s.", None, target)
@@ -107,6 +119,9 @@ def run_claude_code(prompt: str, project_path: Optional[str] = None,
     out = (proc.stdout or "").strip()
     err_text = (proc.stderr or "").strip()
     ok = proc.returncode == 0
+    if not ok:
+        logger.warning("Claude Code exited with code %s; stderr: %s", proc.returncode,
+                       redact_secrets(_truncate(err_text, MAX_LOGGED_STDERR_CHARS)) or "<empty>")
     combined = out if ok or not err_text else f"{out}\n{err_text}".strip()
     opened = False
     if ok and open_in_vscode:
