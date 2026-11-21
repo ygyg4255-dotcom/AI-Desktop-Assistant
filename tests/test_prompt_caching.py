@@ -89,6 +89,70 @@ def test_stream_tool_request_sends_cache_blocks(monkeypatch):
     assert seen["body"]["tools"][-1]["cache_control"] == EPHEMERAL
 
 
+# --- rolling history breakpoint ----------------------------------------------
+
+def test_last_string_message_gets_rolling_breakpoint_without_mutation():
+    p = _payload()
+    out = apply_prompt_caching(p)
+    assert out["messages"][-1]["content"] == [{"type": "text", "text": "hi", "cache_control": EPHEMERAL}]
+    assert p["messages"][-1]["content"] == "hi"
+
+
+def test_rolling_breakpoint_moves_to_last_tool_result_block_only():
+    tr = {"type": "tool_result", "tool_use_id": "t1", "content": "done"}
+    p = _payload()
+    p["messages"] = [{"role": "user", "content": "a"},
+                     {"role": "assistant", "content": [{"type": "text", "text": "x"}]},
+                     {"role": "user", "content": [tr]}]
+    out = apply_prompt_caching(p)
+    assert "cache_control" not in str(out["messages"][:2]) or "cache_control" not in out["messages"][0]["content"]
+    assert out["messages"][-1]["content"][-1]["cache_control"] == EPHEMERAL
+    assert "cache_control" not in tr
+    assert "cache_control" not in out["messages"][1]["content"][0]
+
+
+def test_at_most_three_breakpoints_and_empty_text_skipped():
+    out = apply_prompt_caching(_payload())
+    assert json.dumps(out).count("cache_control") == 3  # tools + system + last message
+    p = _payload()
+    p["messages"] = [{"role": "user", "content": "  "}]
+    assert apply_prompt_caching(p)["messages"] == p["messages"]
+
+
+# --- usage logging -----------------------------------------------------------
+
+def test_json_response_usage_logged(monkeypatch, caplog):
+    body = {"content": [{"type": "text", "text": "ok"}],
+            "usage": {"input_tokens": 120, "cache_creation_input_tokens": 4500,
+                      "cache_read_input_tokens": 0, "output_tokens": 45}}
+    _capture_urlopen(monkeypatch, body=body)
+    with caplog.at_level("INFO", logger=mod.logger.name):
+        AIClient(api_key="k").make_tool_request(_payload())
+    assert "Anthropic usage: in=120 cache_create=4500 cache_read=0 out=45" in caplog.text
+
+
+def test_sse_usage_merged_and_logged(monkeypatch, caplog):
+    stream = _sse(
+        {"type": "message_start", "message": {"id": "m", "role": "assistant",
+         "usage": {"input_tokens": 7, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 4500,
+                   "output_tokens": 1}}},
+        {"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}},
+        _delta(0, "Hi."),
+        {"type": "content_block_stop", "index": 0},
+        {"type": "message_delta", "delta": {"stop_reason": "end_turn"}, "usage": {"output_tokens": 33}},
+    )
+    _capture_urlopen(monkeypatch, response_lines=stream)
+    with caplog.at_level("INFO", logger=mod.logger.name):
+        AIClient(api_key="k").stream_tool_request(_payload(), on_text=lambda t: None)
+    assert "Anthropic usage: in=7 cache_create=0 cache_read=4500 out=33" in caplog.text
+
+
+def test_missing_usage_logs_zeros(caplog):
+    with caplog.at_level("INFO", logger=mod.logger.name):
+        mod.log_usage(None)
+    assert "Anthropic usage: in=0 cache_create=0 cache_read=0 out=0" in caplog.text
+
+
 # --- trimmed prompt keeps every rule -----------------------------------------
 
 def test_trimmed_prompt_keeps_all_rules():

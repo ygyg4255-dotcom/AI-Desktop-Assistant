@@ -18,6 +18,9 @@ ANTHROPIC_MESSAGES_URL = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_VERSION = "2023-06-01"
 # Single source of truth for the default model IDs.
 from src.config.settings import DEFAULT_MODEL, DEFAULT_FAST_MODEL  # noqa: E402
+from src.config.log import get_logger  # noqa: E402
+
+logger = get_logger(__name__)
 
 
 CACHE_CONTROL = {"type": "ephemeral"}
@@ -43,7 +46,53 @@ def apply_prompt_caching(payload: Dict[str, Any]) -> Dict[str, Any]:
         new_tools = list(tools)
         new_tools[-1] = {**tools[-1], "cache_control": dict(CACHE_CONTROL)}
         out["tools"] = new_tools
+    messages = out.get("messages")
+    if isinstance(messages, list) and messages:
+        out["messages"] = _mark_last_message(messages)
     return out
+
+
+def _mark_last_message(messages: List[Any]) -> List[Any]:
+    """Rolling breakpoint: put cache_control on the last block of the last message.
+
+    Everything before it (tools, system, earlier turns) becomes a cacheable prefix
+    that the next request in the same tool loop reads instead of re-processing.
+    Messages are copied, never mutated. Empty text blocks cannot carry the marker.
+    """
+    last = messages[-1]
+    if not isinstance(last, dict):
+        return messages
+    content = last.get("content")
+    if isinstance(content, str):
+        if not content.strip():
+            return messages
+        new_content: Any = [{"type": "text", "text": content, "cache_control": dict(CACHE_CONTROL)}]
+    elif isinstance(content, list) and content and isinstance(content[-1], dict):
+        tail = content[-1]
+        if tail.get("type") == "text" and not str(tail.get("text", "")).strip():
+            return messages
+        new_content = list(content)
+        new_content[-1] = {**tail, "cache_control": dict(CACHE_CONTROL)}
+    else:
+        return messages
+    return [*messages[:-1], {**last, "content": new_content}]
+
+
+def log_usage(usage: Any) -> None:
+    """Log Anthropic token usage (incl. prompt-cache fields) on one INFO line."""
+    u = usage if isinstance(usage, dict) else {}
+
+    def _n(key: str) -> int:
+        try:
+            return int(u.get(key) or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    logger.info(
+        "Anthropic usage: in=%d cache_create=%d cache_read=%d out=%d",
+        _n("input_tokens"), _n("cache_creation_input_tokens"),
+        _n("cache_read_input_tokens"), _n("output_tokens"),
+    )
 
 
 class ConnectionStatus(Enum):
@@ -302,6 +351,7 @@ class AIClient:
                     parsed = parse_sse_stream(resp, _counted, lambda: self._cancel_flag)
                 self._status = ConnectionStatus.CONNECTED
                 self._last_error = None
+                log_usage(parsed.get("usage"))
                 return parsed
             except urllib.error.HTTPError as e:
                 self._status = ConnectionStatus.ERROR
@@ -354,6 +404,7 @@ class AIClient:
                     parsed = json.loads(resp.read().decode("utf-8"))
                     self._status = ConnectionStatus.CONNECTED
                     self._last_error = None
+                    log_usage(parsed.get("usage") if isinstance(parsed, dict) else None)
                     return parsed
 
             except urllib.error.HTTPError as e:
