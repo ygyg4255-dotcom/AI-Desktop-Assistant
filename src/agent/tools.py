@@ -517,6 +517,12 @@ APP_URI_MAP: Dict[str, str] = {
     "xbox": "xbox:",
 }
 
+# Spoken names that map to a launchable executable on PATH.
+APP_NAME_ALIASES: Dict[str, str] = {
+    "vscode": "code",
+    "vs code": "code",
+}
+
 _APPID_SAFE = re.compile(r"^[\w.!\-{}\\ ]+$")
 
 
@@ -573,6 +579,7 @@ def handle_app_open(params: Dict[str, Any], approved: bool = False) -> ToolResul
     """Handle application open tool (non-blocking). Only plain app names auto-run."""
     app_name = params.get("app_name", "").strip()
     app_path = params.get("path", "").strip()
+    app_name = APP_NAME_ALIASES.get(app_name.lower(), app_name)
 
     if not app_name and not app_path:
         return ToolResult(
@@ -3990,6 +3997,18 @@ def handle_steam_add_to_cart(params: Dict[str, Any]) -> ToolResult:
                       error=None if outcome["added"] else outcome["message"])
 
 
+def handle_claude_code_run(params: Dict[str, Any]) -> ToolResult:
+    from src.services import claude_code_service
+    result = claude_code_service.run_claude_code(
+        str(params.get("prompt", "")),
+        project_path=params.get("project_path") or None,
+        create_if_missing=bool(params.get("create_if_missing", True)),
+        open_in_vscode=bool(params.get("open_in_vscode", False)),
+    )
+    return ToolResult(success=result["ok"], output=result,
+                      error=None if result["ok"] else result["output"])
+
+
 def create_default_registry() -> ToolRegistry:
     """Create and populate the default tool registry."""
     registry = ToolRegistry()
@@ -4766,6 +4785,19 @@ def create_default_registry() -> ToolRegistry:
         category=ToolCategory.SYSTEM,
         parameters=[ToolParameter("name_or_appid", "string", "Game name or numeric appid")],
         handler=handle_steam_add_to_cart,
+        requires_permission=False,
+    ))
+    registry.register(Tool(
+        name="claude_code_run",
+        description="Delegate a substantial coding task (new project scaffolding, multi-file edits, refactoring, debugging) to the local Claude Code CLI, which edits files autonomously in the project folder.",
+        category=ToolCategory.SYSTEM,
+        parameters=[
+            ToolParameter("prompt", "string", "Full description of the coding task"),
+            ToolParameter("project_path", "string", "Project folder: absolute path or bare folder name under Desktop (default: current workspace)", required=False, default=None),
+            ToolParameter("create_if_missing", "boolean", "Create the folder if it does not exist (default true)", required=False, default=True),
+            ToolParameter("open_in_vscode", "boolean", "Open the folder in VS Code afterwards (default false)", required=False, default=False),
+        ],
+        handler=handle_claude_code_run,
         requires_permission=False,
     ))
 

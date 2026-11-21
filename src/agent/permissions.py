@@ -84,6 +84,8 @@ class PermissionGate:
         "steam_search_store",
         "steam_open_store_page",
         "steam_add_to_cart",
+        # Delegates to the local Claude Code CLI (acceptEdits, no shell, cwd-scoped).
+        "claude_code_run",
     }
 
     # Tools that auto-run only for low-risk inputs; the handler decides per call
