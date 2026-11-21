@@ -14,15 +14,19 @@ MAX_LOGGED_STDERR_CHARS = 1500
 _TRUNCATION_NOTE = "\n...[output truncated]"
 
 # Altron's own Anthropic overrides (loaded from its .env) must not leak into the
-# Claude Code CLI: a local ANTHROPIC_BASE_URL makes it fail with ECONNREFUSED, and
-# the CLI should use its own native auth and default model.
-_STRIPPED_ENV_VARS = ("ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY", "ANTHROPIC_MODEL")
+# Claude Code CLI: ANTHROPIC_BASE_URL / ANTHROPIC_AUTH_TOKEN pointing at an Ollama
+# or proxy endpoint make it fail (ECONNREFUSED) or bypass its claude.ai login, and
+# ANTHROPIC_MODEL / ANTHROPIC_DEFAULT_*_MODEL override its model choice. Every
+# ANTHROPIC_* variable is dropped so the CLI always uses its native login.
+_STRIPPED_ENV_PREFIX = "ANTHROPIC_"
 
 
 def build_cli_env() -> Dict[str, str]:
-    """Copy of the process environment without Altron's Anthropic overrides."""
-    blocked = {name.upper() for name in _STRIPPED_ENV_VARS}
-    return {k: v for k, v in os.environ.items() if k.upper() not in blocked}
+    """Copy of the process environment without any ANTHROPIC_* variables."""
+    return {
+        k: v for k, v in os.environ.items()
+        if not k.upper().startswith(_STRIPPED_ENV_PREFIX)
+    }
 
 
 def _candidate_paths(names: tuple, extra_dirs: list) -> list:

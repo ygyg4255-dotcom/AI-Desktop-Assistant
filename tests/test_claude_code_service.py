@@ -72,17 +72,39 @@ def test_command_flags_and_no_shell(env):
     assert kw["timeout"] == 300
 
 
+_ANTHROPIC_OVERRIDES = {
+    "ANTHROPIC_BASE_URL": "http://127.0.0.1:11434",
+    "ANTHROPIC_AUTH_TOKEN": "ollama-test-not-real",
+    "ANTHROPIC_API_KEY": "sk-ant-test-not-real",
+    "ANTHROPIC_MODEL": "qwen3-coder",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "qwen3-coder",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "qwen3-coder",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "qwen3-coder",
+    "ANTHROPIC_SMALL_FAST_MODEL": "qwen3-coder",
+}
+
+
 def test_anthropic_overrides_stripped_from_cli_env(env, monkeypatch):
-    monkeypatch.setenv("ANTHROPIC_BASE_URL", "http://127.0.0.1:20128")
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test-not-real")
-    monkeypatch.setenv("ANTHROPIC_MODEL", "claude-haiku-5-5")
+    for name, value in _ANTHROPIC_OVERRIDES.items():
+        monkeypatch.setenv(name, value)
     monkeypatch.setenv("ALTRON_KEEP_ME", "yes")
+    monkeypatch.setenv("MY_ANTHROPIC_NOTE", "kept")  # only the prefix is stripped
     svc.run_claude_code("x", project_path="p")
     passed = env.run.call_args.kwargs["env"]
-    for name in ("ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY", "ANTHROPIC_MODEL"):
-        assert name not in passed
+    assert not [k for k in passed if k.upper().startswith("ANTHROPIC_")]
     assert passed["ALTRON_KEEP_ME"] == "yes"
-    assert "ANTHROPIC_BASE_URL" in svc.os.environ  # parent env is untouched
+    assert passed["MY_ANTHROPIC_NOTE"] == "kept"
+    for name in _ANTHROPIC_OVERRIDES:  # parent env is untouched
+        assert name in svc.os.environ
+
+
+def test_build_cli_env_strips_prefix_case_insensitively(monkeypatch):
+    monkeypatch.setattr(svc.os, "environ", {
+        "anthropic_base_url": "http://localhost:11434",
+        "Anthropic_Auth_Token": "x",
+        "PATH": "C:/bin",
+    })
+    assert svc.build_cli_env() == {"PATH": "C:/bin"}
 
 
 def test_nonzero_exit_logs_stderr(env, caplog):
