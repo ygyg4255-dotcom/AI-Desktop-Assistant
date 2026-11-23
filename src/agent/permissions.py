@@ -52,7 +52,6 @@ class PermissionGate:
         "media_control",
         "play_music",
         "network_control",
-        "power_control",
         "todo_add",
         "todo_list",
         "todo_complete",
@@ -100,6 +99,7 @@ class PermissionGate:
     }
 
     # Tools that require explicit permission
+        "power_control",  # shutdown/restart ask (needs_approval_power_control); lock/sleep/cancel run
     DANGEROUS_TOOLS = {
         "file_write",
         "file_delete",
@@ -250,6 +250,11 @@ def needs_approval_file_open(path: str) -> bool:
 
 _PLAIN_APP_NAME = re.compile(r"^\w[\w .+\-()]{0,63}$")
 _SETTINGS_URI = re.compile(r"^ms-settings:[\w\-./]*$", re.IGNORECASE)
+
+def needs_approval_power_control(action: str) -> bool:
+    """Shutdown and restart always need approval (PIN when set); lock, sleep and cancel do not."""
+    return str(action or "").strip().lower() in ("shutdown", "restart")
+
 
 
 def needs_approval_app_open(app_name: str = "", path: str = "") -> bool:

@@ -36,6 +36,7 @@ from src.agent.permissions import (
     needs_approval_app_open,
     needs_approval_file_open,
     needs_approval_file_read,
+    needs_approval_power_control,
 )
 
 
@@ -2486,7 +2487,7 @@ def _start_sleep() -> None:
                      stderr=subprocess.DEVNULL, close_fds=True)
 
 
-def handle_power_control(params: Dict[str, Any]) -> ToolResult:
+def handle_power_control(params: Dict[str, Any], approved: bool = False) -> ToolResult:
     action = str(params.get("action", "")).strip().lower()
     if action not in POWER_ACTIONS:
         return _tool_error("Unknown power action. Use lock, sleep, shutdown, restart or cancel_shutdown.")
@@ -2581,6 +2582,9 @@ def handle_note_read(params: Dict[str, Any]) -> ToolResult:
 
 # --- Web: open a URL, search, and read results --------------------------
 
+    if not approved and needs_approval_power_control(action):
+        return ToolResult(success=False, output=None, requires_permission=True, is_dangerous=True,
+                          permission_message=f"Power: {action}")
 def _validate_web_url(url: str) -> Optional[str]:
     if not url or len(url) > WEB_URL_MAX_CHARS or any(ch.isspace() or ord(ch) < 32 for ch in url):
         return "That is not a valid web address."
@@ -4616,7 +4620,7 @@ def create_default_registry() -> ToolRegistry:
             ToolParameter("open_after", "boolean", "Open in DeckCraft when done (default true)", required=False, default=True),
         ],
         handler=handle_deckcraft_create,
-        requires_permission=False,
+        requires_permission=True,
     ))
     registry.register(Tool(
         name="deckcraft_read",

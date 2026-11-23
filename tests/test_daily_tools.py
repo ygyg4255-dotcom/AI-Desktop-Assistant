@@ -46,7 +46,7 @@ def test_all_daily_tools_are_registered_with_schemas():
 def test_daily_tools_need_no_approval_and_are_not_dangerous():
     registry = create_default_registry()
     gate = PermissionGate()
-    for name in DAILY_TOOLS:
+    for name in DAILY_TOOLS - {"power_control"}:  # power_control: see test_power_gate
         tool = registry.get(name)
         assert tool.requires_permission is False, name
         assert not gate.requires_permission(name), name
@@ -341,13 +341,13 @@ def test_power_lock_and_sleep(power_calls):
 
 
 def test_power_shutdown_immediate_and_delayed(power_calls):
-    assert tools_mod.handle_power_control({"action": "shutdown"}).success
-    assert tools_mod.handle_power_control({"action": "shutdown", "delay_minutes": 5}).success
+    assert tools_mod.handle_power_control({"action": "shutdown"}, approved=True).success
+    assert tools_mod.handle_power_control({"action": "shutdown", "delay_minutes": 5}, approved=True).success
     assert power_calls["system"] == [["shutdown", "/s", "/t", "0"], ["shutdown", "/s", "/t", "300"]]
 
 
 def test_power_restart_and_cancel(power_calls):
-    assert tools_mod.handle_power_control({"action": "restart", "delay_minutes": 2}).success
+    assert tools_mod.handle_power_control({"action": "restart", "delay_minutes": 2}, approved=True).success
     assert tools_mod.handle_power_control({"action": "cancel_shutdown"}).success
     assert power_calls["system"] == [["shutdown", "/r", "/t", "120"], ["shutdown", "/a"]]
 
@@ -371,6 +371,29 @@ def test_power_reports_failed_shutdown(monkeypatch):
 def test_power_lock_failure_is_reported(monkeypatch):
     monkeypatch.setattr(tools_mod, "_lock_workstation", lambda: False)
     assert tools_mod.handle_power_control({"action": "lock"}).success is False
+
+
+@pytest.mark.parametrize("action", ["shutdown", "restart"])
+def test_power_gate_shutdown_restart_need_approval(power_calls, action):
+    executor = AgentExecutor(ai_client=MagicMock(), database=None)
+    result = executor._execute_tool_with_permission("power_control", {"action": action})
+    assert result.requires_permission and not result.success
+    assert power_calls["system"] == []  # nothing ran
+    # model-supplied "_approved" cannot bypass the gate
+    assert tools_mod.handle_power_control({"action": action, "_approved": True}).requires_permission
+
+
+@pytest.mark.parametrize("action", ["lock", "sleep", "cancel_shutdown"])
+def test_power_gate_other_actions_do_not_ask(power_calls, action):
+    executor = AgentExecutor(ai_client=MagicMock(), database=None)
+    result = executor._execute_tool_with_permission("power_control", {"action": action})
+    assert not result.requires_permission and result.success
+
+
+def test_power_control_is_conditional_and_blanket_allow_refused():
+    gate = PermissionGate()
+    assert gate.is_conditional("power_control") and "power_control" not in gate.SAFE_TOOLS
+    assert gate.refuses_blanket_allow("power_control")
 
 
 # --- to-do and notes handlers -------------------------------------------------
