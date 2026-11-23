@@ -364,6 +364,9 @@
   const cfgModelEl = document.getElementById('cfg-model');
   const cfgApiKeyEl = document.getElementById('cfg-api-key');
   const cfgLanguageEl = document.getElementById('cfg-language');
+  const cfgOllamaEnabledEl = document.getElementById('cfg-ollama-enabled');
+  const cfgOllamaModelEl = document.getElementById('cfg-ollama-model');
+  const cfgOllamaUrlEl = document.getElementById('cfg-ollama-url');
   const btnSaveSettingsEl = document.getElementById('btn-save-settings');
   const btnTestSettingsEl = document.getElementById('btn-test-settings');
   const testStatusEl = document.getElementById('test-connection-status');
@@ -394,6 +397,9 @@
         const cfg = await resp.json();
         if (cfgModelEl) cfgModelEl.value = cfg.model || '';
         if (cfgLanguageEl) cfgLanguageEl.value = cfg.language || 'English';
+        if (cfgOllamaEnabledEl) cfgOllamaEnabledEl.checked = !!cfg.ollama_enabled;
+        if (cfgOllamaModelEl) cfgOllamaModelEl.value = cfg.ollama_model || '';
+        if (cfgOllamaUrlEl) cfgOllamaUrlEl.value = cfg.ollama_base_url || '';
         renderPinState(!!cfg.pin_enabled);
         pinFeedback('', true);
 
@@ -414,14 +420,14 @@
   // Approval PIN management (/config/pin). Raw PINs live only in the inputs and the request body.
   const pinEl = (id) => document.getElementById(id);
   const PIN_MSG = {
-    saved: 'PIN saved · تم حفظ الرمز',
-    changed: 'PIN changed · تم تغيير الرمز',
-    disabled: 'PIN disabled · تم تعطيل الرمز',
-    mismatch: 'PINs do not match · الرمزان غير متطابقين',
-    format: 'PIN must be 4-12 characters · يجب أن يكون الرمز 4-12 خانة',
-    wrong: 'Wrong current PIN · الرمز الحالي خاطئ',
-    locked: 'Too many attempts, wait a minute · محاولات كثيرة، انتظر دقيقة',
-    failed: 'Could not save · تعذر الحفظ',
+    saved: 'PIN saved',
+    changed: 'PIN changed',
+    disabled: 'PIN disabled',
+    mismatch: 'PINs do not match',
+    format: 'PIN must be 4-12 characters',
+    wrong: 'Wrong current PIN',
+    locked: 'Too many attempts, wait a minute',
+    failed: 'Could not save',
   };
 
   function renderPinState(enabled) {
@@ -500,6 +506,9 @@
         model: cfgModelEl ? cfgModelEl.value.trim() : '',
         api_key: cfgApiKeyEl ? cfgApiKeyEl.value.trim() : '',
         language: cfgLanguageEl ? cfgLanguageEl.value : 'English',
+        ollama_enabled: cfgOllamaEnabledEl ? cfgOllamaEnabledEl.checked : false,
+        ollama_model: cfgOllamaModelEl ? cfgOllamaModelEl.value.trim() : '',
+        ollama_base_url: cfgOllamaUrlEl ? cfgOllamaUrlEl.value.trim() : '',
       };
 
       const origBtnText = btnSaveSettingsEl ? btnSaveSettingsEl.textContent : 'SAVE & APPLY';
@@ -741,6 +750,54 @@
       lastApprovalsSignature = '';
       fetchApprovals();
     }
+  }
+
+  // 10. Memories modal (view / add / delete); text is always set via textContent.
+  const memoriesModalEl = document.getElementById('memories-modal');
+  const memoriesListEl = document.getElementById('memories-list');
+  async function memApi(path, method, body) {
+    const headers = { 'X-HUD-Token': HUD_TOKEN };
+    if (body) headers['Content-Type'] = 'application/json';
+    const resp = await fetch(path, { method: method, headers: headers, body: body ? JSON.stringify(body) : undefined });
+    return resp.json();
+  }
+  async function loadMemories() {
+    if (!memoriesListEl) return;
+    try {
+      const data = await memApi('/memories?t=' + Date.now(), 'GET');
+      memoriesListEl.textContent = '';
+      (data.memories || []).forEach(function (m) {
+        const row = document.createElement('div');
+        row.className = 'memory-row';
+        row.textContent = '[' + m.kind + '] ' + m.text + ' ';
+        const del = document.createElement('button');
+        del.type = 'button';
+        del.className = 'header-btn';
+        del.textContent = '✕';
+        del.addEventListener('click', async function () {
+          await memApi('/memories/' + m.id, 'DELETE');
+          loadMemories();
+        });
+        row.appendChild(del);
+        memoriesListEl.appendChild(row);
+      });
+      if (!memoriesListEl.children.length) memoriesListEl.textContent = 'No saved memories.';
+    } catch (err) {
+      console.error('Load memories error:', err);
+    }
+  }
+  const btnMemoriesEl = document.getElementById('btn-memories');
+  if (btnMemoriesEl && memoriesModalEl) {
+    btnMemoriesEl.addEventListener('click', function () { memoriesModalEl.style.display = 'flex'; loadMemories(); });
+    document.getElementById('btn-close-memories').addEventListener('click', function () { memoriesModalEl.style.display = 'none'; });
+    document.getElementById('btn-memory-add').addEventListener('click', async function () {
+      const textEl = document.getElementById('memory-text');
+      const text = textEl.value.trim();
+      if (!text) return;
+      await memApi('/memories', 'POST', { kind: document.getElementById('memory-kind').value, text: text });
+      textEl.value = '';
+      loadMemories();
+    });
   }
 
   // Initial fetch and 1-second interval polling

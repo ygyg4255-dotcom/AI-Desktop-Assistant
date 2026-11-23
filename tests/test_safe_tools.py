@@ -9,6 +9,7 @@ import pytest
 
 from src.agent import tools as tools_mod
 from src.agent.executor import AgentExecutor
+from src.agent.verifiers import VERIFIERS
 from src.agent.permissions import PermissionGate, PermissionLevel, is_sensitive_path
 from src.agent.tools import (
     handle_app_open,
@@ -179,6 +180,7 @@ def startfile(monkeypatch):
     mock = MagicMock()
     monkeypatch.setattr(tools_mod.os, "startfile", mock, raising=False)
     monkeypatch.setattr(tools_mod.subprocess, "Popen", MagicMock())
+    monkeypatch.delitem(VERIFIERS, "app_open")  # nothing really launches here, so the process check would fail
     return mock
 
 

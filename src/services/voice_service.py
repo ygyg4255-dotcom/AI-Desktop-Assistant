@@ -13,7 +13,6 @@ import time
 from typing import Optional, List
 
 import numpy as np
-from PySide6.QtCore import QObject, QThread, Signal
 
 from src.config.log import get_logger
 from src.config.settings import get_config_value
@@ -128,7 +127,7 @@ def split_sentences(text: str) -> List[str]:
     return out or ([text.strip()] if text and text.strip() else [])
 
 
-class TTSManager(QObject):
+class TTSManager:
     """Thread-safe, non-blocking Text-to-Speech manager.
 
     Sentences go into a ``queue.Queue`` drained by one dedicated worker thread,
@@ -140,12 +139,11 @@ class TTSManager(QObject):
     pending sentences; ``speech_finished`` fires once the queue drains.
     """
 
-    speech_started = Signal(str)
-    speech_finished = Signal()
+    speech_started = CallbackSignal()
+    speech_finished = CallbackSignal()
     is_speaking_event = is_speaking_event
 
     def __init__(self, enabled: bool = True, parent=None, warm_up: bool = True):
-        super().__init__(parent)
         self._loop: Optional[asyncio.AbstractEventLoop] = None  # persistent, prefetch-thread-owned
         self._enabled = enabled
         self._muted = False
@@ -1148,21 +1146,9 @@ class SpeechRecognitionListener:
             self.finished_listening.emit()
 
 
-class SpeechRecognitionWorker(QThread, SpeechRecognitionListener):
-    """Legacy Qt wrapper (deprecated src/ui/ only): same loop, real Qt signals.
-
-    Start it with ``start()``; never call ``run()`` on it from a Python thread.
-    """
-
-    started_listening = Signal()
-    status_updated = Signal(str)
-    text_recognized = Signal(str)
-    error_occurred = Signal(str)
-    finished_listening = Signal()
-
-    def __init__(self, languages: Optional[List[str]] = None, model_size: Optional[str] = None, parent=None):
-        QThread.__init__(self, parent)
-        SpeechRecognitionListener.__init__(self, languages, model_size)
-
-    def run(self) -> None:
-        SpeechRecognitionListener.run(self)
+def __getattr__(name):
+    # Legacy Qt wrapper lives in qt_workers so importing this module never loads PySide6.
+    if name == "SpeechRecognitionWorker":
+        from src.services import qt_workers
+        return getattr(qt_workers, name)
+    raise AttributeError(name)

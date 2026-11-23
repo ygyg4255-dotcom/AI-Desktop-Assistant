@@ -2578,6 +2578,23 @@ def _start_sleep() -> None:
                      stderr=subprocess.DEVNULL, close_fds=True)
 
 
+def handle_remember(params: Dict[str, Any], approved: bool = False) -> ToolResult:
+    """Save a user-stated preference/fact. Secret-looking text needs approval first."""
+    from src.agent import memory_store
+    text = str(params.get("text", "")).strip()
+    kind = str(params.get("kind") or "fact")
+    if kind not in ("pref", "fact"):
+        return _tool_error("kind must be 'pref' or 'fact'.")
+    if not text:
+        return _tool_error("text is required.")
+    if not approved and memory_store.looks_secret(text):
+        return ToolResult(success=False, output=None, requires_permission=True, is_dangerous=True,
+                          permission_message="Save a memory that looks like a secret")
+    if memory_store.get_store().add(kind, text) is None:
+        return _tool_error("Nothing memorable in that text.")
+    return ToolResult(success=True, output={"message": "Saved to memory."})
+
+
 def handle_power_control(params: Dict[str, Any], approved: bool = False) -> ToolResult:
     action = str(params.get("action", "")).strip().lower()
     if action not in POWER_ACTIONS:
@@ -4592,6 +4609,17 @@ def create_default_registry() -> ToolRegistry:
             ToolParameter("delay_minutes", "number", "Minutes before shutdown or restart (0 = now, max 1440). Only for shutdown/restart.", required=False, default=0),
         ],
         handler=handle_power_control,
+        requires_permission=True,
+    ))
+    registry.register(Tool(
+        name="remember",
+        description="Save something the USER said to remember long-term (a preference or fact). Never use for web, file or tool output.",
+        category=ToolCategory.UTILITY,
+        parameters=[
+            ToolParameter("text", "string", "What to remember, one short sentence"),
+            ToolParameter("kind", "string", "pref or fact", required=False, enum=["pref", "fact"], default="fact"),
+        ],
+        handler=handle_remember,
         requires_permission=True,
     ))
     registry.register(Tool(

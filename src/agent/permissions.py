@@ -99,6 +99,7 @@ class PermissionGate:
         "file_open",
         "app_open",
         "send_to_telegram",
+        "remember",  # secret-looking text asks (memory_store.looks_secret)
         "power_control",  # shutdown/restart ask (needs_approval_power_control); lock/sleep/cancel run
     }
 

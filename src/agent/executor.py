@@ -6,7 +6,6 @@ User Prompt -> Agent analyzes -> Selects Tool -> Executes -> Verifies Output -> 
 import json
 import time
 import re
-import difflib
 import threading
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Callable, Union
@@ -27,6 +26,8 @@ from src.agent.approvals import (
 from src.agent.history import HISTORY_FILENAME, PersistentHistory
 from src.agent.vision import CAMERA_PLACEHOLDER, SCREENSHOT_PLACEHOLDER, strip_image_data
 from src.agent.memory import ConversationMemory
+from src.agent import memory_store
+from src.agent.verifiers import verify_result
 from src.agent.tool_prompts import strip_action_tag, tag_reply, tool_result_prompt
 from src.services.ai_client import AIClient, Message
 from src.services.hud_status import update_hud_status
@@ -35,6 +36,16 @@ from src.config.log import get_logger, redact_secrets
 from src.config.settings import get_config_value
 
 APPROVED_OUTCOME_MAX_CHARS = 300
+# Tools whose success reply is built locally (no second LLM call).
+DIRECT_ACTION_TOOLS = frozenset({
+    "system_control", "app_open", "browser_open", "browser_search", "youtube_play", "create_and_send_pdf",
+    "send_to_telegram", "desktop_icon_position", "move_application_window", "capture_and_inspect_screen",
+    "capture_camera", "camera_start", "camera_stop", "whatsapp_send", "whatsapp_read", "clipboard_manager",
+})
+# Read-only SAFE tools that are safe to run twice; retried once on a transient error.
+RETRYABLE_TOOLS = frozenset({"file_search", "file_list", "system_info", "process_list", "note_list",
+                             "note_read", "todo_list", "list_reminders"})
+_TRANSIENT_RE = re.compile(r"timed? ?out|temporar|busy|being used by another process|try again|connection (?:reset|aborted)", re.I)
 # A request listing several actions ("a, b and then c"); such turns must not fast-return after one tool.
 _COMPOUND_RE = re.compile(r"\b(?:and|then|also)\b|[,;،]|\bثم\b|\bو\S", re.IGNORECASE)
 
@@ -153,553 +164,9 @@ class PermissionRequest:
         return self._response
 
 
-def match_local_intent(prompt: str) -> Optional[Dict[str, Any]]:
-    """Match direct system control and YouTube commands to bypass LLM latency."""
-    if not prompt:
-        return None
-
-    p = prompt.strip().lower()
-    clean_p = re.sub(r'[\.\,\!\?؟]+$', '', p).strip()
-    is_arabic = any('؀' <= char <= 'ۿ' for char in clean_p)
-
-    # Normalize Arabic/Eastern digits to standard 0-9
-    clean_p_norm = clean_p
-    for ar_digit, en_digit in zip("٠١٢٣٤٥٦٧٨٩", "0123456789"):
-        clean_p_norm = clean_p_norm.replace(ar_digit, en_digit)
-
-    # Arabic text normalization for fuzzy matching
-    def _normalize_arabic(text: str) -> str:
-        text = re.sub(r'[ً-ٰٟ]', '', text)  # Tashkeel / diacritics
-        text = re.sub(r'[إأآا]', 'ا', text)               # Normalize Alef variants
-        text = re.sub(r'ة', 'ه', text)                     # Normalize Teh Marbuta
-        text = re.sub(r'ى', 'ي', text)                     # Normalize Alef Maksura
-        return text
-
-    norm_ar = _normalize_arabic(clean_p_norm)
-    tokens = clean_p_norm.split()
-
-    def _fuzzy_token(token: str, target: str, min_ratio: float = 0.72) -> bool:
-        if token == target:
-            return True
-        return difflib.SequenceMatcher(None, token, target).ratio() >= min_ratio
-
-    # 0a. Application Window Movement Intent (STRICT PRIORITY when window/browser/app is mentioned)
-    window_markers_ar = ("نافذة", "نافذه", "متصفح", "المتصفح", "برنامج", "تطبيق", "كروم", "بريف", "ايدج", "موقع")
-    window_markers_en = ("window", "browser", "app", "application", "chrome", "brave", "edge", "vscode", "omniroute")
-    has_window_marker = any(w in clean_p_norm for w in window_markers_ar) or any(w in clean_p_norm for w in window_markers_en)
-
-    ar_pos_map = {
-        "وسط": "center", "الوسط": "center", "للوسط": "center", "منتصف": "center", "المنتصف": "center", "للمنتصف": "center",
-        "مركز": "center", "المركز": "center", "للمركز": "center",
-        "يمين": "right", "اليمين": "right", "لليمين": "right", "في يمين": "right", "على يمين": "right",
-        "يسار": "left", "اليسار": "left", "لليسار": "left", "شمال": "left", "الشمال": "left", "للشمال": "left", "في يسار": "left", "على يسار": "left",
-        "اعلى": "top", "أعلى": "top", "الاعلى": "top", "الأعلى": "top", "للاعلى": "top", "للأعلى": "top", "فوق": "top", "لفوق": "top",
-        "اسفل": "bottom", "أسفل": "bottom", "الاسفل": "bottom", "الأسفل": "bottom", "للاسفل": "bottom", "للأسفل": "bottom", "تحت": "bottom", "لتحت": "bottom",
-        "اعلى اليمين": "top_right", "أعلى اليمين": "top_right", "فوق يمين": "top_right", "لأعلى اليمين": "top_right",
-        "اعلى اليسار": "top_left", "أعلى اليسار": "top_left", "فوق يسار": "top_left", "لأعلى اليسار": "top_left",
-        "اسفل اليمين": "bottom_right", "أسفل اليمين": "bottom_right", "تحت يمين": "bottom_right", "لأسفل اليمين": "bottom_right",
-        "اسفل اليسار": "bottom_left", "أسفل اليسار": "bottom_left", "تحت يسار": "bottom_left", "لأسفل اليسار": "bottom_left",
-        "تكبير": "maximize", "كبر": "maximize", "ملء الشاشة": "maximize", "كامل الشاشة": "maximize",
-        "تصغير": "minimize", "صغر": "minimize", "اخفاء": "minimize"
-    }
-    pos_keys = "|".join(sorted(ar_pos_map.keys(), key=len, reverse=True))
-
-    if has_window_marker:
-        ar_win_pat = re.compile(
-            rf'^(?:حرك|انقل|ضع|ودي|جيب|خلي|سوي|اعمل)?\s*(.+?)\s+(?:إلى|الى|في|لـ|ل|على)?\s*({pos_keys})(?:\s+(?:من\s+)?الشاشة)?$',
-            re.IGNORECASE
-        )
-        en_win_pat = re.compile(
-            r'^(?:move|position|place|relocate|put|set|snap)\s+(.+?)\s+(?:to\s+(?:the\s+)?|at\s+(?:the\s+)?|in\s+(?:the\s+)?)(center|middle|centre|top|bottom|left|right|top[ -_]left|top[ -_]right|bottom[ -_]left|bottom[ -_]right|maximize|minimize)(?:\s+(?:of\s+)?(?:the\s+)?(?:screen))?$',
-            re.IGNORECASE
-        )
-        m_ar_win = ar_win_pat.match(clean_p)
-        m_en_win = en_win_pat.match(clean_p)
-
-        if m_ar_win:
-            raw_target = m_ar_win.group(1).strip()
-            raw_pos = m_ar_win.group(2).strip()
-            win_pos = ar_pos_map.get(raw_pos, "right")
-            pos_ar_desc = {
-                "center": "وسط الشاشة",
-                "top": "أعلى الشاشة",
-                "bottom": "أسفل الشاشة",
-                "left": "يسار الشاشة",
-                "right": "يمين الشاشة",
-                "top_right": "أعلى يمين الشاشة",
-                "top_left": "أعلى يسار الشاشة",
-                "bottom_right": "أسفل يمين الشاشة",
-                "bottom_left": "أسفل يسار الشاشة",
-                "maximize": "كامل الشاشة",
-                "minimize": "شريط المهام"
-            }.get(win_pos, "يمين الشاشة")
-
-            return {
-                "tool_name": "move_application_window",
-                "tool_input": {"window_query": raw_target or clean_p, "position": win_pos},
-                "confirmation": f"✅ تم ضبط وتحريك النافذة إلى {pos_ar_desc} بنجاح."
-            }
-
-        elif m_en_win:
-            raw_target = m_en_win.group(1).strip()
-            raw_pos = m_en_win.group(2).strip().lower().replace(" ", "_").replace("-", "_")
-            if raw_pos in ("middle", "centre"):
-                raw_pos = "center"
-            return {
-                "tool_name": "move_application_window",
-                "tool_input": {"window_query": raw_target or clean_p, "position": raw_pos},
-                "confirmation": f"✅ Successfully moved window to {raw_pos.replace('_', ' ')}."
-            }
-        else:
-            # Fallback for general window movement with position
-            found_pos = None
-            for pkey, pval in ar_pos_map.items():
-                if pkey in clean_p:
-                    found_pos = pval
-                    break
-            if not found_pos:
-                for pword in ("right", "left", "center", "top", "bottom", "maximize", "minimize"):
-                    if pword in clean_p.lower():
-                        found_pos = pword
-                        break
-
-            if found_pos:
-                return {
-                    "tool_name": "move_application_window",
-                    "tool_input": {"window_query": clean_p, "position": found_pos},
-                    "confirmation": f"✅ تم تحريك وضبط النافذة بنجاح." if is_arabic else f"✅ Successfully adjusted window position."
-                }
-
-    # 0b. Desktop Icon Positioning Intent (STRICTLY ONLY when NO window/browser mentioned)
-    if not has_window_marker:
-        ar_desktop_pat = re.compile(
-            rf'^(?:حرك|انقل|ضع|ودي|جيب)\s+(?:ملف|ايقونة|أيقونة|عنصر)\s*(.+?)\s+(?:إلى|الى|في|لـ|ل)?\s*({pos_keys})(?:\s+(?:من\s+)?الشاشة|\s+(?:من\s+)?سطح المكتب)?$',
-            re.IGNORECASE
-        )
-        en_desktop_pat = re.compile(
-            r'^(?:move|position|place|relocate|put|set)\s+(?:desktop\s+)?(?:icon|file|item)\s+(.+?)\s+(?:to\s+(?:the\s+)?|at\s+(?:the\s+)?|in\s+(?:the\s+)?)(center|middle|centre|top|bottom|left|right|top[ -_]left|top[ -_]right|bottom[ -_]left|bottom[ -_]right)(?:\s+(?:of\s+)?(?:the\s+)?(?:screen|desktop))?$',
-            re.IGNORECASE
-        )
-
-        m_en_dt = en_desktop_pat.match(clean_p)
-        m_ar_dt = ar_desktop_pat.match(clean_p)
-        if m_en_dt:
-            dt_target = m_en_dt.group(1).strip().strip('"\'')
-            dt_pos = m_en_dt.group(2).strip().lower().replace(" ", "_").replace("-", "_")
-            if dt_pos in ("middle", "centre"):
-                dt_pos = "center"
-            return {
-                "tool_name": "desktop_icon_position",
-                "tool_input": {"target": dt_target, "position": dt_pos},
-                "confirmation": f"✅ Successfully moved '{dt_target}' icon to {dt_pos.replace('_', ' ')}."
-            }
-        elif m_ar_dt:
-            dt_target = m_ar_dt.group(1).strip().strip('"\'')
-            dt_pos_raw = m_ar_dt.group(2).strip()
-            dt_pos = ar_pos_map.get(dt_pos_raw, "center")
-            pos_ar_desc = {
-                "center": "وسط الشاشة",
-                "top": "أعلى الشاشة",
-                "bottom": "أسفل الشاشة",
-                "left": "يسار الشاشة",
-                "right": "يمين الشاشة",
-                "top_right": "أعلى يمين الشاشة",
-                "top_left": "أعلى يسار الشاشة",
-                "bottom_right": "أسفل يمين الشاشة",
-                "bottom_left": "أسفل يسار الشاشة"
-            }.get(dt_pos, "وسط الشاشة")
-            return {
-                "tool_name": "desktop_icon_position",
-                "tool_input": {"target": dt_target, "position": dt_pos},
-                "confirmation": f"✅ تم تحريك أيقونة '{dt_target}' إلى {pos_ar_desc} بنجاح."
-            }
-
-    # 1. YouTube Play (Priority if explicit YouTube search/play query, but NOT when asking to summarize)
-    is_summarize_query = any(w in clean_p for w in ("لخص", "تلخيص", "ملخص", "شرح", "عن ماذا", "محتوى", "تفاصيل", "اعطني ملخص", "اعطني تفاصيل", "summarize", "summary", "tldr", "tl;dr", "explain", "what is it about"))
-    if not is_summarize_query:
-        yt_patterns = [
-            # Arabic specific
-            r'^(?:افتح\s+اليوتيوب\s+وشغل|افتح\s+يوتيوب\s+وشغل)\s+(.+)$',
-            r'^(?:شغل|افتح|ابحث عن)\s+(.+?)\s+(?:على\s+اليوتيوب|على\s+يوتيوب|في\s+اليوتيوب|في\s+يوتيوب|يوتيوب)$',
-            r'^(?:شغل|افتح)\s+(?:على\s+اليوتيوب|على\s+يوتيوب|في\s+اليوتيوب|في\s+يوتيوب|يوتيوب)\s+(.+)$',
-            r'^(?:شغل\s+اغنية|شغل\s+أغنية|شغل\s+فيديو|شغل\s+كليب|شغل\s+موسيقى)\s+(.+)$',
-            # English specific
-            r'^(?:open\s+youtube\s+and\s+play)\s+(.+)$',
-            r'^(?:play|open)\s+(.+?)\s+(?:on\s+youtube|in\s+youtube|youtube)$',
-            r'^(?:youtube\s+play|play\s+on\s+youtube|play\s+in\s+youtube)\s+(.+)$',
-            r'^(?:play\s+song|play\s+video|play\s+music)\s+(.+)$',
-        ]
-        for pattern in yt_patterns:
-            match = re.match(pattern, clean_p, re.IGNORECASE)
-            if match:
-                query = match.group(1).strip().strip('"\'')
-                if query:
-                    msg = f"✅ تم تشغيل '{query}' على يوتيوب." if is_arabic else f"✅ Playing '{query}' on YouTube."
-                    return {
-                        "tool_name": "youtube_play",
-                        "tool_input": {"query": query},
-                        "confirmation": msg
-                    }
-
-    # 2. Windows Settings with Typo Tolerance (e.g. "open srtting", "open seting", "settings", "افتح الاعدادات")
-    is_settings = False
-    open_verbs = {"open", "launch", "show", "goto", "start", "opne", "oepn", "opn"}
-    settings_words = {"settings", "setting", "seting", "setings", "srtting", "srttings", "settngs", "sttings", "configuration", "config"}
-
-    if clean_p_norm in settings_words or any(_fuzzy_token(clean_p_norm, target, 0.72) for target in ["settings", "setting"]):
-        is_settings = True
-    elif len(tokens) >= 2:
-        has_open = any(t in open_verbs or _fuzzy_token(t, "open", 0.75) for t in tokens)
-        has_setting = any(t in settings_words or _fuzzy_token(t, "settings", 0.72) or _fuzzy_token(t, "setting", 0.75) for t in tokens)
-        if has_open and has_setting:
-            is_settings = True
-
-    # Arabic Settings
-    if not is_settings:
-        ar_settings_roots = {"اعدادات", "الاعدادات", "ضبط", "الضبط"}
-        if norm_ar in ar_settings_roots or any(r in norm_ar for r in ["اعدادات الويندوز", "اعدادات النظام", "اعدادات الجهاز"]):
-            is_settings = True
-        elif any(root in norm_ar for root in ["اعدادات", "ضبط"]):
-            ar_verbs = ["افتح", "فتح", "شغل", "عرض", "وريني", "ادخل"]
-            if any(v in norm_ar for v in ar_verbs) or len(norm_ar.split()) <= 2:
-                is_settings = True
-
-    if is_settings:
-        msg = "✅ تم فتح إعدادات النظام." if is_arabic else "✅ Opened Windows Settings."
-        return {
-            "tool_name": "system_control",
-            "tool_input": {"action": "open_settings"},
-            "confirmation": msg
-        }
-
-    # 3. Numeric Volume & Brightness Settings with Fuzzy Matching (e.g. "volum 33", "صوت 33", "brightness 50")
-    if not ("youtube" in clean_p_norm or "يوتيوب" in clean_p_norm):
-        m_num = re.search(r'(\d{1,3})', clean_p_norm)
-        if m_num:
-            val = max(0, min(100, int(m_num.group(1))))
-
-            # Check for brightness first
-            is_bright = (
-                any(t in {"brightness", "brightnes", "screen", "display"} for t in tokens) or
-                any(_fuzzy_token(t, "brightness", 0.75) for t in tokens) or
-                any(w in norm_ar for w in {"سطوع", "السطوع", "اضاءة", "الاضاءة", "اضاءه", "الاضاءه", "نور"})
-            )
-            if is_bright:
-                msg = f"✅ تم ضبط السطوع على {val}%." if is_arabic else f"✅ Brightness set to {val}%."
-                return {
-                    "tool_name": "system_control",
-                    "tool_input": {"action": "set_brightness", "value": val},
-                    "confirmation": msg
-                }
-
-            # Check for volume (e.g. "volum 33", "volume 33", "vol 33", "sound 33", "صوت 33", "الصوت 33")
-            is_vol = (
-                any(t in {"vol", "volume", "volum", "voulme", "volue", "volumn", "sound", "audio"} for t in tokens) or
-                any(_fuzzy_token(t, "volume", 0.72) for t in tokens) or
-                any(_fuzzy_token(t, "sound", 0.75) for t in tokens) or
-                ("صوت" in norm_ar)
-            )
-            if is_vol:
-                msg = f"✅ تم ضبط مستوى الصوت على {val}%." if is_arabic else f"✅ Volume set to {val}%."
-                return {
-                    "tool_name": "system_control",
-                    "tool_input": {"action": "set_volume", "value": val},
-                    "confirmation": msg
-                }
-
-    # 4. Volume Up
-    vol_up_en = {"volume up", "increase volume", "raise volume", "turn up volume", "louder", "sound up", "volume +", "vol up", "volum up"}
-    vol_up_tokens = {"up", "+"}
-    is_vol_up = (
-        clean_p_norm in vol_up_en or
-        (any(t in vol_up_tokens for t in tokens) and any(t in {"vol", "volume", "volum", "sound", "audio"} or _fuzzy_token(t, "volume", 0.72) for t in tokens)) or
-        ("صوت" in norm_ar and any(w in norm_ar for w in {"ارفع", "علي", "رفع", "زود", "تعلي", "اعلى", "زياده", "زيادة"}))
-    )
-    if is_vol_up:
-        msg = "✅ تم رفع مستوى الصوت." if is_arabic else "✅ Volume increased."
-        return {
-            "tool_name": "system_control",
-            "tool_input": {"action": "volume_up"},
-            "confirmation": msg
-        }
-
-    # 5. Volume Down
-    vol_down_en = {"volume down", "decrease volume", "lower volume", "turn down volume", "quieter", "sound down", "volume -", "vol down", "volum down"}
-    vol_down_tokens = {"down", "-"}
-    is_vol_down = (
-        clean_p_norm in vol_down_en or
-        (any(t in vol_down_tokens for t in tokens) and any(t in {"vol", "volume", "volum", "sound", "audio"} or _fuzzy_token(t, "volume", 0.72) for t in tokens)) or
-        ("صوت" in norm_ar and any(w in norm_ar for w in {"خفض", "اخفض", "وطي", "نزل", "قلل", "توطيه", "توطية", "اقل"}))
-    )
-    if is_vol_down:
-        msg = "✅ تم خفض مستوى الصوت." if is_arabic else "✅ Volume decreased."
-        return {
-            "tool_name": "system_control",
-            "tool_input": {"action": "volume_down"},
-            "confirmation": msg
-        }
-
-    # 6. Volume Mute
-    vol_mute_en = {"mute", "unmute", "mute volume", "mute sound", "mute audio", "silence"}
-    is_vol_mute = (
-        clean_p_norm in vol_mute_en or
-        any(_fuzzy_token(t, "mute", 0.75) for t in tokens) or
-        any(w in norm_ar for w in {"كتم", "صامت", "اخرس", "الغاء الكتم", "فك الكتم"})
-    )
-    if is_vol_mute:
-        msg = "✅ تم كتم/إلغاء كتم الصوت." if is_arabic else "✅ Volume muted/unmuted."
-        return {
-            "tool_name": "system_control",
-            "tool_input": {"action": "volume_mute"},
-            "confirmation": msg
-        }
-
-    # 7. Brightness Up
-    bright_up_en = {"brightness up", "increase brightness", "raise brightness", "brighter", "screen brighter", "brightness +"}
-    is_bright_up = (
-        clean_p_norm in bright_up_en or
-        ("up" in tokens and any(t in {"brightness", "brightnes", "screen"} or _fuzzy_token(t, "brightness", 0.75) for t in tokens)) or
-        (("سطوع" in norm_ar or "اضاءة" in norm_ar or "اضاءه" in norm_ar) and any(w in norm_ar for w in {"ارفع", "علي", "رفع", "زود", "اعلى", "زياده", "زيادة"}))
-    )
-    if is_bright_up:
-        msg = "✅ تم رفع السطوع." if is_arabic else "✅ Brightness increased."
-        return {
-            "tool_name": "system_control",
-            "tool_input": {"action": "brightness_up"},
-            "confirmation": msg
-        }
-
-    # 8. Brightness Down
-    bright_down_en = {"brightness down", "decrease brightness", "lower brightness", "dimmer", "dim screen", "brightness -"}
-    is_bright_down = (
-        clean_p_norm in bright_down_en or
-        ("down" in tokens and any(t in {"brightness", "brightnes", "screen"} or _fuzzy_token(t, "brightness", 0.75) for t in tokens)) or
-        (("سطوع" in norm_ar or "اضاءة" in norm_ar or "اضاءه" in norm_ar) and any(w in norm_ar for w in {"خفض", "اخفض", "وطي", "نزل", "قلل", "اقل"}))
-    )
-    if is_bright_down:
-        msg = "✅ تم خفض السطوع." if is_arabic else "✅ Brightness decreased."
-        return {
-            "tool_name": "system_control",
-            "tool_input": {"action": "brightness_down"},
-            "confirmation": msg
-        }
-
-    # 9. Screen Capture / Vision Intent
-    # Only explicit "take/send a screenshot" requests skip the LLM. Questions about what is
-    # ON the screen ("can you see my screen", "what's on my screen", "read this error") go
-    # to the model, which calls capture_and_inspect_screen and looks at the attached image.
-    screen_cap_en = {
-        "screenshot", "take a screenshot", "take screenshot", "capture screen",
-        "capture the screen", "screen capture", "send screenshot"
-    }
-    is_screen_cap = (
-        clean_p_norm in screen_cap_en or
-        ("screenshot" in clean_p_norm) or
-        ("screen" in tokens and any(t in tokens for t in ("capture", "take", "grab"))) or
-        any(w in norm_ar for w in {"صور الشاشه", "صور الشاشة", "لقطه شاشه", "لقطة شاشة", "صوره للشاشه", "صورة للشاشة", "صور شاشتي", "سكرين شوت", "سكرينشوت"})
-    )
-    if is_screen_cap:
-        msg = "✅ جاري فحص الشاشة والتقاطها وإرسالها إلى تيليجرام..." if is_arabic else "✅ Capturing desktop screen and delivering to Telegram..."
-        return {
-            "tool_name": "capture_and_inspect_screen",
-            "tool_input": {"send_to_telegram": True},
-            "confirmation": msg
-        }
-
-    # 10. WhatsApp Messaging & Reading Intent (Strict priority for WhatsApp requests and follow-up reading commands)
-    has_wa_keyword = any(w in clean_p for w in ("واتساب", "واتس", "whatsapp"))
-    has_meta_ai = any(w in clean_p for w in ("meta ai", "metaai", "ميتا ai", "ميتا اي", "ميتا"))
-
-    is_reply_forward_or_read = (
-        any(w in clean_p for w in (
-            "ارسل اجابة", "ارسل اجابه", "ارسل رد", "ارسل جواب", "ابعث رد", "ابعث اجابة", "ابعث اجابه",
-            "اقرأ رد", "اقرا رد", "اقرأ اجابة", "اقرا اجابة", "اقرأ جواب", "اقرا جواب",
-            "ماذا رد", "ماذا ردت", "ماذا قالت", "ماذا قال", "ماذا اجاب", "ماذا اجابت",
-            "شو رد", "شو ردت", "ايش رد", "ايش ردت",
-            "ارسلها", "أرسلها", "ارسلته", "أرسلته",
-            "اقرأ الرسالة", "اقرا الرسالة", "اقرأ رسالة", "اقرا رسالة", "اقرأ رسائل", "اقرا رسائل",
-            "اقرأ محادثة", "اقرا محادثة",
-            "ماذا ارسل", "ماذا أرسل", "ماذا كتب", "ماذا بعث"
-        ))
-        or (any(w in clean_p for w in ("ارسل", "ابعث", "send", "forward")) and any(w in clean_p for w in ("اجابة", "إجابة", "رد", "جواب", "رسالة", "الرسالة", "صورة", "صوره", "reply", "answer", "response", "screenshot")) and any(w in clean_p for w in ("تلغرام", "التلغرام", "تيليجرام", "telegram", "telgram")))
-        or ("read" in clean_p and any(w in clean_p for w in ("reply", "answer", "response", "message", "chat")))
-        or (any(w in clean_p for w in ("what did", "what has")) and any(w in clean_p for w in ("reply", "send", "say", "write")))
-        or ((has_wa_keyword or has_meta_ai) and any(w in clean_p for w in ("اقرأ", "اقرا", "رسائل", "read", "messages", "fetch", "check")))
-    )
-
-    if is_reply_forward_or_read:
-        chat_target = ""
-
-        # Pattern 1: "ارسل اجابة/رد/رسالة [الاسم] الى التلغرام"
-        m_forward = re.search(
-            r'^(?:ارسل|ابعث|حول)\s+(?:صورة|صوره|لقطة|لقطه)?\s*(?:اجابة|إجابة|رد|جواب|رسالة|الرسالة)?\s*(.+?)\s+(?:الى|إلى|لـ|ل|على)?\s*(?:التلغرام|تلغرام|تيليجرام|telegram)$',
-            clean_p,
-            re.IGNORECASE
-        )
-        if m_forward:
-            chat_target = m_forward.group(1).strip()
-
-        # Pattern 2: "اقرأ رد/اجابة/رسالة [الاسم]" or "اقرأ الرسالة التي ارسلها [الاسم]"
-        if not chat_target:
-            m_read_reply = re.search(
-                r'^(?:اقرأ|اقرا|اعرض|وريني|جيب|شوف)\s+(?:الرسالة|الرسائل|رسائل|رسالة|رد|اجابة|إجابة|جواب)?\s*(?:التي\s+(?:ارسلها|أرسلها|ارسلته|أرسلته))?\s*(?:في\s+واتساب|على\s+واتساب|واتساب|واتس)?\s*(?:من|مع|لـ|ل)?\s*([^\:\,\n\?؟]+?)(?:\s+(?:في\s+واتساب|على\s+واتساب|واتساب|واتس))?$',
-                clean_p,
-                re.IGNORECASE
-            )
-            if m_read_reply:
-                chat_target = m_read_reply.group(1).strip()
-
-        # Pattern 3: "ماذا ارسل [الاسم] في واتساب" or "ماذا رد [الاسم]"
-        if not chat_target:
-            m_what = re.search(
-                r'^(?:ماذا|شو|ايش)\s+(?:أرسل|ارسل|كتب|بعث|رد|ردت|قال|قالت|اجاب|اجابت)\s+(?:لي\s+)?([^\:\,\n\?؟]+?)(?:\s+(?:في\s+واتساب|على\s+واتساب|واتساب|واتس))?$',
-                clean_p,
-                re.IGNORECASE
-            )
-            if m_what:
-                chat_target = m_what.group(1).strip()
-
-        # Pattern 4: English forward: "send [name]'s reply to telegram" or "send reply of [name] to telegram"
-        if not chat_target:
-            m_en_fwd = re.search(
-                r'^(?:send|forward)\s+(?:the\s+)?(?:reply|answer|response|message)\s+(?:of|from)?\s*(.+?)\s+(?:to\s+telegram)$',
-                clean_p,
-                re.IGNORECASE
-            )
-            if m_en_fwd:
-                chat_target = m_en_fwd.group(1).strip()
-
-        # Pattern 5: English read: "read reply from [name]" or "read whatsapp messages from [name]"
-        if not chat_target:
-            m_en_read = re.search(
-                r'^(?:read|show|get|fetch)\s+(?:the\s+)?(?:reply|answer|response|whatsapp\s+messages?|messages?|chat)\s+(?:from|with|of)?\s*(.+?)(?:\s+(?:on\s+whatsapp|in\s+whatsapp))?$',
-                clean_p,
-                re.IGNORECASE
-            )
-            if m_en_read:
-                chat_target = m_en_read.group(1).strip()
-
-        # Pattern 6: English what: "what did [name] send/reply on whatsapp"
-        if not chat_target:
-            m_en_what = re.search(
-                r'^what\s+did\s+(.+?)\s+(?:send|reply|write|say)(?:\s+(?:to\s+me\s+)?(?:on\s+whatsapp|in\s+whatsapp))?$',
-                clean_p,
-                re.IGNORECASE
-            )
-            if m_en_what:
-                chat_target = m_en_what.group(1).strip()
-
-        # Clean filler words from chat_target
-        if chat_target:
-            chat_target = chat_target.strip(' "\'').strip()
-            chat_target = re.sub(r'^(?:من|مع|المدعو|صديقي|لي|رد|اجابة|إجابة|رسالة|الرسالة|from|with|of)\s+', '', chat_target).strip()
-            chat_target = re.sub(r'\s+(?:في|على)\s+(?:واتساب|الواتساب|واتس)$', '', chat_target).strip()
-            chat_target = re.sub(r'\s+(?:on|in)\s+whatsapp$', '', chat_target, flags=re.IGNORECASE).strip()
-
-        if not chat_target and has_meta_ai:
-            chat_target = "Meta AI"
-        elif chat_target and chat_target.lower() in ("meta ai", "metaai", "ميتا ai", "ميتا اي", "ميتا"):
-            chat_target = "Meta AI"
-        elif chat_target in ("واتساب", "واتس", "whatsapp", "الرسائل", "رسائل", "الرسالة", "رسالة", "messages", "message"):
-            chat_target = ""
-
-        confirm_msg = (
-            f"✅ جاري استخراج رد '{chat_target}' وإرساله إلى تيليجرام..."
-            if ("تلغرام" in clean_p or "telegram" in clean_p)
-            else (f"✅ جاري قراءة رد '{chat_target}'..." if chat_target else "✅ جاري قراءة أحدث رسائل واتساب...")
-        )
-        if not is_arabic:
-            confirm_msg = (
-                f"✅ Fetching '{chat_target}' reply and delivering to Telegram..."
-                if ("telegram" in clean_p or "telgram" in clean_p)
-                else (f"✅ Reading '{chat_target}' reply..." if chat_target else "✅ Reading latest WhatsApp messages...")
-            )
-
-        want_screenshot = any(w in clean_p for w in ("صورة", "صوره", "لقطة", "لقطه", "screenshot", "image", "photo"))
-        return {
-            "tool_name": "whatsapp_read",
-            "tool_input": {"contact_or_chat": chat_target, "count": 10, "send_to_telegram": True, "send_screenshot": want_screenshot},
-            "confirmation": confirm_msg
-        }
-
-    elif has_wa_keyword:
-        ar_wa_pat = re.compile(
-            r'^(?:ارسل|ابعث|سوي|اكتب)?\s*(?:رسالة\s+)?(?:على\s+)?(?:في\s+)?(?:واتساب|الواتساب|واتس|الواتس)\s*(?:الى|إلى|لـ|ل)?\s*([^\:\,\n]+?)(?:\s*(?:\:|\-|\،|\,)\s*|\s+(?:نصها|رسالة|وقل له|وقل لها|يقول|نصها هو)\s+|\s+)(.+)$',
-            re.IGNORECASE
-        )
-        en_wa_pat = re.compile(
-            r'^(?:send\s+)?(?:a\s+)?whatsapp(?:\s+message)?\s+(?:to\s+)?([^\:\,\n]+?)(?:\s*(?:\:|\-|\,)\s*|\s+(?:saying|text|message)\s+|\s+)(.+)$',
-            re.IGNORECASE
-        )
-        m_wa_ar = ar_wa_pat.match(clean_p)
-        m_wa_en = en_wa_pat.match(clean_p)
-
-        if m_wa_ar:
-            rec = m_wa_ar.group(1).strip().strip('"\'')
-            msg_text = m_wa_ar.group(2).strip().strip('"\'')
-            if rec and msg_text:
-                return {
-                    "tool_name": "whatsapp_send",
-                    "tool_input": {"recipient": rec, "message": msg_text, "auto_send": True},
-                    "confirmation": f"✅ تم إرسال رسالة واتساب إلى '{rec}' بنجاح."
-                }
-        elif m_wa_en:
-            rec = m_wa_en.group(1).strip().strip('"\'')
-            msg_text = m_wa_en.group(2).strip().strip('"\'')
-            if rec and msg_text:
-                return {
-                    "tool_name": "whatsapp_send",
-                    "tool_input": {"recipient": rec, "message": msg_text, "auto_send": True},
-                    "confirmation": f"✅ Successfully sent WhatsApp message to '{rec}'."
-                }
-
-    # 11. Clipboard Management Intent
-    if any(w in clean_p for w in ("سجل الحافظة", "تاريخ الحافظة", "سجل الحافظه", "clipboard history", "show clipboard history")):
-        return {
-            "tool_name": "clipboard_manager",
-            "tool_input": {"action": "history"},
-            "confirmation": "📋 جاري استرجاع سجل الحافظة..."
-        }
-
-    if any(w in clean_p for w in ("امسح الحافظة", "امسح الحافظه", "تفريغ الحافظة", "تفريغ الحافظه", "مسح الحافظة", "مسح الحافظه", "clear clipboard", "empty clipboard")):
-        return {
-            "tool_name": "clipboard_manager",
-            "tool_input": {"action": "clear"},
-            "confirmation": "✅ تم تفريغ الحافظة بنجاح."
-        }
-
-    if any(w in clean_p for w in ("النص المنسوخ", "محتوى الحافظة", "محتوى الحافظه", "ما في الحافظة", "ما في الحافظه", "اقرأ الحافظة", "اقرا الحافظة", "اقرأ الحافظه", "read clipboard", "get clipboard", "what is on my clipboard", "clipboard content")):
-        return {
-            "tool_name": "clipboard_manager",
-            "tool_input": {"action": "get"},
-            "confirmation": "📋 جاري قراءة محتوى الحافظة..."
-        }
-
-    if any(w in clean_p for w in ("انسخ المحدد", "انسخ النص المحدد", "نسخ المحدد", "copy selected", "copy selected text")):
-        return {
-            "tool_name": "clipboard_manager",
-            "tool_input": {"action": "copy_selected"},
-            "confirmation": "✅ جاري نسخ النص المحدد..."
-        }
-
-    if clean_p in ("الصق", "لصق", "الصق النص", "لصق النص", "paste", "paste text"):
-        return {
-            "tool_name": "clipboard_manager",
-            "tool_input": {"action": "paste"},
-            "confirmation": "✅ تم لصق النص في النافذة النشطة."
-        }
-
-    copy_text_match = re.match(r'^(?:انسخ|نسخ|ضع في الحافظة|ضع في الحافظه)\s+(?:هذا\s+)?(?:النص\s*)?(?:\:|\-|\s)\s*(.+)$', clean_p, re.IGNORECASE)
-    if copy_text_match:
-        text_to_copy = copy_text_match.group(1).strip()
-        if text_to_copy:
-            return {
-                "tool_name": "clipboard_manager",
-                "tool_input": {"action": "set", "text": text_to_copy},
-                "confirmation": "✅ تم نسخ النص إلى الحافظة بنجاح."
-            }
-
-    return None
+# Tools whose output is outside content (web/files/terminal/screen): `remember` is refused after them in the same turn.
+_EXTERNAL_TOOL_RE = re.compile(r"web|browse|fetch|search|read|http|terminal|screenshot|screen|ocr|clipboard|youtube|claude_code|camera|vision|telegram", re.I)
+from src.agent.local_router import match_local_intent  # noqa: E402,F401 (tests patch executor.match_local_intent)
 
 
 def clean_tool_confirmation(
@@ -941,7 +408,7 @@ def intercept_raw_code_or_payload(
             if tmp_f.exists():
                 tmp_f.unlink()
         except Exception:
-            pass
+            logger.debug("ignored error", exc_info=True)
 
     trimmed = text.strip()
     is_arabic = any('؀' <= char <= 'ۿ' for char in user_message)
@@ -973,7 +440,7 @@ def intercept_raw_code_or_payload(
                 )
                 return confirmation, res
         except Exception:
-            pass
+            logger.debug("ignored error", exc_info=True)
 
     # 1. Check for JSON tool payload (raw or wrapped in ```json ... ```)
     json_candidate = None
@@ -1018,7 +485,7 @@ def intercept_raw_code_or_payload(
                     )
                     return confirmation, res
         except Exception:
-            pass
+            logger.debug("ignored error", exc_info=True)
 
     # 2. Check for raw Python code leaks (ctypes.windll, win32gui, win32con, MoveWindow, SetWindowPos)
     has_raw_code = (
@@ -1078,7 +545,7 @@ def sanitize_final_reply(content: str, user_message: str) -> str:
             if tmp_f.exists():
                 tmp_f.unlink()
         except Exception:
-            pass
+            logger.debug("ignored error", exc_info=True)
 
     trimmed = strip_action_tag((content or "").strip()).strip()
     if not trimmed:
@@ -1108,7 +575,7 @@ def sanitize_final_reply(content: str, user_message: str) -> str:
                 is_ar = any('؀' <= c <= 'ۿ' for c in user_message)
                 return f"✅ أحدث رد:\n\n{latest}" if is_ar else f"✅ Latest reply:\n\n{latest}"
         except Exception:
-            pass
+            logger.debug("ignored error", exc_info=True)
 
     is_raw_code_leak = (
         "win32gui." in trimmed
@@ -1225,6 +692,9 @@ Available tools are provided in the tool definitions. Use them responsibly."""
         # replayed as live conversation.
         self._history = history or PersistentHistory(self._memory.path.parent / HISTORY_FILENAME)
         self._previous_context = self._history.load_reference()
+        self._persona_cache: Optional[str] = None
+        self._tool_failures: Dict[str, int] = {}
+        self._turn_tainted = False
         self._memory.clear()
         self._state = AgentState.IDLE
         self._conversation_id: Optional[int] = None
@@ -1248,12 +718,12 @@ Available tools are provided in the tool definitions. Use them responsibly."""
                 if tmp_f.exists():
                     tmp_f.unlink()
             except Exception:
-                pass
+                logger.debug("ignored error", exc_info=True)
 
     def _get_system_prompt(self) -> str:
         """Dynamically load persona prompt from prompts/system_prompt.txt and prepend to SYSTEM_PROMPT."""
-        persona = ""
-        prompt_paths = [
+        persona = self._persona_cache
+        prompt_paths = [] if persona is not None else [
             Path("prompts/system_prompt.txt"),
             Path(__file__).resolve().parent.parent.parent / "prompts" / "system_prompt.txt",
         ]
@@ -1264,8 +734,9 @@ Available tools are provided in the tool definitions. Use them responsibly."""
                     if persona:
                         break
                 except Exception:
-                    pass
+                    logger.debug("ignored error", exc_info=True)
 
+        persona = self._persona_cache = persona or ""
         nl = chr(10) * 2
         prompt = f"{persona}{nl}{self.SYSTEM_PROMPT}" if persona else self.SYSTEM_PROMPT
         if self._previous_context:
@@ -1278,7 +749,7 @@ Available tools are provided in the tool definitions. Use them responsibly."""
         Only the newest screenshot stays in the in-memory message list (older ones become
         a text placeholder), and image data is never passed to ``_remember``/history.
         """
-        text = tool_result_prompt(tool_name, result_repr, result.success)
+        text = tool_result_prompt(tool_name, result_repr, result.success, self._tool_failures.get(tool_name, 0))
         if result.success and result.image:
             kinds = self.__dict__.setdefault("_image_kinds", {})  # id(message) -> "camera" | "screenshot"
             for msg in self._messages:
@@ -1298,6 +769,20 @@ Available tools are provided in the tool definitions. Use them responsibly."""
         stored = tag_reply(content, outcomes or []) if role == "assistant" else content
         self._memory.add_message(role, stored)
         self._history.append(role, stored)
+
+    @staticmethod
+    def _log_outcome(user_message: str, tool_outcomes: List[str]) -> None:
+        """Zero-LLM outcome memory for a tool-using turn: truncated request + tools + ok/failed."""
+        used = [o for o in tool_outcomes if not o.startswith("remember ")]
+        if not used:
+            return
+        status = "failed" if any(o.endswith("failed") for o in used) else "ok"
+        tools = ", ".join(dict.fromkeys(o.rsplit(" ", 1)[0] for o in used))
+        request = " ".join(user_message.split())[:100]
+        try:
+            memory_store.get_store().add("outcome", f'"{request}" -> {tools}: {status}')
+        except Exception:
+            logger.debug("outcome logging failed", exc_info=True)
 
     @property
     def memory(self) -> ConversationMemory:
@@ -1403,7 +888,29 @@ Available tools are provided in the tool definitions. Use them responsibly."""
                 error=f"Unknown tool: {tool_name}"
             )
 
-        return tool.run(tool_input, approved=approved)
+        return self._run_tool(tool_name, tool, tool_input, approved)
+
+    def _run_tool(self, tool_name: str, tool: Any, tool_input: Dict[str, Any], approved: bool = False) -> ToolResult:
+        """tool.run plus one retry (read-only tools, transient errors), post-run verification and the failure counter."""
+        if tool_name == "remember" and not approved and self._turn_tainted:
+            return ToolResult(success=False, output=None, error=(
+                "Cannot save memories after reading external content (prompt-injection guard); "
+                "ask the user to say it directly."))
+        if _EXTERNAL_TOOL_RE.search(tool_name):
+            self._turn_tainted = True
+        result = tool.run(tool_input, approved=approved)
+        if (not result.success and not result.requires_permission and tool_name in RETRYABLE_TOOLS
+                and _TRANSIENT_RE.search(result.error or "")):
+            logger.info("Retrying %s once after transient error: %s", tool_name, result.error)
+            time.sleep(0.3)
+            result = tool.run(tool_input, approved=approved)
+        if result.success:
+            detail = verify_result(tool_name, tool_input, result)
+            if detail:
+                result.success, result.error = False, detail
+        if not result.success and not result.requires_permission:
+            self._tool_failures[tool_name] = self._tool_failures.get(tool_name, 0) + 1
+        return result
 
     # -- out-of-band approvals (audit S5a) -------------------------------------
     @property
@@ -1567,7 +1074,7 @@ Available tools are provided in the tool definitions. Use them responsibly."""
 
         # Check session permission
         if self._gate.get_permission_level(tool_name) == PermissionLevel.ALLOW:
-            return tool.run(tool_input, approved=True)
+            return self._run_tool(tool_name, tool, tool_input, True)
         elif self._gate.get_permission_level(tool_name) == PermissionLevel.DENY:
             return ToolResult(
                 success=False,
@@ -1579,7 +1086,7 @@ Available tools are provided in the tool definitions. Use them responsibly."""
         if self._database:
             saved_permission = self._database.get_tool_permission(tool_name)
             if saved_permission == "allow" and not self._gate.refuses_blanket_allow(tool_name):
-                return tool.run(tool_input, approved=True)
+                return self._run_tool(tool_name, tool, tool_input, True)
             elif saved_permission == "deny":
                 return ToolResult(
                     success=False,
@@ -1589,7 +1096,7 @@ Available tools are provided in the tool definitions. Use them responsibly."""
 
         # Tool requires permission
         if tool.requires_permission:
-            result = tool.run(tool_input)
+            result = self._run_tool(tool_name, tool, tool_input)
 
             if result.requires_permission:
                 self._state = AgentState.AWAITING_PERMISSION
@@ -1608,7 +1115,7 @@ Available tools are provided in the tool definitions. Use them responsibly."""
 
             return result  # no approval needed for this input; do not run the handler twice
 
-        return tool.run(tool_input)
+        return self._run_tool(tool_name, tool, tool_input)
 
     def process(
         self,
@@ -1645,7 +1152,7 @@ Available tools are provided in the tool definitions. Use them responsibly."""
                                 content=f"⏳ {reminder_text}"
                             ))
                         except Exception:
-                            pass
+                            logger.debug("ignored error", exc_info=True)
                     try:
                         from src.services.voice_service import TTSManager
                         tts = TTSManager(enabled=True)
@@ -1676,13 +1183,13 @@ Available tools are provided in the tool definitions. Use them responsibly."""
                     try:
                         on_error(e)
                     except Exception:
-                        pass
+                        logger.debug("ignored error", exc_info=True)
             finally:
                 if reminder_timer is not None:
                     try:
                         reminder_timer.cancel()
                     except Exception:
-                        pass
+                        logger.debug("ignored error", exc_info=True)
                 # Always reset state to IDLE so subsequent messages can be processed
                 self._state = AgentState.IDLE
 
@@ -1704,13 +1211,15 @@ Available tools are provided in the tool definitions. Use them responsibly."""
         ``resume_prompt`` continues a task paused for approval: the user turn is not re-recorded.
         """
         self._origin = origin
+        self._tool_failures = {}
+        self._turn_tainted = False
         # Clean up any temporary inspect_wa.ps1 if present in root directory
         try:
             wa_script = Path("inspect_wa.ps1")
             if wa_script.exists():
                 wa_script.unlink()
         except Exception:
-            pass
+            logger.debug("ignored error", exc_info=True)
 
         tools_used = []
         tool_outcomes: List[str] = []
@@ -1736,6 +1245,14 @@ Available tools are provided in the tool definitions. Use them responsibly."""
                 user_message
             )
 
+        turn_idx = len(self._messages) - 1
+        mem_block = ""
+        if resume_prompt is None:
+            try:
+                mem_block = memory_store.format_block(memory_store.get_store().search(user_message))
+            except Exception:
+                logger.debug("memory retrieval failed", exc_info=True)
+
         # Fast Local Intent Router (Bypass LLM for instant system controls and YouTube playback)
         # Compound requests go to the LLM: a local intent would run only one of the steps.
         local_intent = None if resume_prompt or _is_compound(user_message) else match_local_intent(user_message)
@@ -1745,35 +1262,42 @@ Available tools are provided in the tool definitions. Use them responsibly."""
             confirmation = local_intent["confirmation"]
 
             self._state = AgentState.EXECUTING
-            tool_step = AgentStep(
-                step_type="tool_use",
-                content=f"Using tool: {tool_name}",
-                tool_name=tool_name,
-                tool_input=tool_input
-            )
-            self._steps.append(tool_step)
-            if on_step:
-                on_step(tool_step)
+            if tool_name is None:
+                # Pure local answer (time/date): no tool, no API call.
+                result = ToolResult(success=True, output={"message": confirmation})
+            else:
+                tool_step = AgentStep(
+                    step_type="tool_use",
+                    content=f"Using tool: {tool_name}",
+                    tool_name=tool_name,
+                    tool_input=tool_input
+                )
+                self._steps.append(tool_step)
+                if on_step:
+                    on_step(tool_step)
 
-            result = self._execute_tool(tool_name, tool_input)
+                result = self._execute_tool(tool_name, tool_input)
 
-            if result.requires_permission:
-                # Gated input (e.g. app_open with a full path): ask, never drop silently.
-                return self._approval_response(tool_name, tool_input, result, user_message, tools_used)
+                if result.requires_permission:
+                    # Gated input (app_close, power shutdown/restart, app_open with a path): ask, never drop silently.
+                    return self._approval_response(tool_name, tool_input, result, user_message, tools_used)
 
-            result_step = AgentStep(
-                step_type="tool_result",
-                content=f"Tool result: {result.output if result.success else result.error}",
-                tool_name=tool_name,
-                tool_result=result
-            )
-            self._steps.append(result_step)
-            if on_step:
-                on_step(result_step)
+                result_step = AgentStep(
+                    step_type="tool_result",
+                    content=f"Tool result: {result.output if result.success else result.error}",
+                    tool_name=tool_name,
+                    tool_result=result
+                )
+                self._steps.append(result_step)
+                if on_step:
+                    on_step(result_step)
 
-            tools_used.append(tool_name)
-            tool_outcomes.append(f"{tool_name} {'ok' if result.success else 'failed'}")
-            if result.success and isinstance(result.output, dict) and result.output.get("message"):
+                tools_used.append(tool_name)
+                tool_outcomes.append(f"{tool_name} {'ok' if result.success else 'failed'}")
+            render = local_intent.get("render")
+            if result.success and render:
+                final_content = render(result.output)
+            elif result.success and isinstance(result.output, dict) and result.output.get("message"):
                 final_content = result.output["message"]
             else:
                 final_content = confirmation if result.success else f"Action failed: {result.error}"
@@ -1812,6 +1336,9 @@ Available tools are provided in the tool definitions. Use them responsibly."""
             self._state = AgentState.THINKING
 
             messages = [m.to_api_format() for m in self._messages]
+            # Memory goes into this turn's user message only (a copy): the system prompt and cached history stay byte-identical.
+            if mem_block and iteration == 1 and 0 <= turn_idx < len(messages) and isinstance(messages[turn_idx].get("content"), str):
+                messages[turn_idx] = {**messages[turn_idx], "content": mem_block + messages[turn_idx]["content"]}
 
             payload = {
                 "model": self._ai_client._model,
@@ -1893,25 +1420,6 @@ Available tools are provided in the tool definitions. Use them responsibly."""
                             if on_step:
                                 on_step(result_step)
 
-                            DIRECT_ACTION_TOOLS = {
-                                "system_control",
-                                "app_open",
-                                "browser_open",
-                                "browser_search",
-                                "youtube_play",
-                                "create_and_send_pdf",
-                                "send_to_telegram",
-                                "desktop_icon_position",
-                                "move_application_window",
-                                "capture_and_inspect_screen",
-                                "capture_camera",
-                                "camera_start",
-                                "camera_stop",
-                                "whatsapp_send",
-                                "whatsapp_read",
-                                "clipboard_manager"
-                            }
-
                             if tool_name in DIRECT_ACTION_TOOLS and res.success and not res.image and not _is_compound(user_message):
                                 confirm_msg = ""
                                 if isinstance(res.output, dict):
@@ -1930,6 +1438,7 @@ Available tools are provided in the tool definitions. Use them responsibly."""
                                 assistant_msg = Message(role="assistant", content=final_content, timestamp=time.time())
                                 self._messages.append(assistant_msg)
                                 self._remember("assistant", final_content, tool_outcomes)
+                                self._log_outcome(user_message, tool_outcomes)
 
                                 if self._database and self._conversation_id:
                                     self._database.add_message(
@@ -1957,7 +1466,7 @@ Available tools are provided in the tool definitions. Use them responsibly."""
                             streamed_speech = False
                             continue
                     except Exception:
-                        pass
+                        logger.debug("ignored error", exc_info=True)
 
                 # Intercept raw JSON tool calls or raw Python code leaked as text
                 intercepted = intercept_raw_code_or_payload(
@@ -1994,25 +1503,6 @@ Available tools are provided in the tool definitions. Use them responsibly."""
                         )
 
                 break
-
-            DIRECT_ACTION_TOOLS = {
-                "system_control",
-                "app_open",
-                "browser_open",
-                "browser_search",
-                "youtube_play",
-                "create_and_send_pdf",
-                "send_to_telegram",
-                "desktop_icon_position",
-                "move_application_window",
-                "capture_and_inspect_screen",
-                "capture_camera",
-                "camera_start",
-                "camera_stop",
-                "whatsapp_send",
-                "whatsapp_read",
-                "clipboard_manager"
-            }
 
             for tool_idx, tool_use in enumerate(tool_uses):
                 tool_name = tool_use["name"]
@@ -2140,6 +1630,7 @@ Available tools are provided in the tool definitions. Use them responsibly."""
 
                     final_content = sanitize_final_reply(final_content, user_message)
                     self._remember("assistant", final_content, tool_outcomes)
+                    self._log_outcome(user_message, tool_outcomes)
                     self._state = AgentState.IDLE
                     return AgentResponse(
                         content=final_content,
@@ -2162,6 +1653,7 @@ Available tools are provided in the tool definitions. Use them responsibly."""
         default_fallback = "✅ تم إكمال العملية المطلوبة بنجاح!" if any('؀' <= char <= 'ۿ' for char in user_message) else "✅ I've completed the requested actions."
         resp_text = final_content or default_fallback
         self._remember("assistant", resp_text, tool_outcomes)
+        self._log_outcome(user_message, tool_outcomes)
         self._state = AgentState.IDLE
 
         return AgentResponse(
@@ -2250,3 +1742,7 @@ Available tools are provided in the tool definitions. Use them responsibly."""
         self._memory.clear()
         self._history.clear()
         self._previous_context = ""
+        try:
+            memory_store.get_store().clear()  # "forget everything" also drops long-term memories
+        except Exception:
+            logger.debug("memory clear failed", exc_info=True)

@@ -19,3 +19,9 @@ def _no_ambient_approval_pin(monkeypatch):
     from src.security import pin
 
     monkeypatch.setattr(pin, "configured_hash", lambda: "")
+
+
+@pytest.fixture(autouse=True)
+def _isolated_data_dir(monkeypatch, tmp_path):
+    """Executor turns write outcome memories; keep that out of the real runtime dir (tests may override)."""
+    monkeypatch.setenv("ALTRON_DATA_DIR", str(tmp_path / "altron-data"))

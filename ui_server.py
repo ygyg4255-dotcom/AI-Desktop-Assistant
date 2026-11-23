@@ -29,6 +29,7 @@ from src.config.settings import (
     get_active_config_dict, get_config_value, is_masked_key, save_ai_config, update_env_file,
 )
 from src.security import pin as pin_mod
+from src.services.model_router import is_loopback_url
 from src.services.hud_status import get_hud_status, clear_hud_logs, update_hud_status
 
 logger = get_logger("hud")
@@ -43,9 +44,10 @@ _TOKEN_PLACEHOLDER = "__HUD_TOKEN__"
 _HUD_PORT: int = 5000
 
 _API_PATHS = {"/status", "/status.json", "/config", "/test_config", "/command", "/clear_logs",
-              "/approvals", "/approve", "/config/pin"}
-_JSON_ONLY_PATHS = {"/command", "/config", "/test_config", "/approve", "/config/pin"}
-_CONFIG_FIELDS = {"api_key", "model", "language"}
+              "/approvals", "/approve", "/config/pin", "/memories"}
+_JSON_ONLY_PATHS = {"/command", "/config", "/test_config", "/approve", "/config/pin", "/memories"}
+_CONFIG_FIELDS = {"api_key", "model", "language", "ollama_model", "ollama_base_url"}
+_OLLAMA_FLAG = "ollama_enabled"  # the only boolean field
 
 # Registered callbacks
 _COMMAND_HANDLER: Optional[Callable[[str], None]] = None
@@ -158,6 +160,10 @@ def _error(code: int, message: str) -> Response:
     return resp
 
 
+def _is_api_path() -> bool:
+    return request.path in _API_PATHS or request.path.startswith("/memories/")
+
+
 @flask_app.before_request
 def _enforce_hud_security():
     """Host / Origin / token / content-type gate applied to every request."""
@@ -169,7 +175,7 @@ def _enforce_hud_security():
     if origin is not None and origin.lower() != f"http://{host}":
         return _error(403, "forbidden origin")
 
-    if request.path in _API_PATHS:
+    if _is_api_path():
         supplied = request.headers.get("X-HUD-Token", "")
         if not hmac.compare_digest(supplied.encode("utf-8"), _HUD_TOKEN.encode("utf-8")):
             return _error(401, "missing or invalid HUD token")
@@ -186,7 +192,7 @@ def _enforce_hud_security():
 def _security_headers(resp: Response) -> Response:
     resp.headers["X-Content-Type-Options"] = "nosniff"
     resp.headers["Content-Security-Policy"] = "frame-ancestors 'none'"
-    if request.path in _API_PATHS:
+    if _is_api_path():
         resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     return resp
 
@@ -198,9 +204,11 @@ def _json_object() -> Optional[Dict[str, Any]]:
 
 def _validate_config_payload(data: Dict[str, Any]) -> Optional[str]:
     """Return an error message, or None if the payload is acceptable."""
-    unknown = set(data) - _CONFIG_FIELDS
+    unknown = set(data) - _CONFIG_FIELDS - {_OLLAMA_FLAG}
     if unknown:
         return f"unsupported field(s): {', '.join(sorted(unknown))}"
+    if _OLLAMA_FLAG in data and not isinstance(data[_OLLAMA_FLAG], bool):
+        return f"{_OLLAMA_FLAG} must be a boolean"
     for key in _CONFIG_FIELDS:
         value = data.get(key, "")
         if not isinstance(value, str):
@@ -212,6 +220,9 @@ def _validate_config_payload(data: Dict[str, Any]) -> Optional[str]:
     if not is_masked_key(api_key):
         if not api_key.isascii() or any(c.isspace() for c in api_key.strip()):
             return "api_key must contain only ASCII characters and no whitespace"
+    url = data.get("ollama_base_url", "").strip()
+    if url and not is_loopback_url(url):  # S2: Ollama is loopback only
+        return "ollama_base_url must be an http(s) loopback URL (127.0.0.1, localhost or ::1)"
     return None
 
 
@@ -252,6 +263,9 @@ def config_route():
             model=data.get("model", ""),
             api_key=data.get("api_key", "").strip(),
             language=data.get("language", "English"),
+            ollama_enabled=data.get(_OLLAMA_FLAG),
+            ollama_model=data.get("ollama_model"),
+            ollama_base_url=data.get("ollama_base_url"),
         )
     except OSError:
         return _error(500, "could not write settings to .env")
@@ -350,6 +364,32 @@ def approve_route():
     resp = jsonify({"status": result.outcome})
     resp.status_code = _APPROVE_STATUS.get(result.outcome, 400)
     return resp
+
+
+@flask_app.route("/memories", methods=["GET", "POST"])
+def memories_route():
+    from src.agent import memory_store
+    store = memory_store.get_store()
+    if request.method == "GET":
+        return jsonify({"memories": store.list()})
+    data = _json_object()
+    if data is None or set(data) - {"kind", "text"}:
+        return _error(400, "body must be a JSON object with kind and text")
+    kind, text = data.get("kind", "fact"), data.get("text")
+    if kind not in ("pref", "fact") or not isinstance(text, str) or not text.strip():
+        return _error(400, "kind must be 'pref' or 'fact'; text must be a non-empty string")
+    mem_id = store.add(kind, text)
+    if mem_id is None:
+        return _error(400, "nothing memorable in that text")
+    return jsonify({"status": "ok", "id": mem_id})
+
+
+@flask_app.route("/memories/<int:mem_id>", methods=["DELETE"])
+def memory_delete_route(mem_id: int):
+    from src.agent import memory_store
+    if not memory_store.get_store().delete(mem_id):
+        return _error(404, "unknown memory")
+    return jsonify({"status": "ok"})
 
 
 # Brute-force guard for the settings PIN endpoint: 5 wrong current PINs lock it for 60 s.

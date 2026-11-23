@@ -20,7 +20,9 @@ from src.config import Settings
 from src.config.log import get_logger, setup_logging
 from src.config.settings import get_config_value
 from src.storage.db import Database
-from src.services import AIClient, OmniRouteManager
+from src.services.ai_client import AIClient
+from src.services.model_router import ModelRouter
+from src.services.omniroute_manager import OmniRouteManager
 from src.agent.executor import AgentExecutor
 from src.agent.control_intents import ControlHandler
 from src.agent.approvals import (
@@ -66,6 +68,11 @@ def apply_ai_config(ai_client, cfg: dict) -> None:
     real_key = Settings().ai_api_key or None
     logger.info("Hot-reloading AI model: %s", model)
     ai_client.update_config(model=model, api_key=real_key)
+
+
+def is_duplicate_approval_reply(res, bridge) -> bool:
+    """True when a Telegram-origin 'awaiting approval' reply repeats the card the bridge already sent."""
+    return bridge is not None and getattr(res, "error", None) == "awaiting approval"
 
 
 def make_approval_listener(bridge_ref: list, notify_telegram=send_telegram_message_async):
@@ -189,7 +196,8 @@ def main() -> None:
     # Out-of-band approvals: gated tool calls never block; they wait for the
     # owner's decision in the HUD panel or a Telegram inline keyboard.
     approvals = ApprovalManager()
-    executor = AgentExecutor(ai_client=ai_client, database=database, approvals=approvals)
+    router = ModelRouter(ai_client)
+    executor = AgentExecutor(ai_client=router, database=database, approvals=approvals)
     tg_bridge = [None]
     approvals.add_listener(make_approval_listener(tg_bridge))
 
@@ -277,6 +285,7 @@ def main() -> None:
     def _on_ai_config_updated(cfg: dict):
         """Hot-reload AI model and API key at runtime."""
         apply_ai_config(ai_client, cfg)
+        router.configure(cfg.get("ollama_enabled"), cfg.get("ollama_base_url"), cfg.get("ollama_model"))
 
     def _on_hud_command(cmd_text: str):
         clean_cmd = cmd_text.strip()
@@ -461,7 +470,8 @@ def main() -> None:
                         if res and res.content:
                             logger.info("Altron (Telegram reply): %s", res.content)
                             update_hud_status(state="Idle", log_entry=f"Altron: {res.content}")
-                            send_telegram_message_async(res.content)
+                            if not is_duplicate_approval_reply(res, tg_bridge[0]):
+                                send_telegram_message_async(res.content)
                             if tts_manager.is_enabled and not tts_manager.is_muted:
                                 tts_manager.speak(res.content)
 

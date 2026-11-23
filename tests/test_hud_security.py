@@ -126,7 +126,64 @@ def test_valid_config_post_200(client):
     resp = client.post("/config", base_url=BASE, headers=auth(),
                        json={"model": "claude-sonnet-5-5", "api_key": "sk-ant-test", "language": "English"})
     assert resp.status_code == 200
-    client.saved.assert_called_once_with(model="claude-sonnet-5-5", api_key="sk-ant-test", language="English")
+    client.saved.assert_called_once_with(model="claude-sonnet-5-5", api_key="sk-ant-test", language="English",
+                                         ollama_enabled=None, ollama_model=None, ollama_base_url=None)
+
+
+def test_config_post_passes_ollama_fields(client):
+    resp = client.post("/config", base_url=BASE, headers=auth(), json={
+        "model": "m", "ollama_enabled": True, "ollama_model": "qwen2.5-coder:3b",
+        "ollama_base_url": "http://localhost:11434"})
+    assert resp.status_code == 200
+    kw = client.saved.call_args.kwargs
+    assert (kw["ollama_enabled"], kw["ollama_model"], kw["ollama_base_url"]) == (
+        True, "qwen2.5-coder:3b", "http://localhost:11434")
+
+
+@pytest.mark.parametrize("url", ["http://evil.example:11434", "http://127.0.0.1.evil.com", "file:///etc/passwd", "ftp://127.0.0.1"])
+def test_config_rejects_non_loopback_ollama_url(client, url):
+    resp = client.post("/config", base_url=BASE, headers=auth(), json={"model": "m", "ollama_base_url": url})
+    assert resp.status_code == 400
+    assert "loopback" in resp.get_json()["error"]
+    client.saved.assert_not_called()
+
+
+def test_config_rejects_non_bool_ollama_enabled(client):
+    resp = client.post("/config", base_url=BASE, headers=auth(), json={"model": "m", "ollama_enabled": "yes"})
+    assert resp.status_code == 400
+    client.saved.assert_not_called()
+
+
+def test_ollama_settings_round_trip(tmp_path, monkeypatch):
+    env = tmp_path / ".env"
+    monkeypatch.setattr(settings_mod, "resolve_env_path", lambda *a, **k: env)
+    for k in ("OLLAMA_ENABLED", "OLLAMA_MODEL", "OLLAMA_BASE_URL"):
+        monkeypatch.delenv(k, raising=False)
+    settings_mod.save_ai_config("m", "", ollama_enabled=True, ollama_model="llama3:8b",
+                                ollama_base_url="http://127.0.0.1:11500")
+    cfg = settings_mod.Settings().get_config_dict()
+    assert (cfg["ollama_enabled"], cfg["ollama_model"], cfg["ollama_base_url"]) == (
+        True, "llama3:8b", "http://127.0.0.1:11500")
+    settings_mod.save_ai_config("m", "", ollama_enabled=False)
+    assert settings_mod.Settings().get_config_dict()["ollama_enabled"] is False
+    for k in ("OLLAMA_ENABLED", "OLLAMA_MODEL", "OLLAMA_BASE_URL"):
+        monkeypatch.delenv(k, raising=False)  # save_ai_config wrote os.environ directly
+
+
+def test_router_configure_live():
+    from src.services.model_router import ModelRouter
+    r = ModelRouter(MagicMock(), enabled=False)
+    r.configure(True, "http://127.0.0.1:11434", "x")
+    assert r.enabled
+    r.configure(True, "http://evil.example", "x")
+    assert not r.enabled
+
+
+def test_config_modal_has_no_arabic():
+    import re, pathlib
+    html = pathlib.Path(ui_server.UI_DIR / "index.html").read_text(encoding="utf-8")
+    modal = html.split('id="settings-modal"')[1].split('id="memories-modal"')[0]
+    assert not re.search(r"[؀-ۿ]", modal)
 
 
 # --- Claude-only config ----------------------------------------------------

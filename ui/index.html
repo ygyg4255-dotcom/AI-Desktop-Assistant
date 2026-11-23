@@ -163,6 +163,7 @@
           <div class="card-header">
             <span class="card-tag">CONVERSATION</span>
             <div class="card-actions">
+              <button id="btn-memories" class="header-btn" type="button" title="View and edit saved memories">Memories</button>
               <button id="btn-clear-chat" class="header-btn" type="button" title="Clear conversation logs">Clear</button>
               <button id="btn-export-chat" class="header-btn" type="button" title="Export conversation as .txt">Export Chat</button>
             </div>
@@ -205,6 +206,22 @@
           </select>
         </div>
 
+        <div class="form-group">
+          <label for="cfg-ollama-enabled">
+            <input type="checkbox" id="cfg-ollama-enabled" /> Enable Ollama (Local Chat)
+          </label>
+        </div>
+
+        <div class="form-group">
+          <label for="cfg-ollama-model">Ollama Model</label>
+          <input type="text" id="cfg-ollama-model" class="form-control" placeholder="e.g. qwen2.5-coder:3b" />
+        </div>
+
+        <div class="form-group">
+          <label for="cfg-ollama-url">Ollama Base URL (loopback only)</label>
+          <input type="text" id="cfg-ollama-url" class="form-control" placeholder="http://127.0.0.1:11434" autocomplete="off" />
+        </div>
+
         <div id="test-connection-status" class="test-status" style="display: none;"></div>
 
         <div class="modal-footer">
@@ -217,23 +234,39 @@
       <!-- Approval PIN (separate from the AI form: has its own buttons) -->
       <div class="modal-body pin-section" id="pin-section">
         <div class="pin-title">
-          <span>APPROVAL PIN · رمز الموافقة</span>
-          <span id="pin-badge" class="pin-badge" hidden>PIN Active · مفعّل</span>
+          <span>APPROVAL PIN</span>
+          <span id="pin-badge" class="pin-badge" hidden>PIN Active</span>
         </div>
         <div id="pin-set-block">
-          <input type="password" id="pin-new-set" class="form-control" placeholder="Set PIN · تعيين الرمز (4-12)" maxlength="12" autocomplete="new-password" />
-          <input type="password" id="pin-confirm-set" class="form-control" placeholder="Confirm PIN · تأكيد الرمز" maxlength="12" autocomplete="new-password" />
-          <button type="button" id="btn-pin-save" class="btn-primary">SAVE PIN · حفظ</button>
+          <input type="password" id="pin-new-set" class="form-control" placeholder="Set PIN (4-12)" maxlength="12" autocomplete="new-password" />
+          <input type="password" id="pin-confirm-set" class="form-control" placeholder="Confirm PIN" maxlength="12" autocomplete="new-password" />
+          <button type="button" id="btn-pin-save" class="btn-primary">SAVE PIN</button>
         </div>
         <div id="pin-active-block" hidden>
-          <input type="password" id="pin-current" class="form-control" placeholder="Current PIN · الرمز الحالي" maxlength="12" autocomplete="off" />
-          <input type="password" id="pin-new" class="form-control" placeholder="New PIN · الرمز الجديد (4-12)" maxlength="12" autocomplete="new-password" />
+          <input type="password" id="pin-current" class="form-control" placeholder="Current PIN" maxlength="12" autocomplete="off" />
+          <input type="password" id="pin-new" class="form-control" placeholder="New PIN (4-12)" maxlength="12" autocomplete="new-password" />
           <div class="pin-buttons">
-            <button type="button" id="btn-pin-change" class="btn-primary">CHANGE PIN · تغيير</button>
-            <button type="button" id="btn-pin-disable" class="btn-secondary">DISABLE PIN · تعطيل</button>
+            <button type="button" id="btn-pin-change" class="btn-primary">CHANGE PIN</button>
+            <button type="button" id="btn-pin-disable" class="btn-secondary">DISABLE PIN</button>
           </div>
         </div>
         <div id="pin-feedback" class="pin-feedback" role="status"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Memories Modal -->
+  <div id="memories-modal" class="modal-backdrop" style="display: none;">
+    <div class="modal-window">
+      <div class="modal-header">
+        <span class="modal-title">MEMORIES · الذاكرة</span>
+        <button type="button" id="btn-close-memories" class="modal-close-btn" title="Close">✕</button>
+      </div>
+      <div class="modal-body">
+        <div id="memories-list"></div>
+        <select id="memory-kind" class="form-control"><option value="fact">fact</option><option value="pref">pref</option></select>
+        <input type="text" id="memory-text" class="form-control" placeholder="Add a memory · أضف ذكرى" maxlength="500" autocomplete="off" />
+        <button type="button" id="btn-memory-add" class="btn-primary">ADD · إضافة</button>
       </div>
     </div>
   </div>

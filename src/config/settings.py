@@ -219,10 +219,13 @@ def save_ai_config(
     model: str,
     api_key: str,
     language: str = "English",
-    env_path: Optional[Path] = None
+    env_path: Optional[Path] = None,
+    ollama_enabled: Optional[bool] = None,
+    ollama_model: Optional[str] = None,
+    ollama_base_url: Optional[str] = None,
 ) -> Dict[str, str]:
-    """Persist Claude model / API key / language to .env and the process environment."""
-    for value in (model, api_key, language):
+    """Persist Claude model / API key / language (and optional Ollama settings) to .env and the process environment."""
+    for value in (model, api_key, language, ollama_model or "", ollama_base_url or ""):
         if "\r" in str(value) or "\n" in str(value):
             raise ValueError("config values must not contain line breaks")
 
@@ -238,6 +241,12 @@ def save_ai_config(
     if not is_masked_key(api_key):
         updates["AI_API_KEY"] = api_key.strip()
         updates["ANTHROPIC_API_KEY"] = api_key.strip()
+    if ollama_enabled is not None:
+        updates["OLLAMA_ENABLED"] = "true" if ollama_enabled else "false"
+    if ollama_model is not None:  # blank removes the key -> router default
+        updates["OLLAMA_MODEL"] = ollama_model.strip() or None
+    if ollama_base_url is not None:
+        updates["OLLAMA_BASE_URL"] = ollama_base_url.strip() or None
 
     update_env_file(updates, env_path)
     return updates
@@ -374,4 +383,7 @@ class Settings:
             "has_api_key": has_key,
             "language": self.altron_language,
             "pin_enabled": bool(self.approval_pin_hash),  # never the hash itself
+            "ollama_enabled": get_config_value("OLLAMA_ENABLED", default="false").lower() in ("1", "true", "yes", "on"),
+            "ollama_model": get_config_value("OLLAMA_MODEL", default="qwen2.5-coder:3b"),
+            "ollama_base_url": get_config_value("OLLAMA_BASE_URL", default="http://127.0.0.1:11434"),
         }

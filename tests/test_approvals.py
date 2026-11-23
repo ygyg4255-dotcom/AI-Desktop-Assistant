@@ -524,7 +524,7 @@ def test_listener_keeps_processing_while_request_pending(agent, danger, monkeypa
             req_id = agent.approvals.list_pending()[0]["id"]
             r = agent.approvals.get(req_id)
             return FakeResp({"ok": True, "result": [
-                msg(2, "what time is it"),
+                msg(2, "tell me something"),
                 {"update_id": 3, "callback_query": callback(r, "a", user_id="9999", cq_id="bad")},
             ]})
         if polls["n"] == 3:

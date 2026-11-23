@@ -10,7 +10,6 @@ import urllib.request
 from pathlib import Path
 from typing import Callable, Optional
 
-from PySide6.QtCore import QThread, Signal
 from src.config.paths import runtime_file
 from src.config.log import get_logger, redact_secrets  # redact_secrets re-exported (audit S6)
 from src.config.settings import get_config_value
@@ -443,6 +442,9 @@ class TelegramApprovalBridge:
 _OFFSET_FILE = "telegram_offset.json"
 
 
+BACKOFF_STEPS = (2.0, 5.0, 15.0, 30.0)  # consecutive polling failures -> sleep seconds (capped)
+
+
 def _bot_id(token: Optional[str]) -> str:
     return (token or "").split(":", 1)[0]
 
@@ -485,6 +487,7 @@ class TelegramRemoteListener:
                  message_interceptor: Optional[Callable[[dict], bool]] = None):
         self._token, self._allowed_chat_id = resolve_credentials(bot_token, allowed_chat_id)
         self._is_running = True
+        self._failures = 0
         self._offset = load_update_offset(self._token)
         # Handles inline-keyboard callback_query updates (approval buttons). It must
         # return quickly; the approval bridge does its network I/O off this thread.
@@ -562,24 +565,23 @@ class TelegramRemoteListener:
                         logger.info("Incoming remote command from Telegram: %s", text)
                         self.remote_command_received.emit(text)
 
+                if self._failures:
+                    logger.info("Telegram connection restored after %d failed polls", self._failures)
+                    self._failures = 0
+
             except Exception as e:
-                # On network glitch or timeout, back off briefly
-                logger.warning("Telegram polling error: %s", redact_secrets(e, self._token))
-                time.sleep(2.0)
+                # Exponential backoff; warn once when the connection drops, DEBUG on retries.
+                self._failures += 1
+                if self._failures == 1:
+                    logger.warning("Telegram connection lost: %s", redact_secrets(e, self._token))
+                else:
+                    logger.debug("Telegram poll retry %d: %s", self._failures, redact_secrets(e, self._token))
+                time.sleep(BACKOFF_STEPS[min(self._failures, len(BACKOFF_STEPS)) - 1])
 
 
-class TelegramRemoteWorker(QThread, TelegramRemoteListener):
-    """Legacy Qt wrapper (deprecated src/ui/ only): same loop, a real Qt signal.
-
-    Start it with ``start()``; never call ``run()`` on it from a Python thread.
-    """
-
-    remote_command_received = Signal(str)
-
-    def __init__(self, bot_token: Optional[str] = None, allowed_chat_id: Optional[str] = None, parent=None,
-                 callback_handler: Optional[Callable[[dict], object]] = None):
-        QThread.__init__(self, parent)
-        TelegramRemoteListener.__init__(self, bot_token, allowed_chat_id, callback_handler)
-
-    def run(self) -> None:
-        TelegramRemoteListener.run(self)
+def __getattr__(name):
+    # Legacy Qt wrapper lives in qt_workers so importing this module never loads PySide6.
+    if name == "TelegramRemoteWorker":
+        from src.services import qt_workers
+        return getattr(qt_workers, name)
+    raise AttributeError(name)
