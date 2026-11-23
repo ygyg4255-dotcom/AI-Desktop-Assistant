@@ -272,6 +272,8 @@ class TelegramBotApi:
             return {"ok": False}
 
 
+CANCEL_WORDS = ("cancel", "إلغاء", "الغاء")
+
 _STATUS_LABELS = {
     "approved": "✅ Approved",
     "denied": "❌ Denied",
@@ -302,18 +304,15 @@ class TelegramApprovalBridge:
         self._dispatch = dispatch
         self._lock = threading.Lock()
         self._messages: dict = {}  # request id -> (message_id, text)
+        self._pin_pending: list = []  # request ids awaiting a PIN reply, oldest first
 
     @staticmethod
     def request_text(req) -> str:
-        args = req.meta.get("args_preview")
-        if args is None:
-            from src.agent.approvals import summarize_args
-            args = summarize_args(req.args, limit=300)
+        # Plain-language summary only: raw args / code stay in the HUD's technical details.
         return (
             "🔐 Approval needed\n"
             f"Tool: {req.tool_name}\n"
             f"Action: {req.summary[:300]}\n"
-            f"Args: {args}\n"
             f"Requested via: {req.channel}\n"
             f"Expires in {int(req.expires_at - req.created_at)}s"
         )
@@ -321,13 +320,26 @@ class TelegramApprovalBridge:
     def send_request(self, req) -> None:
         text = self.request_text(req)
         h = req.args_hash[:16]
-        markup = {"inline_keyboard": [[
-            {"text": "✅ Approve", "callback_data": f"ap:a:{req.id}:{h}"},
-            {"text": "❌ Deny", "callback_data": f"ap:d:{req.id}:{h}"},
-        ]]}
+        if self._manager.pin_required:
+            # PIN mode: no buttons. The owner's next message is the PIN (see handle_message).
+            text += (
+                "\n\n🔑 Reply with your PIN to execute, or send "
+                f"\"cancel\" / \"{CANCEL_WORDS[1]}\" to abort."
+            )
+            with self._lock:
+                self._pin_pending.append(req.id)
+            markup = None
+        else:
+            markup = {"inline_keyboard": [[
+                {"text": "✅ Approve", "callback_data": f"ap:a:{req.id}:{h}"},
+                {"text": "❌ Deny", "callback_data": f"ap:d:{req.id}:{h}"},
+            ]]}
 
         def _send():
-            res = self._api.call("sendMessage", {"chat_id": self._chat_id, "text": text, "reply_markup": markup})
+            payload = {"chat_id": self._chat_id, "text": text}
+            if markup:
+                payload["reply_markup"] = markup
+            res = self._api.call("sendMessage", payload)
             msg_id = ((res or {}).get("result") or {}).get("message_id")
             if msg_id is not None:
                 with self._lock:
@@ -339,6 +351,8 @@ class TelegramApprovalBridge:
         """Edit the original message to its final status (also for HUD/expiry)."""
         with self._lock:
             entry = self._messages.pop(req.id, None)
+            if req.id in self._pin_pending:
+                self._pin_pending.remove(req.id)
         label = _STATUS_LABELS.get(req.status)
         if not entry or not label:
             return
@@ -346,6 +360,46 @@ class TelegramApprovalBridge:
         self._dispatch(lambda: self._api.call("editMessageText", {
             "chat_id": self._chat_id, "message_id": msg_id, "text": f"{text}\n\n{label}",
         }))
+
+    def _say(self, text: str) -> None:
+        self._dispatch(lambda: self._api.call("sendMessage", {"chat_id": self._chat_id, "text": text}))
+
+    def handle_message(self, message: dict) -> bool:
+        """Consume the owner's message as a PIN/cancel reply while a PIN request is pending.
+
+        Returns True when the message was taken (it must then not be logged or sent to the
+        LLM). The PIN text is never logged or echoed, and the message is deleted from the chat.
+        """
+        message = message or {}
+        chat_id = str((message.get("chat") or {}).get("id", ""))
+        user_id = str((message.get("from") or {}).get("id", ""))
+        if chat_id != self._chat_id or user_id != self._owner_user_id:
+            return False
+        with self._lock:
+            pending = [r for r in self._pin_pending
+                       if getattr(self._manager.get(r), "status", "") == "pending"]
+            self._pin_pending[:] = pending
+        if not pending or not self._manager.pin_required:
+            return False
+        rid, text = pending[-1], str(message.get("text", "")).strip()
+        msg_id = message.get("message_id")
+        if msg_id is not None:
+            self._dispatch(lambda: self._api.call("deleteMessage", {"chat_id": self._chat_id, "message_id": msg_id}))
+
+        if text.lower() in CANCEL_WORDS:
+            self._manager.cancel(rid, "telegram")
+            self._say("❌ Cancelled.")
+            return True
+        res = self._manager.verify_pin_and_approve(rid, text, "telegram")
+        if res.outcome == "approved":
+            self._say("✅ PIN accepted — running now.")
+        elif res.outcome == "wrong_pin":
+            self._say(f"⚠️ Wrong PIN. {res.attempts_left} attempt(s) left.")
+        elif res.outcome == "locked":
+            self._say("🔒 Too many wrong PINs. The request was denied.")
+        else:
+            self._say("This request is no longer pending.")
+        return True
 
     def _answer(self, cq_id, text: str) -> None:
         if cq_id is not None:
@@ -377,6 +431,7 @@ class TelegramApprovalBridge:
             "already_used": "This request was already handled.",
             "hash_mismatch": "Request did not match; denied.",
             "forbidden_channel": "This request cannot be approved from Telegram.",
+            "pin_required": "A PIN is required: reply to the request message with it.",
             "unknown": "Unknown or expired request.",
         }
         self._answer(cq_id, replies.get(result.outcome, "Not processed."))
@@ -426,13 +481,17 @@ class TelegramRemoteListener:
     remote_command_received = CallbackSignal()
 
     def __init__(self, bot_token: Optional[str] = None, allowed_chat_id: Optional[str] = None,
-                 callback_handler: Optional[Callable[[dict], object]] = None):
+                 callback_handler: Optional[Callable[[dict], object]] = None,
+                 message_interceptor: Optional[Callable[[dict], bool]] = None):
         self._token, self._allowed_chat_id = resolve_credentials(bot_token, allowed_chat_id)
         self._is_running = True
         self._offset = load_update_offset(self._token)
         # Handles inline-keyboard callback_query updates (approval buttons). It must
         # return quickly; the approval bridge does its network I/O off this thread.
         self._callback_handler = callback_handler
+        # Gets each authorized message first; True means "consumed" (e.g. a PIN reply), so it
+        # is neither logged nor emitted as a command.
+        self._message_interceptor = message_interceptor
 
     def stop(self) -> None:
         """Cleanly stop long polling."""
@@ -490,6 +549,13 @@ class TelegramRemoteListener:
                     if chat_id_str != self._allowed_chat_id:
                         logger.warning("Ignored message from unauthorized chat_id %s", chat_id_str)
                         continue
+
+                    if self._message_interceptor is not None:
+                        try:
+                            if self._message_interceptor(message):
+                                continue
+                        except Exception as ic_err:  # a broken interceptor must never swallow normal commands
+                            logger.error("Message interceptor error: %s", redact_secrets(ic_err, self._token))
 
                     text = message.get("text", "").strip()
                     if text:

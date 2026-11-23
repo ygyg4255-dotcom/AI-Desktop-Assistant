@@ -921,3 +921,19 @@ body.state-offline .state-icon { color: #55555d; text-shadow: none; }
   color: var(--accent-red);
   border-color: var(--accent-red);
 }
+
+/* Approval PIN: settings section + pending-approval PIN entry */
+.pin-section { border-top: 1px solid var(--border-cyan); gap: 8px; }
+.pin-section[hidden], .pin-section [hidden] { display: none; }
+.pin-section > div:not(.pin-title):not(.pin-feedback) { display: flex; flex-direction: column; gap: 8px; }
+.pin-title { display: flex; justify-content: space-between; align-items: center; font-size: 11px; font-weight: 700; letter-spacing: 1px; color: var(--cyan-glow); }
+.pin-badge { color: var(--accent-green); border: 1px solid var(--accent-green); border-radius: 10px; padding: 1px 8px; font-size: 10px; }
+.pin-buttons { display: flex; gap: 8px; }
+.pin-feedback { min-height: 1.2em; font-size: 12px; }
+.pin-feedback.ok { color: var(--accent-green); }
+.pin-feedback.err, .pin-error { color: var(--accent-red); }
+.pin-error { font-size: 0.75rem; }
+.pin-input { flex: 1; min-width: 0; }
+
+.approval-details summary { cursor: pointer; opacity: 0.7; font-size: 0.85em; margin: 4px 0; }
+.approval-summary { font-weight: 600; }

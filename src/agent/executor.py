@@ -32,8 +32,15 @@ from src.services.ai_client import AIClient, Message
 from src.services.hud_status import update_hud_status
 from src.services.sentence_chunker import SentenceChunker
 from src.config.log import get_logger, redact_secrets
+from src.config.settings import get_config_value
 
 APPROVED_OUTCOME_MAX_CHARS = 300
+# A request listing several actions ("a, b and then c"); such turns must not fast-return after one tool.
+_COMPOUND_RE = re.compile(r"\b(?:and|then|also)\b|[,;،]|\bثم\b|\bو\S", re.IGNORECASE)
+
+
+def _is_compound(message: str) -> bool:
+    return bool(_COMPOUND_RE.search(message or ""))
 
 logger = get_logger(__name__)
 from src.storage.db import Database
@@ -1183,6 +1190,7 @@ IMPORTANT RULES:
 11. For terminal commands, be cautious and explain the command.
 12. If a tool fails, explain the error and suggest alternatives.
 13. After executing any tool, ALWAYS provide a friendly, natural, and concise confirmation message in the user's language (Arabic or English), e.g., '✅ تم نسخ 11,400 ملف إلى مجلد her بنجاح!'. NEVER output raw JSON, '[Tool Result]', Python scripts, or technical data dumps to the user.
+13b. To list/show files or folders (Desktop, Documents, any folder) ALWAYS use `file_list` (directory="desktop" for the Desktop). NEVER use terminal_execute/PowerShell for listing.
 14. CRITICAL VOICE RULE: Your text responses are automatically spoken aloud by your built-in internal voice synthesizer (`TTSManager`). NEVER invoke `terminal_execute` or PowerShell `System.Speech` to speak or demonstrate your voice—simply reply with plain text and your internal voice engine will speak it immediately.
 
 15. TRUTHFULNESS (CRITICAL): NEVER claim, imply or describe an action as done (opened, closed, checked, sent, moved, found...) unless you called a tool in THIS turn and its result confirmed it. If no tool ran, say what you could do or ask; do not pretend. If a tool failed or returned partial data, say so plainly (e.g. "checked 50 of 254 processes"). Describe only what the tool result actually contains.
@@ -1225,7 +1233,14 @@ Available tools are provided in the tool definitions. Use them responsibly."""
         self._pending_permission: Optional[PermissionRequest] = None
         self._cancel_flag = False
         # Worst-case Steam add-to-cart: search + open + 5 inspects + 4 scrolls + click + reply.
-        self._max_iterations = 20
+        try:
+            self._max_iterations = max(10, int(get_config_value("MAX_AGENT_STEPS", default=20)))
+        except (TypeError, ValueError):
+            self._max_iterations = 20
+        # Set by _approval_response when an approved tool should resume the interrupted task.
+        self._resume_ctx: Optional[Dict[str, Any]] = None
+        # Called as (AgentResponse, origin) with the final reply of a resumed task.
+        self.on_resume_complete: Optional[Callable[[Any, str], None]] = None
 
         # Clean up any temporary inspect_wa/ocr files in root directory
         for tmp_f in (Path("inspect_wa.ps1"), Path("inspect_wa_out.json"), Path("inspect_ocr.ps1"), Path("inspect_ocr_out.json")):
@@ -1423,7 +1438,27 @@ Available tools are provided in the tool definitions. Use them responsibly."""
             except Exception:
                 logger.debug("Could not update tool execution record", exc_info=True)
         self._record_approved_outcome(tool_name, result)
+        ctx, self._resume_ctx = self._resume_ctx, None
+        if ctx:
+            self._resume_after_approval(ctx, tool_name, result)
         return result
+
+    def _resume_after_approval(self, ctx: Dict[str, Any], tool_name: str, result: ToolResult) -> None:
+        """Re-enter the agent loop so the steps after an approved tool still run."""
+        done = ", ".join(ctx["done"] + [f"{tool_name} {'ok' if result.success else 'failed'}"])
+        prompt = (f"[System] Approved step finished. Steps done so far: {done}. "
+                  "Continue with the remaining steps of my original request, then give one short summary.")
+        self._cancel_flag = False
+        try:
+            resp = self._process_sync(ctx["user_message"], origin=ctx["origin"], resume_prompt=prompt)
+        except Exception:
+            logger.exception("Resuming after approved %s failed", tool_name)
+            return
+        if self.on_resume_complete:
+            try:
+                self.on_resume_complete(resp, ctx["origin"])
+            except Exception:
+                logger.exception("on_resume_complete failed")
 
     def _record_approved_outcome(self, tool_name: str, result: ToolResult) -> None:
         """Tell the conversation an approved tool finished, so "did you do it?" is answered truthfully.
@@ -1449,10 +1484,15 @@ Available tools are provided in the tool definitions. Use them responsibly."""
             logger.warning("Could not record approved outcome for %s", tool_name, exc_info=True)
 
     @staticmethod
-    def approval_wait_message(origin: str, tool_name: str, summary: str, arabic: bool = False) -> str:
+    def approval_wait_message(origin: str, tool_name: str, summary: str, arabic: bool = False,
+                              pin: bool = False) -> str:
         """User-facing text for a pending approval; depends on where the request came from."""
         secs = int(DEFAULT_TTL)
-        if origin == CHANNEL_TELEGRAM:
+        if pin and origin == CHANNEL_TELEGRAM:
+            where_en, where_ar = "reply here with your PIN (or send cancel)", "أرسل الرمز السري هنا (أو أرسل إلغاء)"
+        elif pin:
+            where_en, where_ar = "enter your PIN in the HUD approvals panel", "أدخل الرمز السري في لوحة الموافقات في الواجهة"
+        elif origin == CHANNEL_TELEGRAM:
             where_en, where_ar = "tap Approve or Deny on the Telegram message", "اضغط موافقة أو رفض في رسالة تيليجرام"
         elif origin == CHANNEL_VOICE:
             # Voice can never approve: say so out loud and point at the screen.
@@ -1481,14 +1521,24 @@ Available tools are provided in the tool definitions. Use them responsibly."""
             tool_name, strip_internal_keys(tool_input), channel=self._origin, summary=summary
         )
         update_hud_status(log_entry=f"Approval pending: {tool_name} — {summary}")
-        return self.approval_wait_message(self._origin, tool_name, summary, arabic)
+        return self.approval_wait_message(self._origin, tool_name, summary, arabic,
+                                          pin=self._approvals.pin_required)
 
     def _approval_response(self, tool_name: str, tool_input: Dict[str, Any], result: ToolResult,
-                           user_message: str, tools_used: List[str]) -> AgentResponse:
-        """End the turn with a pending-approval message (persisted like any reply)."""
+                           user_message: str, tools_used: List[str],
+                           tool_outcomes: Optional[List[str]] = None, more_steps: bool = False) -> AgentResponse:
+        """End the turn with a pending-approval message (persisted like any reply).
+
+        ``more_steps`` (other tools already ran, are queued, or the request looks compound) makes
+        run_approved resume the task once the approval is executed.
+        """
         content = self._request_approval(tool_name, tool_input, result, user_message)
+        self._resume_ctx = (
+            {"user_message": user_message, "origin": self._origin, "done": list(tool_outcomes or [])}
+            if more_steps and self._approvals is not None else None
+        )
         self._messages.append(Message(role="assistant", content=content, timestamp=time.time()))
-        self._remember("assistant", content)
+        self._remember("assistant", content, tool_outcomes)
         if self._database and self._conversation_id:
             self._database.add_message(self._conversation_id, "assistant", content)
         self._state = AgentState.IDLE
@@ -1647,8 +1697,12 @@ Available tools are provided in the tool definitions. Use them responsibly."""
         on_permission: Optional[Callable[[PermissionRequest], None]] = None,
         origin: str = CHANNEL_LOCAL,
         on_sentence: Optional[Callable[[str], None]] = None,
+        resume_prompt: Optional[str] = None,
     ) -> AgentResponse:
-        """Synchronous processing logic with fast local intent bypass."""
+        """Synchronous processing logic with fast local intent bypass.
+
+        ``resume_prompt`` continues a task paused for approval: the user turn is not re-recorded.
+        """
         self._origin = origin
         # Clean up any temporary inspect_wa.ps1 if present in root directory
         try:
@@ -1662,7 +1716,8 @@ Available tools are provided in the tool definitions. Use them responsibly."""
         tool_outcomes: List[str] = []
 
         # Automatically store new user message in short-term conversation memory and update HUD
-        self._remember("user", user_message)
+        if resume_prompt is None:
+            self._remember("user", user_message)
         update_hud_status(state="Thinking")
 
         # Include last 10 messages from memory.json as conversation context
@@ -1672,7 +1727,9 @@ Available tools are provided in the tool definitions. Use them responsibly."""
             for m in recent
         ]
 
-        if self._database and self._conversation_id:
+        if resume_prompt is not None:
+            self._messages.append(Message(role="user", content=resume_prompt, timestamp=time.time()))
+        elif self._database and self._conversation_id:
             self._database.add_message(
                 self._conversation_id,
                 "user",
@@ -1680,7 +1737,8 @@ Available tools are provided in the tool definitions. Use them responsibly."""
             )
 
         # Fast Local Intent Router (Bypass LLM for instant system controls and YouTube playback)
-        local_intent = match_local_intent(user_message)
+        # Compound requests go to the LLM: a local intent would run only one of the steps.
+        local_intent = None if resume_prompt or _is_compound(user_message) else match_local_intent(user_message)
         if local_intent:
             tool_name = local_intent["tool_name"]
             tool_input = local_intent["tool_input"]
@@ -1818,7 +1876,9 @@ Available tools are provided in the tool definitions. Use them responsibly."""
 
                             res = self.registry.execute(tool_name, **tool_input)
                             if res.requires_permission:
-                                return self._approval_response(tool_name, tool_input, res, user_message, tools_used)
+                                return self._approval_response(
+                                    tool_name, tool_input, res, user_message, tools_used, tool_outcomes,
+                                    more_steps=bool(tools_used) or _is_compound(user_message))
                             last_tool_result = res
                             tools_used.append(tool_name)
                             tool_outcomes.append(f"{tool_name} {'ok' if res.success else 'failed'}")
@@ -1852,7 +1912,7 @@ Available tools are provided in the tool definitions. Use them responsibly."""
                                 "clipboard_manager"
                             }
 
-                            if tool_name in DIRECT_ACTION_TOOLS and res.success and not res.image:
+                            if tool_name in DIRECT_ACTION_TOOLS and res.success and not res.image and not _is_compound(user_message):
                                 confirm_msg = ""
                                 if isinstance(res.output, dict):
                                     confirm_msg = res.output.get("message") or res.output.get("summary") or ""
@@ -1979,7 +2039,9 @@ Available tools are provided in the tool definitions. Use them responsibly."""
                 if result.requires_permission and self._approvals is not None:
                     # Non-blocking: create an approval request and end the turn. The
                     # approved call later runs via run_approved with the stored args.
-                    return self._approval_response(tool_name, tool_input, result, user_message, tools_used)
+                    return self._approval_response(
+                        tool_name, tool_input, result, user_message, tools_used, tool_outcomes,
+                        more_steps=bool(tools_used) or tool_idx < len(tool_uses) - 1 or _is_compound(user_message))
 
                 if result.requires_permission and self._pending_permission:
                     # Legacy in-process prompt (desktop chat window, no ApprovalManager).
@@ -2052,7 +2114,7 @@ Available tools are provided in the tool definitions. Use them responsibly."""
                 # Direct action tool fast-return: bypass second LLM summarization call
                 # (never for a screenshot: the model has to look at the image)
                 remaining_in_turn = len(tool_uses) - 1 - tool_idx
-                if tool_name in DIRECT_ACTION_TOOLS and result.success and remaining_in_turn == 0 and not result.image:
+                if tool_name in DIRECT_ACTION_TOOLS and result.success and remaining_in_turn == 0 and not result.image and not _is_compound(user_message):
                     confirm_msg = ""
                     if isinstance(result.output, dict):
                         confirm_msg = result.output.get("message") or result.output.get("summary") or ""

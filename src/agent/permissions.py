@@ -28,6 +28,7 @@ class PermissionGate:
     # Tools that are always safe (no permission needed)
     SAFE_TOOLS = {
         "file_search",
+        "file_list",
         "process_list",
         "system_info",
         "browser_open",
@@ -85,6 +86,8 @@ class PermissionGate:
         "steam_add_to_cart",
         # Delegates to the local Claude Code CLI (acceptEdits, no shell, cwd-scoped).
         "claude_code_run",
+        # Puts a Recycle Bin item back where it was; never deletes or overwrites.
+        "file_restore",
     }
 
     # Tools that auto-run only for low-risk inputs; the handler decides per call
@@ -96,10 +99,10 @@ class PermissionGate:
         "file_open",
         "app_open",
         "send_to_telegram",
+        "power_control",  # shutdown/restart ask (needs_approval_power_control); lock/sleep/cancel run
     }
 
     # Tools that require explicit permission
-        "power_control",  # shutdown/restart ask (needs_approval_power_control); lock/sleep/cancel run
     DANGEROUS_TOOLS = {
         "file_write",
         "file_delete",
@@ -248,13 +251,13 @@ def needs_approval_file_open(path: str) -> bool:
     return _has_risky_extension(path)
 
 
-_PLAIN_APP_NAME = re.compile(r"^\w[\w .+\-()]{0,63}$")
-_SETTINGS_URI = re.compile(r"^ms-settings:[\w\-./]*$", re.IGNORECASE)
-
 def needs_approval_power_control(action: str) -> bool:
     """Shutdown and restart always need approval (PIN when set); lock, sleep and cancel do not."""
     return str(action or "").strip().lower() in ("shutdown", "restart")
 
+
+_PLAIN_APP_NAME = re.compile(r"^\w[\w .+\-()]{0,63}$")
+_SETTINGS_URI = re.compile(r"^ms-settings:[\w\-./]*$", re.IGNORECASE)
 
 
 def needs_approval_app_open(app_name: str = "", path: str = "") -> bool:

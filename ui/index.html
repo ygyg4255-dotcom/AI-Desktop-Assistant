@@ -213,6 +213,28 @@
           <button type="submit" id="btn-save-settings" class="btn-primary">SAVE & APPLY</button>
         </div>
       </form>
+
+      <!-- Approval PIN (separate from the AI form: has its own buttons) -->
+      <div class="modal-body pin-section" id="pin-section">
+        <div class="pin-title">
+          <span>APPROVAL PIN · رمز الموافقة</span>
+          <span id="pin-badge" class="pin-badge" hidden>PIN Active · مفعّل</span>
+        </div>
+        <div id="pin-set-block">
+          <input type="password" id="pin-new-set" class="form-control" placeholder="Set PIN · تعيين الرمز (4-12)" maxlength="12" autocomplete="new-password" />
+          <input type="password" id="pin-confirm-set" class="form-control" placeholder="Confirm PIN · تأكيد الرمز" maxlength="12" autocomplete="new-password" />
+          <button type="button" id="btn-pin-save" class="btn-primary">SAVE PIN · حفظ</button>
+        </div>
+        <div id="pin-active-block" hidden>
+          <input type="password" id="pin-current" class="form-control" placeholder="Current PIN · الرمز الحالي" maxlength="12" autocomplete="off" />
+          <input type="password" id="pin-new" class="form-control" placeholder="New PIN · الرمز الجديد (4-12)" maxlength="12" autocomplete="new-password" />
+          <div class="pin-buttons">
+            <button type="button" id="btn-pin-change" class="btn-primary">CHANGE PIN · تغيير</button>
+            <button type="button" id="btn-pin-disable" class="btn-secondary">DISABLE PIN · تعطيل</button>
+          </div>
+        </div>
+        <div id="pin-feedback" class="pin-feedback" role="status"></div>
+      </div>
     </div>
   </div>
 

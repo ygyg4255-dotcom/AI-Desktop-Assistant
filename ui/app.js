@@ -394,6 +394,8 @@
         const cfg = await resp.json();
         if (cfgModelEl) cfgModelEl.value = cfg.model || '';
         if (cfgLanguageEl) cfgLanguageEl.value = cfg.language || 'English';
+        renderPinState(!!cfg.pin_enabled);
+        pinFeedback('', true);
 
         if (cfgApiKeyEl) {
           cfgApiKeyEl.value = '';
@@ -407,6 +409,67 @@
     } catch (err) {
       console.error('Failed to load settings:', err);
     }
+  }
+
+  // Approval PIN management (/config/pin). Raw PINs live only in the inputs and the request body.
+  const pinEl = (id) => document.getElementById(id);
+  const PIN_MSG = {
+    saved: 'PIN saved · تم حفظ الرمز',
+    changed: 'PIN changed · تم تغيير الرمز',
+    disabled: 'PIN disabled · تم تعطيل الرمز',
+    mismatch: 'PINs do not match · الرمزان غير متطابقين',
+    format: 'PIN must be 4-12 characters · يجب أن يكون الرمز 4-12 خانة',
+    wrong: 'Wrong current PIN · الرمز الحالي خاطئ',
+    locked: 'Too many attempts, wait a minute · محاولات كثيرة، انتظر دقيقة',
+    failed: 'Could not save · تعذر الحفظ',
+  };
+
+  function renderPinState(enabled) {
+    const set = pinEl('pin-set-block'), active = pinEl('pin-active-block'), badge = pinEl('pin-badge');
+    if (!set || !active || !badge) return;
+    set.hidden = enabled;
+    active.hidden = !enabled;
+    badge.hidden = !enabled;
+    ['pin-new-set', 'pin-confirm-set', 'pin-current', 'pin-new'].forEach((id) => { pinEl(id).value = ''; });
+  }
+
+  function pinFeedback(text, ok) {
+    const el = pinEl('pin-feedback');
+    if (!el) return;
+    el.textContent = text;
+    el.className = 'pin-feedback ' + (ok ? 'ok' : 'err');
+  }
+
+  async function pinRequest(action, currentPin, newPin, okMsg) {
+    try {
+      const resp = await fetch('/config/pin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-HUD-Token': HUD_TOKEN },
+        body: JSON.stringify({ action: action, current_pin: currentPin, new_pin: newPin }),
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        renderPinState(!!data.pin_enabled);
+        pinFeedback(okMsg, true);
+      } else {
+        pinFeedback(resp.status === 403 ? PIN_MSG.wrong : resp.status === 429 ? PIN_MSG.locked
+          : resp.status === 400 ? PIN_MSG.format : PIN_MSG.failed, false);
+      }
+    } catch (err) {
+      pinFeedback(PIN_MSG.failed, false);
+    }
+  }
+
+  if (pinEl('btn-pin-save')) {
+    pinEl('btn-pin-save').addEventListener('click', () => {
+      const pin = pinEl('pin-new-set').value;
+      if (pin !== pinEl('pin-confirm-set').value) return pinFeedback(PIN_MSG.mismatch, false);
+      pinRequest('set', '', pin, PIN_MSG.saved);
+    });
+    pinEl('btn-pin-change').addEventListener('click', () =>
+      pinRequest('change', pinEl('pin-current').value, pinEl('pin-new').value, PIN_MSG.changed));
+    pinEl('btn-pin-disable').addEventListener('click', () =>
+      pinRequest('disable', pinEl('pin-current').value, '', PIN_MSG.disabled));
   }
 
   function closeSettingsModal() {
@@ -534,11 +597,16 @@
 
   function renderApprovals(pending) {
     if (!approvalsCardEl || !approvalsListEl) return;
-    const signature = pending.map((p) => `${p.id}:${p.expires_in}`).join('|');
+    const signature = pending.map((p) => `${p.id}:${p.expires_in}:${p.pin_required}:${p.attempts_left}`).join('|');
     if (signature === lastApprovalsSignature) return;
     lastApprovalsSignature = signature;
 
     approvalsCardEl.hidden = pending.length === 0;
+    // The list is rebuilt every second: keep a half-typed PIN and its focus.
+    const savedPins = {};
+    approvalsListEl.querySelectorAll('input[data-req]').forEach((el) => {
+      savedPins[el.dataset.req] = { value: el.value, focused: document.activeElement === el };
+    });
     approvalsListEl.replaceChildren();
 
     pending.forEach((req) => {
@@ -553,9 +621,14 @@
       summary.className = 'approval-summary';
       summary.textContent = req.summary;
 
-      const args = document.createElement('pre');
-      args.className = 'approval-args';
-      args.textContent = req.args_preview;
+      const args = document.createElement('details');
+      args.className = 'approval-details';
+      const argsSummary = document.createElement('summary');
+      argsSummary.textContent = 'Show technical details';
+      const argsPre = document.createElement('pre');
+      argsPre.className = 'approval-args';
+      argsPre.textContent = req.args_preview;
+      args.append(argsSummary, argsPre);
 
       const footer = document.createElement('div');
       footer.className = 'approval-actions';
@@ -563,20 +636,51 @@
       timer.className = 'approval-timer';
       timer.textContent = `expires in ${req.expires_in}s`;
 
+      const busy = approvalsInFlight.has(req.id);
+      const denyBtn = document.createElement('button');
+      denyBtn.type = 'button';
+      denyBtn.className = 'header-btn deny-btn';
+      denyBtn.disabled = busy;
+      denyBtn.addEventListener('click', () => submitApproval(req, 'deny'));
+
+      if (req.pin_required) {
+        // PIN mode: a correct PIN executes immediately; there is no Approve button.
+        denyBtn.textContent = 'Cancel';
+        const pinInput = document.createElement('input');
+        pinInput.type = 'password';
+        pinInput.className = 'form-control pin-input';
+        pinInput.placeholder = 'PIN · الرمز';
+        pinInput.maxLength = 12;
+        pinInput.autocomplete = 'off';
+        pinInput.dataset.req = req.id;
+        pinInput.disabled = busy;
+        const saved = savedPins[req.id];
+        if (saved) pinInput.value = saved.value;
+        pinInput.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') { e.preventDefault(); submitPin(req, pinInput); }
+        });
+        footer.append(timer, pinInput, denyBtn);
+        item.append(title, summary, args);
+        if (req.attempts_left < 3) {
+          const err = document.createElement('div');
+          err.className = 'pin-error';
+          err.textContent = `Wrong PIN — ${req.attempts_left} attempt(s) left · رمز خاطئ، المحاولات المتبقية: ${req.attempts_left}`;
+          item.append(err);
+        }
+        item.append(footer);
+        approvalsListEl.appendChild(item);
+        // Focus a new card's input (or restore the focus it had before the rebuild).
+        if (!busy && (!saved || saved.focused)) pinInput.focus();
+        return;
+      }
+
       const approveBtn = document.createElement('button');
       approveBtn.type = 'button';
       approveBtn.className = 'header-btn approve-btn';
       approveBtn.textContent = 'Approve';
-      const denyBtn = document.createElement('button');
-      denyBtn.type = 'button';
-      denyBtn.className = 'header-btn deny-btn';
+      approveBtn.disabled = busy;
       denyBtn.textContent = 'Deny';
-      if (approvalsInFlight.has(req.id)) {
-        approveBtn.disabled = true;
-        denyBtn.disabled = true;
-      }
       approveBtn.addEventListener('click', () => submitApproval(req, 'approve'));
-      denyBtn.addEventListener('click', () => submitApproval(req, 'deny'));
 
       footer.append(timer, approveBtn, denyBtn);
       item.append(title, summary, args, footer);
@@ -595,6 +699,27 @@
       renderApprovals(Array.isArray(data.pending) ? data.pending : []);
     } catch (err) {
       // Offline / reconnecting
+    }
+  }
+
+  async function submitPin(req, input) {
+    const pin = input.value;
+    if (!pin || approvalsInFlight.has(req.id)) return;
+    input.value = '';  // never keep the PIN in the DOM after submitting
+    approvalsInFlight.add(req.id);
+    lastApprovalsSignature = '';
+    try {
+      await fetch('/approve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-HUD-Token': HUD_TOKEN },
+        body: JSON.stringify({ id: req.id, pin: pin }),
+      });
+    } catch (err) {
+      console.error('PIN submission error');
+    } finally {
+      approvalsInFlight.delete(req.id);
+      lastApprovalsSignature = '';
+      fetchApprovals();
     }
   }
 

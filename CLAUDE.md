@@ -18,15 +18,24 @@ recorded speech (STT only) to Groq Whisper.
 - `src/agent/`: `executor.py` (agent loop), `tools.py` (tool registry and handlers),
   `permissions.py` (tiers), `approvals.py` (out-of-band approvals), `memory.py`
   (conversation memory), `history.py` (reference-only cross-session history),
-  `control_intents.py` (strict whole-utterance shutdown / mute / forget commands). Root `memory.py` only re-exports `src.agent.memory`.
+  `control_intents.py` (strict whole-utterance shutdown / mute / forget commands). Key points:
+  `approvals.py` also holds `describe_action()` (plain-language previews used by HUD and Telegram,
+  no raw args in Telegram) and the optional PIN flow (`pin_required`, `verify_pin_and_approve`,
+  rate limit and lockout). `tools.py` has `file_list` (SAFE), Recycle Bin `file_delete`
+  (`SHFileOperationW`), `file_restore` (SAFE), one shared Desktop resolver (OneDrive-aware) for
+  all file tools, and `power_control` (shutdown/restart gated via `needs_approval_power_control`).
+  `executor.py` runs compound requests to completion (local-intent bypass disabled for them) and
+  resumes the remaining steps after an approval (resume-completion callback wired in `main.py`). Root `memory.py` only re-exports `src.agent.memory`.
 - `src/services/`: `ai_client.py` (Claude Messages API), `voice_service.py`
   (`SpeechRecognitionListener`, queue-based `TTSManager`), `groq_stt.py` (optional Groq
   Whisper with local faster-whisper fallback), `sentence_chunker.py` (streamed text ->
   sentences for TTS), `audio_input.py` (mic selection that skips loopback devices, post-TTS
   echo gate, energy floor), `telegram_service.py`
-  (`TelegramRemoteListener`, `TelegramApprovalBridge`, send helpers), `hud_status.py`
+  (`TelegramRemoteListener`, `TelegramApprovalBridge`, send helpers; in PIN mode the owner's next
+  message is consumed as the PIN reply, never logged or echoed, and deleted from the chat), `hud_status.py`
   (in-memory HUD state, flushed atomically to `status.json`), `signals.py` (Qt-free
   `CallbackSignal`), plus desktop icon and OmniRoute helpers.
+- `src/security/`: `pin.py` (PBKDF2 approval PIN hash/verify; `python -m src.security.pin`).
 - `src/config/`: `settings.py` (configuration), `paths.py` (runtime dir), `log.py`
   (logging).
 
@@ -44,7 +53,7 @@ call `.run()` on a QThread from a Python thread. Root `test_app.py`, `test_chat_
   environment > default.
 - Default models live only in `settings.py`: `DEFAULT_MODEL = "claude-sonnet-5-5"` and
   `DEFAULT_FAST_MODEL = "claude-haiku-5-5"`.
-- Never read, print or edit `.env`. A PreToolUse hook blocks edits to it; use `.env.example`.
+- Never read, print, edit or commit `.env` (it is gitignored; only `.env.example` is tracked). A PreToolUse hook blocks edits to it; use `.env.example`.
 
 ## Runtime directory
 Runtime state lives in `~/.ai-desktop-assistant/` (override with `ALTRON_DATA_DIR`), never in
@@ -76,6 +85,8 @@ the OneDrive-synced project folder. It holds `memory.json`, `status.json`,
 - **S4 tiers:** SAFE (auto), CONDITIONAL (per-call `needs_approval_*` check, no blanket
   allow), DANGEROUS (always ask). New tools default to DANGEROUS. See the
   `permission-gate-review` skill.
+- **S5 approvals (PIN):** with `APPROVAL_PIN_HASH` set, approval needs the PIN (HUD `/config/pin`
+  and `/approve`, or Telegram reply). Only the hash is stored; never log or echo the PIN.
 - **S5 approvals:** non-blocking `ApprovalManager`, resolved from the HUD (token) or a
   Telegram inline keyboard (owner chat and user only). Bound to an args hash, single use,
   expiring. Voice can never approve.
@@ -85,7 +96,13 @@ the OneDrive-synced project folder. It holds `memory.json`, `status.json`,
   pass argument lists.
 - **S8 runtime files:** everything mutable goes in `~/.ai-desktop-assistant/` (see above).
 
+## Prompt constraint
+`prompts/system_prompt.txt` must stay under **6900 characters** (a test enforces it). Trim wording
+before adding rules, and keep the password and compound-request rules intact (tests check them).
+
 ## Tests
+- Current status: **872 passed** (`tests/` plus `test_agent.py`). `test_pin_settings.py` failed
+  once in a full run and passed on rerun, so treat it as possibly order-dependent.
 - Run `pytest -p no:cacheprovider` from the project root. `pytest.ini` limits collection to
   `tests/` and `test_agent.py` and disables the cache provider, so no `.pytest_cache/`
   lands in OneDrive.

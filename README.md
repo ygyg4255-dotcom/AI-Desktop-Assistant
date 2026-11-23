@@ -23,6 +23,12 @@
 - **Anthropic Claude Backend**: Uses the Claude Messages API directly (default model `claude-sonnet-5-5`, fast model `claude-haiku-5-5`). The endpoint is fixed to `api.anthropic.com` by design.
 - **Out-of-band Approvals**: Dangerous actions (file writes and deletes, terminal commands, closing apps, ...) never run unprompted. You approve or deny each request in the HUD or with Telegram inline buttons.
 - **Autonomous Multi-Step Execution**: Give one request and Altron chains tool calls until the task is done (up to 20 tool iterations per turn) instead of stopping after the first step or asking "shall I continue?". It only pauses for an approval or when something genuinely blocks it (for example a login or credential prompt).
+- **Compound Tasks**: One command with several actions ("list my Desktop, delete the old PDF, then send me the report") runs every step in order. If a step needs approval, the remaining steps resume automatically once you approve, so the chain is never dropped halfway.
+- **Approval PIN (optional)**: Set a PIN in the HUD settings and every dangerous approval then needs it: type it in the HUD, or reply with it in Telegram (the reply is never logged or echoed, and the message is deleted). Only a PBKDF2 hash (`APPROVAL_PIN_HASH`) is stored, wrong tries are rate-limited and locked out, and you can change or disable the PIN from the same panel. Without a PIN, the Approve/Deny buttons are used.
+- **Human-readable Approval Previews**: HUD and Telegram prompts describe the action in plain language ("Delete report.pdf from your Desktop", "Restart the PC") instead of raw tool arguments. Technical details stay in a collapsed section in the HUD and are not sent to Telegram.
+- **Safe Deletion**: `file_delete` moves items to the Recycle Bin instead of erasing them, and `file_restore` brings them back.
+- **Directory Listing**: `file_list` shows a folder safely, so Altron no longer falls back to `terminal_execute` to browse. The Desktop resolves to your real (OneDrive-redirected) Desktop in every file tool.
+- **Power Gate**: `power_control` shutdown and restart always need approval (and the PIN, if set). Lock, sleep and cancelling a shutdown run without a prompt.
 
 ### Integrations
 
@@ -60,11 +66,11 @@ The vault file is local only and is never logged or committed.
 ### Approval Policy
 | Tier | Behaviour | Examples |
 |---|---|---|
-| Safe | Runs automatically | Artcraft tools, Steam tools (including `steam_add_to_cart`), `telegram_send_file`, `network_control`, media and power control, notes and to-dos, reminders, `web_search`, `open_url`, `gui_click`, `gui_scroll`, camera, PDF creation |
-| Conditional | Auto-runs for low-risk input, asks otherwise (never a blanket "allow") | `file_read`, `file_open`, `app_open`, `send_to_telegram` (sensitive paths ask) |
-| Dangerous | Always asks, per call | `file_write`, `file_delete`, `file_move`, `file_copy`, `terminal_execute`, `app_close`, `code_edit`, `gui_type`, `gui_hotkey` |
+| Safe | Runs automatically | Artcraft tools, Steam tools (including `steam_add_to_cart`), `telegram_send_file`, `network_control`, media control, `power_control` lock/sleep, notes and to-dos, reminders, `web_search`, `open_url`, `gui_click`, `gui_scroll`, camera, PDF creation, `file_list`, `file_restore` |
+| Conditional | Auto-runs for low-risk input, asks otherwise (never a blanket "allow") | `file_read`, `file_open`, `app_open`, `send_to_telegram` (sensitive paths ask), `power_control` (shutdown and restart ask) |
+| Dangerous | Always asks, per call | `file_write`, `file_delete` (to the Recycle Bin), `file_move`, `file_copy`, `terminal_execute`, `app_close`, `code_edit`, `gui_type`, `gui_hotkey` |
 
-Approvals are given in the HUD or with Telegram inline buttons. Voice can never approve. New tools default to Dangerous.
+Approvals are given in the HUD or with Telegram inline buttons, or with the PIN when one is set. Voice can never approve. New tools default to Dangerous.
 
 ### Local voice (Piper)
 Piper runs offline and is the preferred voice. Altron uses `en_US-joe-medium` for English and `ar_JO-kareem-medium` for Arabic, and applies the `ALTRON_VOICE_FX=ultron` chain to both Piper and edge-tts. Install the package and download the two voices once (Windows, from the project folder):
@@ -81,8 +87,9 @@ Altron looks for the models in that folder automatically. To use other files, se
 |---|---|
 | `main.py` | **Official entry point.** Starts and supervises the HUD server, the voice listener and the Telegram listener on plain Python threads. |
 | `ui_server.py` + `ui/` | Flask HUD server on `127.0.0.1:5000` (5001 if busy) and its web front end. |
-| `src/agent/` | Agent executor (autonomous tool loop), tool registry, permission tiers, approval manager, conversation memory, vision and screen-coordinate helpers. |
+| `src/agent/` | Agent executor (autonomous tool loop), tool registry, permission tiers, approval manager (`approvals.py`, plain-language previews and PIN checks), conversation memory, vision and screen-coordinate helpers. |
 | `src/services/` | Claude client, voice (VAD + faster-whisper or Groq STT, TTS), Telegram, HUD status, desktop icons, reminders, camera, media, network and Wi-Fi vault, notes, web search, `artcraft_service.py`, `steam_service.py`. |
+| `src/security/` | Approval PIN hashing and verification (`pin.py`; `python -m src.security.pin` generates a hash). |
 | `tests/` | pytest suite (see *Run the Tests*). |
 | `src/config/` | Settings (single config precedence), runtime paths, central logging. |
 | `src/app.py`, `src/ui/` | **Legacy, deprecated** PySide6 capsule UI. These are kept so old imports still work. They are no longer the supported way to run Altron. |
@@ -111,7 +118,7 @@ Altron runs tools on your desktop, so its HUD, configuration and tools are harde
 | S2 | API key is only ever sent to `api.anthropic.com`; `base_url`/`provider` cannot be configured. State-changing endpoints accept JSON only. |
 | S3 | The model cannot forge approval: `_`-prefixed tool input keys are stripped before dispatch. |
 | S4 | Tools are tiered as safe, conditional (checked per call, e.g. sensitive paths) or dangerous (always ask). |
-| S5 | Approvals are non-blocking, bound to a hash of the arguments, single-use and expiring. They are accepted from the HUD or from the owner's Telegram account. Voice can never approve. |
+| S5 | Approvals are non-blocking, bound to a hash of the arguments, single-use and expiring. They are accepted from the HUD or from the owner's Telegram account, optionally behind a PIN. Voice can never approve. |
 | S6 | Bot tokens and API keys are redacted from logs and errors. `.env` values are written safely. |
 | S7 | No `shell=True`. Executables are resolved and launched with argument lists. |
 | S8 | Runtime files live in `~/.ai-desktop-assistant/`, not in the project folder. |
@@ -179,6 +186,7 @@ Edit `.env` (see `.env.example`) to set:
 | `ALTRON_MIC_DEVICE`, `ALTRON_REQUIRE_WAKE_WORD` | Optional microphone and wake-word behaviour |
 | `ALTRON_CAMERA_AUTOSTART` | Optional webcam warm-up (frames stay in RAM) |
 | `ALTRON_VOICE_FX`, `PIPER_MODEL_PATH`, `PIPER_MODEL_PATH_AR`, `PIPER_LENGTH_SCALE` | Optional voice settings |
+| `APPROVAL_PIN_HASH` | Optional approval PIN hash. Set it from the HUD settings (recommended) or with `python -m src.security.pin`. Never store the plain PIN |
 | `ALTRON_DATA_DIR`, `ALTRON_LOG_LEVEL` | Optional runtime directory and log level |
 
 You can also change the model, key and language later from the HUD settings panel. Steam tools need the Steam client installed; Artcraft tools need the Artcraft apps.
@@ -202,7 +210,7 @@ The HUD opens in your browser at `http://127.0.0.1:5000`, and the console prints
 pip install pytest
 pytest -p no:cacheprovider
 ```
-`pytest.ini` limits collection to `tests/` and `test_agent.py` and disables the pytest cache, so nothing is written into the synced project folder. Tests use a temporary `ALTRON_DATA_DIR` and never touch your real `.env` or the network. Current status: **782 passed**. The root `test_app.py`, `test_chat_ui.py`, `test_step3_final.py` and `test_ui_integration.py` are manual GUI scripts for the legacy UI, not part of the suite.
+`pytest.ini` limits collection to `tests/` and `test_agent.py` and disables the pytest cache, so nothing is written into the synced project folder. Tests use a temporary `ALTRON_DATA_DIR` and never touch your real `.env` or the network. Current status: **872 passed**. The root `test_app.py`, `test_chat_ui.py`, `test_step3_final.py` and `test_ui_integration.py` are manual GUI scripts for the legacy UI, not part of the suite.
 
 ---
 
@@ -224,6 +232,8 @@ pytest -p no:cacheprovider
 - **مشاركة الملفات عبر تيليجرام**: الأداة `telegram_send_file` ترسل أي ملف محلي إلى محادثتك (حد أقصى 50 ميغابايت).
 - **خزنة Wi-Fi**: قراءة كلمات مرور الشبكات المحفوظة (`wifi_get_password`) ونسيان الشبكات مع نسخة احتياطية (`wifi_forget`) والاتصال بشبكة جديدة (`wifi_connect_new`).
 - **تنفيذ مستقل متعدد الخطوات**: يُكمل المهمة بسلسلة من الأدوات (حتى 20 خطوة في الدور الواحد) دون توقف بعد أول خطوة.
+- **رمز PIN للموافقات (اختياري)**: عند تفعيله يلزم إدخال الرمز في لوحة HUD أو الرد به في تيليجرام لتنفيذ أي إجراء خطير، مع وصف مفهوم للإجراء بدل المعاملات التقنية.
+- **حذف آمن وقوائم المجلدات**: `file_delete` ينقل الملفات إلى سلة المحذوفات و`file_restore` يستعيدها، و`file_list` يعرض محتوى المجلد (ويدعم سطح المكتب المُعاد توجيهه إلى OneDrive). أما إيقاف التشغيل وإعادة التشغيل (`power_control`) فيتطلبان موافقة دائماً.
 - **سياسة الموافقات**: الأدوات الآمنة تعمل تلقائياً، أما الكتابة والحذف والنقل والنسخ وأوامر الطرفية وإغلاق التطبيقات والكتابة بلوحة المفاتيح فتتطلب موافقتك دائماً.
 - **ملفات التشغيل**: تُحفظ الذاكرة والحالة والسجل (`altron.log`) في المجلد `‎%USERPROFILE%\.ai-desktop-assistant\` خارج مجلد المشروع.
 

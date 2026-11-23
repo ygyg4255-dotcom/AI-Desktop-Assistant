@@ -192,6 +192,12 @@ def main() -> None:
     executor = AgentExecutor(ai_client=ai_client, database=database, approvals=approvals)
     tg_bridge = [None]
     approvals.add_listener(make_approval_listener(tg_bridge))
+
+    def _on_resume_complete(res, origin):
+        update_hud_status(state="Idle", log_entry=f"Altron: {res.content}")
+        if origin == CHANNEL_TELEGRAM:
+            send_telegram_message_async(res.content)
+    executor.on_resume_complete = _on_resume_complete
     approvals.start_sweeper(interval=5.0)
     tts_manager = TTSManager(enabled=True)
 
@@ -436,6 +442,7 @@ def main() -> None:
                     bot_token=bot_token,
                     allowed_chat_id=chat_id,
                     callback_handler=tg_bridge[0].handle_callback_query if tg_bridge[0] else None,
+                    message_interceptor=tg_bridge[0].handle_message if tg_bridge[0] else None,
                 )
                 active_tg_worker[0] = tg_worker
 

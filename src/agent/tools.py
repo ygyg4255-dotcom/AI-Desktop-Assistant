@@ -201,6 +201,32 @@ class ToolRegistry:
 
 # === Built-in Tool Handlers ===
 
+def _desktop_dir() -> Path:
+    """Real Desktop folder (shell-folder registry value, so OneDrive-redirected Desktops work)."""
+    if platform.system() == "Windows":
+        try:
+            import winreg
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders") as k:
+                d = Path(os.path.expandvars(winreg.QueryValueEx(k, "Desktop")[0]))
+            if d.is_dir():
+                return d
+        except OSError as e:
+            logger.debug("Desktop registry lookup failed: %s", e)
+    home = Path.home()
+    cands = [home / "OneDrive" / "Desktop", home / "Desktop"]
+    return next((c for c in cands if c.is_dir()), cands[-1])
+
+
+def resolve_user_path(value: str) -> Path:
+    """Expand a tool path; 'desktop', 'desktop/x', '~/Desktop/x' map to the real Desktop."""
+    parts = re.split(r"[\\/]+", str(value or "").strip())
+    if parts and parts[0] == "~":
+        parts = parts[1:]
+    if parts and parts[0].lower() == "desktop":
+        return _desktop_dir().joinpath(*[x for x in parts[1:] if x])
+    return Path(value).expanduser()
+
+
 def handle_file_search(params: Dict[str, Any]) -> ToolResult:
     """Handle file search tool."""
     query = params.get("query", "")
@@ -208,7 +234,7 @@ def handle_file_search(params: Dict[str, Any]) -> ToolResult:
 
     try:
         results = []
-        search_dir = Path(directory).expanduser()
+        search_dir = resolve_user_path(directory)
 
         if not search_dir.exists():
             return ToolResult(
@@ -235,6 +261,21 @@ def handle_file_search(params: Dict[str, Any]) -> ToolResult:
         )
 
 
+def handle_file_list(params: Dict[str, Any]) -> ToolResult:
+    """List one directory's entries (read-only; 'desktop' resolves to the real Desktop folder)."""
+    directory = str(params.get("directory") or "~")
+    try:
+        target = resolve_user_path(directory)
+        if not target.is_dir():
+            return ToolResult(success=False, output=None, error=f"Directory not found: {directory}")
+        entries = []
+        for item in sorted(target.iterdir(), key=lambda i: (not i.is_dir(), i.name.lower()))[:200]:
+            entries.append({"name": item.name, "type": "folder" if item.is_dir() else "file"})
+        return ToolResult(success=True, output={"path": str(target), "entries": entries, "count": len(entries)})
+    except Exception as e:
+        return ToolResult(success=False, output=None, error=str(e))
+
+
 def handle_file_read(params: Dict[str, Any], approved: bool = False) -> ToolResult:
     """Handle file read tool - sensitive paths (secrets, keys, browser data) need approval."""
     file_path = params.get("path", "")
@@ -250,7 +291,7 @@ def handle_file_read(params: Dict[str, Any], approved: bool = False) -> ToolResu
         )
 
     try:
-        path = Path(file_path).expanduser()
+        path = resolve_user_path(file_path)
         if not path.exists():
             return ToolResult(
                 success=False,
@@ -290,7 +331,7 @@ def handle_file_write(params: Dict[str, Any], approved: bool = False) -> ToolRes
     file_path = params.get("path", "")
     content = params.get("content", "")
 
-    path = Path(file_path).expanduser()
+    path = resolve_user_path(file_path)
     exists = path.exists()
 
     if not approved:
@@ -321,7 +362,7 @@ def handle_file_write(params: Dict[str, Any], approved: bool = False) -> ToolRes
 def handle_file_delete(params: Dict[str, Any], approved: bool = False) -> ToolResult:
     """Handle file delete tool - requires permission."""
     file_path = params.get("path", "")
-    path = Path(file_path).expanduser()
+    path = resolve_user_path(file_path)
 
     if not approved:
         return ToolResult(
@@ -336,16 +377,66 @@ def handle_file_delete(params: Dict[str, Any], approved: bool = False) -> ToolRe
         return ToolResult(success=False, output=None, error=f"File not found: {file_path}")
 
     try:
-        if path.is_file():
-            path.unlink()
-        elif path.is_dir():
-            shutil.rmtree(path)
+        _recycle(path)
         return ToolResult(
             success=True,
-            output={"deleted": str(path), "message": "Deleted successfully"}
+            output={"deleted": str(path), "message": "Moved to Recycle Bin (restorable with file_restore)"}
         )
     except Exception as e:
         return ToolResult(success=False, output=None, error=str(e))
+
+
+def _recycle(path: Path) -> None:
+    """Send a file/folder to the Recycle Bin via SHFileOperationW (FO_DELETE + FOF_ALLOWUNDO)."""
+    import ctypes
+    from ctypes import wintypes
+
+    class SHFILEOPSTRUCTW(ctypes.Structure):
+        _fields_ = [("hwnd", wintypes.HWND), ("wFunc", wintypes.UINT),
+                    ("pFrom", wintypes.LPCWSTR), ("pTo", wintypes.LPCWSTR),
+                    ("fFlags", ctypes.c_ushort), ("fAnyOperationsAborted", wintypes.BOOL),
+                    ("hNameMappings", ctypes.c_void_p), ("lpszProgressTitle", wintypes.LPCWSTR)]
+
+    FO_DELETE, FOF_SILENT, FOF_NOCONFIRMATION, FOF_ALLOWUNDO, FOF_NOERRORUI = 3, 0x4, 0x10, 0x40, 0x400
+    op = SHFILEOPSTRUCTW()
+    op.wFunc = FO_DELETE
+    op.pFrom = str(path.resolve()) + "\0"  # double-NUL terminated list
+    op.fFlags = FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT | FOF_NOERRORUI
+    rc = ctypes.windll.shell32.SHFileOperationW(ctypes.byref(op))
+    if rc or op.fAnyOperationsAborted:
+        raise OSError(f"Recycle Bin move failed (code {rc})")
+
+
+_RESTORE_PS = (
+    "$n=$env:ALTRON_RESTORE; $sh=New-Object -ComObject Shell.Application; "
+    "$bin=$sh.Namespace(10); $m=@($bin.Items() | Where-Object { $_.Name -like \"*$n*\" "
+    "-or [IO.Path]::GetFileNameWithoutExtension($_.Name) -like \"*$n*\" }); "
+    "if(-not $m){ exit 3 }; $it=$m[0]; $dir=$bin.GetDetailsOf($it,1); "
+    "$orig=Join-Path $dir $it.Name; $it.InvokeVerb('undelete'); Write-Output $orig"
+)
+
+
+def handle_file_restore(params: Dict[str, Any]) -> ToolResult:
+    """Restore the first Recycle Bin item whose name matches (Shell COM 'undelete' verb)."""
+    name = str(params.get("name", "")).strip()
+    if not name or any(c in name for c in '*?"\r\n'):
+        return ToolResult(success=False, output=None, error="A plain file name is required")
+    ps = shutil.which("powershell") or shutil.which("pwsh")
+    if platform.system() != "Windows" or not ps:
+        return ToolResult(success=False, output=None, error="Recycle Bin restore needs Windows PowerShell")
+    try:
+        proc = subprocess.run(
+            [ps, "-NoProfile", "-NonInteractive", "-Command", _RESTORE_PS],
+            capture_output=True, text=True, timeout=30, env={**os.environ, "ALTRON_RESTORE": name},
+        )
+    except Exception as e:
+        return ToolResult(success=False, output=None, error=str(e))
+    if proc.returncode == 3:
+        return ToolResult(success=False, output=None, error=f"'{name}' was not found in the Recycle Bin")
+    if proc.returncode != 0:
+        return ToolResult(success=False, output=None, error=redact_secrets(proc.stderr.strip()[:300] or "Restore failed"))
+    return ToolResult(success=True, output={"restored": proc.stdout.strip(),
+                                            "message": f"Restored '{name}' to its original location"})
 
 
 def handle_file_copy(params: Dict[str, Any], approved: bool = False) -> ToolResult:
@@ -365,8 +456,8 @@ def handle_file_copy(params: Dict[str, Any], approved: bool = False) -> ToolResu
             permission_message=f"Copy: {src_str} -> {dst_str} (existing files may be overwritten)"
         )
 
-    src = Path(src_str).expanduser()
-    dst = Path(dst_str).expanduser()
+    src = resolve_user_path(src_str)
+    dst = resolve_user_path(dst_str)
 
     if not src.exists():
         return ToolResult(success=False, output=None, error=f"Source path not found: {src_str}")
@@ -398,8 +489,8 @@ def handle_file_move(params: Dict[str, Any], approved: bool = False) -> ToolResu
     if not src_str or not dst_str:
         return ToolResult(success=False, output=None, error="Both 'source' and 'destination' are required")
 
-    src = Path(src_str).expanduser()
-    dst = Path(dst_str).expanduser()
+    src = resolve_user_path(src_str)
+    dst = resolve_user_path(dst_str)
 
     if not approved:
         return ToolResult(
@@ -2491,6 +2582,9 @@ def handle_power_control(params: Dict[str, Any], approved: bool = False) -> Tool
     action = str(params.get("action", "")).strip().lower()
     if action not in POWER_ACTIONS:
         return _tool_error("Unknown power action. Use lock, sleep, shutdown, restart or cancel_shutdown.")
+    if not approved and needs_approval_power_control(action):
+        return ToolResult(success=False, output=None, requires_permission=True, is_dangerous=True,
+                          permission_message=f"Power: {action}")
     try:
         delay = int(float(params.get("delay_minutes") or 0))
     except (TypeError, ValueError):
@@ -2582,9 +2676,6 @@ def handle_note_read(params: Dict[str, Any]) -> ToolResult:
 
 # --- Web: open a URL, search, and read results --------------------------
 
-    if not approved and needs_approval_power_control(action):
-        return ToolResult(success=False, output=None, requires_permission=True, is_dangerous=True,
-                          permission_message=f"Power: {action}")
 def _validate_web_url(url: str) -> Optional[str]:
     if not url or len(url) > WEB_URL_MAX_CHARS or any(ch.isspace() or ord(ch) < 32 for ch in url):
         return "That is not a valid web address."
@@ -4031,6 +4122,17 @@ def create_default_registry() -> ToolRegistry:
     ))
 
     registry.register(Tool(
+        name="file_list",
+        description="List the files and folders inside a directory (use directory='desktop' for the Desktop). ALWAYS use this instead of terminal_execute/PowerShell to list or show folder contents",
+        category=ToolCategory.FILE_SYSTEM,
+        parameters=[
+            ToolParameter("directory", "string", "Directory to list, or 'desktop'", required=False, default="~")
+        ],
+        handler=handle_file_list,
+        requires_permission=False
+    ))
+
+    registry.register(Tool(
         name="file_read",
         description="Read the contents of a file",
         category=ToolCategory.FILE_SYSTEM,
@@ -4057,7 +4159,7 @@ def create_default_registry() -> ToolRegistry:
 
     registry.register(Tool(
         name="file_delete",
-        description="Delete a file or directory",
+        description="Move a file or directory to the Windows Recycle Bin (restorable with file_restore)",
         category=ToolCategory.FILE_SYSTEM,
         parameters=[
             ToolParameter("path", "string", "Path to the file or directory to delete")
@@ -4065,6 +4167,17 @@ def create_default_registry() -> ToolRegistry:
         handler=handle_file_delete,
         requires_permission=True,
         is_dangerous=True
+    ))
+
+    registry.register(Tool(
+        name="file_restore",
+        description="Restore a deleted file or folder from the Windows Recycle Bin to its original location, found by name",
+        category=ToolCategory.FILE_SYSTEM,
+        parameters=[
+            ToolParameter("name", "string", "File or folder name (or part of it) to restore")
+        ],
+        handler=handle_file_restore,
+        requires_permission=False
     ))
 
     registry.register(Tool(
@@ -4110,7 +4223,8 @@ def create_default_registry() -> ToolRegistry:
         category=ToolCategory.TERMINAL,
         parameters=[
             ToolParameter("command", "string", "Command to execute"),
-            ToolParameter("shell", "string", "Shell to use", required=False, default="powershell", enum=["powershell", "cmd", "bash"])
+            ToolParameter("shell", "string", "Shell to use", required=False, default="powershell", enum=["powershell", "cmd", "bash"]),
+            ToolParameter("summary", "string", "Short plain-language sentence (user's language) saying what this does; shown in the approval prompt", required=False, default="")
         ],
         handler=handle_terminal_command,
         requires_permission=True,
@@ -4478,7 +4592,7 @@ def create_default_registry() -> ToolRegistry:
             ToolParameter("delay_minutes", "number", "Minutes before shutdown or restart (0 = now, max 1440). Only for shutdown/restart.", required=False, default=0),
         ],
         handler=handle_power_control,
-        requires_permission=False,
+        requires_permission=True,
     ))
     registry.register(Tool(
         name="todo_add",
@@ -4620,7 +4734,7 @@ def create_default_registry() -> ToolRegistry:
             ToolParameter("open_after", "boolean", "Open in DeckCraft when done (default true)", required=False, default=True),
         ],
         handler=handle_deckcraft_create,
-        requires_permission=True,
+        requires_permission=False,
     ))
     registry.register(Tool(
         name="deckcraft_read",
@@ -4800,6 +4914,7 @@ def create_default_registry() -> ToolRegistry:
             ToolParameter("project_path", "string", "Project folder: absolute path or bare folder name under Desktop (default: current workspace)", required=False, default=None),
             ToolParameter("create_if_missing", "boolean", "Create the folder if it does not exist (default true)", required=False, default=True),
             ToolParameter("open_in_vscode", "boolean", "Open the folder in VS Code afterwards (default false)", required=False, default=False),
+            ToolParameter("summary", "string", "Short plain-language sentence (user's language) saying what this does; shown in the approval prompt", required=False, default=""),
         ],
         handler=handle_claude_code_run,
         requires_permission=False,

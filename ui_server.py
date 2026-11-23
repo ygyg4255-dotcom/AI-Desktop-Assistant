@@ -25,7 +25,10 @@ from typing import Optional, Callable, Any, Dict
 from flask import Flask, send_from_directory, Response, request, jsonify
 
 from src.config.log import get_logger, setup_logging
-from src.config.settings import get_active_config_dict, get_config_value, is_masked_key, save_ai_config
+from src.config.settings import (
+    get_active_config_dict, get_config_value, is_masked_key, save_ai_config, update_env_file,
+)
+from src.security import pin as pin_mod
 from src.services.hud_status import get_hud_status, clear_hud_logs, update_hud_status
 
 logger = get_logger("hud")
@@ -40,8 +43,8 @@ _TOKEN_PLACEHOLDER = "__HUD_TOKEN__"
 _HUD_PORT: int = 5000
 
 _API_PATHS = {"/status", "/status.json", "/config", "/test_config", "/command", "/clear_logs",
-              "/approvals", "/approve"}
-_JSON_ONLY_PATHS = {"/command", "/config", "/test_config", "/approve"}
+              "/approvals", "/approve", "/config/pin"}
+_JSON_ONLY_PATHS = {"/command", "/config", "/test_config", "/approve", "/config/pin"}
 _CONFIG_FIELDS = {"api_key", "model", "language"}
 
 # Registered callbacks
@@ -319,6 +322,7 @@ _APPROVE_STATUS = {
     "approved": 200, "denied": 200,
     "expired": 409, "already_used": 409,
     "hash_mismatch": 409, "forbidden_channel": 403, "unknown": 404,
+    "pin_required": 428, "wrong_pin": 403, "locked": 423, "no_pin": 409,
 }
 
 
@@ -329,8 +333,15 @@ def approve_route():
     data = _json_object()
     if data is None:
         return _error(400, "body must be a JSON object")
-    if set(data) - {"id", "decision", "args_hash"}:
+    if set(data) - {"id", "decision", "args_hash", "pin"}:
         return _error(400, "unsupported field(s)")
+    if "pin" in data:  # PIN mode: a correct PIN approves and runs immediately
+        if not isinstance(data.get("id"), str) or not isinstance(data["pin"], str):
+            return _error(400, "id and pin must be strings")
+        result = _APPROVAL_MANAGER.verify_pin_and_approve(data["id"], data["pin"], via="hud")
+        resp = jsonify({"status": result.outcome, "attempts_left": result.attempts_left})
+        resp.status_code = _APPROVE_STATUS.get(result.outcome, 400)
+        return resp
     req_id, decision, digest = data.get("id"), data.get("decision"), data.get("args_hash")
     if not isinstance(req_id, str) or not isinstance(digest, str) or decision not in ("approve", "deny"):
         return _error(400, "id and args_hash must be strings; decision must be 'approve' or 'deny'")
@@ -339,6 +350,43 @@ def approve_route():
     resp = jsonify({"status": result.outcome})
     resp.status_code = _APPROVE_STATUS.get(result.outcome, 400)
     return resp
+
+
+# Brute-force guard for the settings PIN endpoint: 5 wrong current PINs lock it for 60 s.
+_PIN_FAILS = {"count": 0, "until": 0.0}
+
+
+@flask_app.route("/config/pin", methods=["POST"])
+def config_pin_route():
+    """Set / change / disable the approval PIN. Payloads are never logged or echoed."""
+    data = _json_object()
+    if data is None:
+        return _error(400, "body must be a JSON object")
+    action = data.get("action")
+    current, new = data.get("current_pin", ""), data.get("new_pin", "")
+    if set(data) - {"action", "current_pin", "new_pin"} or action not in ("set", "change", "disable")             or not isinstance(current, str) or not isinstance(new, str):
+        return _error(400, "invalid request")
+
+    stored = pin_mod.configured_hash()
+    if (action == "set") == bool(stored):
+        return _error(409, "a PIN is already set" if stored else "no PIN is set")
+    if action in ("set", "change") and not pin_mod.valid_pin_format(new):
+        return _error(400, f"PIN must be {pin_mod.PIN_MIN_LEN}-{pin_mod.PIN_MAX_LEN} printable characters")
+    if action != "set":
+        if time.monotonic() < _PIN_FAILS["until"]:
+            return _error(429, "too many wrong PINs, try again in a minute")
+        if not pin_mod.verify_pin(current, stored):
+            _PIN_FAILS["count"] += 1
+            if _PIN_FAILS["count"] >= 5:
+                _PIN_FAILS.update(count=0, until=time.monotonic() + 60)
+            return _error(403, "wrong current PIN")
+        _PIN_FAILS["count"] = 0
+
+    try:
+        update_env_file({"APPROVAL_PIN_HASH": None if action == "disable" else pin_mod.hash_pin(new)})
+    except OSError:
+        return _error(500, "could not write settings to .env")
+    return jsonify({"status": "ok", "pin_enabled": action != "disable"})
 
 
 def _is_port_in_use(host: str, port: int) -> bool:

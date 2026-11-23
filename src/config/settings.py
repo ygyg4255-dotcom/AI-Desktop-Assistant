@@ -165,6 +165,56 @@ def is_masked_key(key: str) -> bool:
     return "•" in s or "*" in s or s == "••••••••" or (len(s) > 4 and "••" in s)
 
 
+def update_env_file(updates: Dict[str, Optional[str]], env_path: Optional[Path] = None) -> None:
+    """Persist ``updates`` to .env and os.environ; a value of None removes that key."""
+    if env_path is None:
+        env_path = resolve_env_path()
+    lines = []
+    if env_path.exists():
+        try:
+            with open(env_path, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+        except Exception as err:
+            # Rebuilding from scratch would drop unrelated settings, so refuse to overwrite.
+            logger.error("Could not read %s: %s", env_path.name, type(err).__name__)
+            raise
+
+    keys_written = set()
+    new_lines = []
+    for line in lines:
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#") and "=" in stripped:
+            k, _ = stripped.split("=", 1)
+            k = k.strip()
+            if k in updates:
+                keys_written.add(k)
+                if updates[k] is not None:
+                    new_lines.append(f"{k}={updates[k]}\n")
+                continue
+        new_lines.append(line)
+
+    for k, v in updates.items():
+        if k not in keys_written and v is not None:
+            new_lines.append(f"{k}={v}\n")
+
+    try:
+        env_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(env_path, "w", encoding="utf-8") as f:
+            f.writelines(new_lines)
+    except Exception as err:
+        # Never include values (they may hold the API key) in the message.
+        logger.error("Failed to write %s: %s", env_path.name, type(err).__name__)
+        raise
+
+    for k, v in updates.items():
+        if v is None:
+            os.environ.pop(k, None)
+        else:
+            os.environ[k] = str(v)
+    invalidate_config_cache()
+
+
+
 def save_ai_config(
     model: str,
     api_key: str,
@@ -189,46 +239,7 @@ def save_ai_config(
         updates["AI_API_KEY"] = api_key.strip()
         updates["ANTHROPIC_API_KEY"] = api_key.strip()
 
-    lines = []
-    if env_path.exists():
-        try:
-            with open(env_path, "r", encoding="utf-8") as f:
-                lines = f.readlines()
-        except Exception as err:
-            # Rebuilding from scratch would drop unrelated settings, so refuse to overwrite.
-            logger.error("Could not read %s: %s", env_path.name, type(err).__name__)
-            raise
-
-    keys_written = set()
-    new_lines = []
-    for line in lines:
-        stripped = line.strip()
-        if stripped and not stripped.startswith("#") and "=" in stripped:
-            k, _ = stripped.split("=", 1)
-            k = k.strip()
-            if k in updates:
-                new_lines.append(f"{k}={updates[k]}\n")
-                keys_written.add(k)
-                continue
-        new_lines.append(line)
-
-    for k, v in updates.items():
-        if k not in keys_written:
-            new_lines.append(f"{k}={v}\n")
-
-    try:
-        env_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(env_path, "w", encoding="utf-8") as f:
-            f.writelines(new_lines)
-    except Exception as err:
-        # Never include values (they may hold the API key) in the message.
-        logger.error("Failed to write %s: %s", env_path.name, type(err).__name__)
-        raise
-
-    for k, v in updates.items():
-        os.environ[k] = str(v)
-    invalidate_config_cache()
-
+    update_env_file(updates, env_path)
     return updates
 
 
@@ -308,6 +319,7 @@ class Settings:
         self.telegram_bot_token = cfg("TELEGRAM_BOT_TOKEN")
         self.telegram_chat_id = cfg("TELEGRAM_CHAT_ID")
         self.groq_api_key = cfg("GROQ_API_KEY")
+        self.approval_pin_hash = cfg("APPROVAL_PIN_HASH")
         self.altron_mic_device = cfg("ALTRON_MIC_DEVICE")
         # Keep the webcam warm in RAM for instant capture (frames never leave the machine
         # unless the user asks Altron to look). Missing camera/cv2 degrades to a warning.
@@ -361,4 +373,5 @@ class Settings:
             "api_key": masked_key,
             "has_api_key": has_key,
             "language": self.altron_language,
+            "pin_enabled": bool(self.approval_pin_hash),  # never the hash itself
         }

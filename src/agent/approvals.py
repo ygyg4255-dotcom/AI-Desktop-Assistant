@@ -11,6 +11,11 @@ A tool call that needs approval becomes an ``ApprovalRequest``:
 Nothing blocks while a request is pending. When a request is approved the
 registered ``runner`` executes the stored args (never caller-supplied args)
 exactly once, on a ``dispatch`` worker (a daemon thread by default).
+
+PIN mode: when ``APPROVAL_PIN_HASH`` is configured, approving requires the PIN via
+``verify_pin_and_approve`` (a correct PIN executes immediately, 3 wrong ones deny the
+request); plain ``resolve(approve=True)`` is refused. Denying never needs a PIN.
+The raw PIN is never stored, logged or returned.
 """
 from __future__ import annotations
 
@@ -23,6 +28,8 @@ import threading
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
+
+from src.security import pin as pin_mod
 
 # Origin channels
 CHANNEL_LOCAL = "local"
@@ -53,6 +60,10 @@ UNKNOWN = "unknown"
 ALREADY_USED = "already_used"
 HASH_MISMATCH = "hash_mismatch"
 FORBIDDEN_CHANNEL = "forbidden_channel"
+PIN_REQUIRED = "pin_required"  # resolve(approve=True) while a PIN is configured
+WRONG_PIN = "wrong_pin"
+LOCKED = "locked"  # too many wrong PINs: request denied
+MAX_PIN_ATTEMPTS = 3
 
 
 def args_hash(tool_name: str, args: Dict[str, Any]) -> str:
@@ -71,6 +82,42 @@ def summarize_args(args: Dict[str, Any], limit: int = 300) -> str:
     except Exception:
         text = repr(args)
     return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+def _where(path: Any) -> tuple:
+    """(file name, friendly parent folder) for a user path."""
+    p = str(path or "").strip().strip('"').replace("\\", "/").rstrip("/")
+    name = p.rsplit("/", 1)[-1] or p or "?"
+    parent = p.rsplit("/", 1)[0].rsplit("/", 1)[-1] if "/" in p else ""
+    return name, ("" if parent in ("", "~", ".") else parent)
+
+
+def describe_action(tool_name: str, args: Dict[str, Any], fallback: str = "") -> str:
+    """Plain-language one-line description of a gated call (no raw args or code)."""
+    a = args or {}
+    name, parent = _where(a.get("path") or a.get("source"))
+    loc = f" from {parent}" if parent else ""
+    dest_name, dest_parent = _where(a.get("destination"))
+    if tool_name == "file_delete":
+        return f"Move `{name}`{loc} to Recycle Bin"
+    if tool_name == "file_write":
+        return f"Write to `{name}`{loc}"
+    if tool_name == "file_move":
+        return f"Move `{name}`{loc} to {dest_parent or dest_name}"
+    if tool_name == "file_copy":
+        return f"Copy `{name}`{loc} to {dest_parent or dest_name}"
+    if tool_name == "power_control":
+        return {"shutdown": "Shut down the PC", "restart": "Restart the PC", "sleep": "Put the PC to sleep",
+                "lock": "Lock the PC", "cancel_shutdown": "Cancel the scheduled shutdown"
+                }.get(str(a.get("action")), "Change the PC power state")
+    if tool_name in ("terminal_execute", "claude_code_run"):
+        said = " ".join(str(a.get("summary") or "").split())
+        if said:
+            return said[:200]
+        text = " ".join(str(a.get("command") or a.get("prompt") or "").split())
+        what = "Run a terminal command" if tool_name == "terminal_execute" else "Run a coding task"
+        return f"{what}: {text[:80]}{'…' if len(text) > 80 else ''}" if text else what
+    return fallback or f"Run {tool_name}"
 
 
 @dataclass
@@ -106,6 +153,7 @@ class ApprovalRequest:
 class ResolveResult:
     outcome: str
     request: Optional[ApprovalRequest] = None
+    attempts_left: Optional[int] = None
 
     @property
     def ok(self) -> bool:
@@ -128,11 +176,14 @@ class ApprovalManager:
         ttl: float = DEFAULT_TTL,
         clock: Callable[[], float] = time.monotonic,
         dispatch: Callable[[Callable[[], None]], None] = _thread_dispatch,
+        pin_hash: Optional[Callable[[], str]] = None,
     ):
         self._runner = runner
         self._ttl = float(ttl)
         self._clock = clock
         self._dispatch = dispatch
+        # Read live on every call so setting/disabling the PIN needs no restart.
+        self._pin_hash = pin_hash or (lambda: pin_mod.configured_hash())
         self._lock = threading.RLock()
         self._requests: Dict[str, ApprovalRequest] = {}
         self._listeners: List[Listener] = []
@@ -155,6 +206,10 @@ class ApprovalManager:
             except Exception as err:  # a broken listener must not break approvals
                 print(f"[Approvals] listener error on {event}: {err}")
 
+    @property
+    def pin_required(self) -> bool:
+        return bool(self._pin_hash())
+
     # -- lifecycle ------------------------------------------------------
     def create_request(self, tool_name: str, args: Dict[str, Any], channel: str, summary: str = "") -> str:
         frozen_args = copy.deepcopy(dict(args or {}))
@@ -165,7 +220,7 @@ class ApprovalManager:
             args=frozen_args,
             args_hash=args_hash(tool_name, frozen_args),
             channel=channel,
-            summary=summary or f"Run {tool_name}",
+            summary=describe_action(tool_name, frozen_args, summary),
             created_at=now,
             expires_at=now + self._ttl,
             approver_channels=APPROVERS_BY_ORIGIN.get(channel, frozenset({CHANNEL_HUD})),
@@ -183,7 +238,12 @@ class ApprovalManager:
         self.sweep()
         now = self._clock()
         with self._lock:
-            return [r.public_view(now) for r in self._requests.values() if r.status == PENDING]
+            pin = self.pin_required
+            return [
+                {**r.public_view(now), "pin_required": pin,
+                 "attempts_left": MAX_PIN_ATTEMPTS - r.meta.get("pin_attempts", 0)}
+                for r in self._requests.values() if r.status == PENDING
+            ]
 
     def sweep(self) -> List[ApprovalRequest]:
         """Expire (deny) every pending request past its deadline."""
@@ -217,6 +277,8 @@ class ApprovalManager:
                 return ResolveResult(ALREADY_USED, req)
             if via not in req.approver_channels:
                 return ResolveResult(FORBIDDEN_CHANNEL, req)
+            if approve and self.pin_required:
+                return ResolveResult(PIN_REQUIRED, req)
             if len(expected_hash) < MIN_HASH_PREFIX or not hmac.compare_digest(
                 req.args_hash[: len(expected_hash)].encode(), expected_hash.encode()
             ):
@@ -233,6 +295,44 @@ class ApprovalManager:
         if outcome == APPROVED:
             self._dispatch(lambda: self._run(req))
         return ResolveResult(outcome, req)
+
+    def cancel(self, request_id: str, via: str) -> ResolveResult:
+        """Deny a pending request (the PIN-mode replacement for the Deny button)."""
+        req = self.get(request_id)
+        return self.resolve(request_id, False, via, req.args_hash if req else "")
+
+    def verify_pin_and_approve(self, request_id: str, pin: Any, via: str) -> ResolveResult:
+        """Approve and run immediately if ``pin`` is right; 3 wrong PINs deny the request."""
+        stored = self._pin_hash()
+        if not stored:
+            return ResolveResult("no_pin")
+        if not isinstance(request_id, str):
+            return ResolveResult(UNKNOWN)
+        self.sweep()
+        with self._lock:
+            req = self._requests.get(request_id)
+            if req is None:
+                return ResolveResult(UNKNOWN)
+            if req.status == EXPIRED:
+                return ResolveResult(EXPIRED, req)
+            if req.status != PENDING:
+                return ResolveResult(ALREADY_USED, req)
+            if via not in req.approver_channels:
+                return ResolveResult(FORBIDDEN_CHANNEL, req)
+            if pin_mod.verify_pin(pin, stored):
+                req.status, req.resolved_via = APPROVED, via
+                outcome, left = APPROVED, None
+            else:
+                used = req.meta["pin_attempts"] = req.meta.get("pin_attempts", 0) + 1
+                left = MAX_PIN_ATTEMPTS - used
+                if left > 0:
+                    return ResolveResult(WRONG_PIN, req, left)
+                req.status, req.resolved_via = DENIED, via
+                outcome = LOCKED
+        self._notify("resolved", req)
+        if outcome == APPROVED:
+            self._dispatch(lambda: self._run(req))
+        return ResolveResult(outcome, req, left)
 
     def _run(self, req: ApprovalRequest) -> None:
         # Defence in depth: the stored args must still match the approved hash.
