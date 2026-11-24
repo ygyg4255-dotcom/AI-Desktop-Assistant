@@ -127,56 +127,7 @@ def test_valid_config_post_200(client):
                        json={"model": "claude-sonnet-5-5", "api_key": "sk-ant-test", "language": "English"})
     assert resp.status_code == 200
     client.saved.assert_called_once_with(model="claude-sonnet-5-5", api_key="sk-ant-test", language="English",
-                                         ollama_enabled=None, ollama_model=None, ollama_base_url=None)
-
-
-def test_config_post_passes_ollama_fields(client):
-    resp = client.post("/config", base_url=BASE, headers=auth(), json={
-        "model": "m", "ollama_enabled": True, "ollama_model": "qwen2.5-coder:3b",
-        "ollama_base_url": "http://localhost:11434"})
-    assert resp.status_code == 200
-    kw = client.saved.call_args.kwargs
-    assert (kw["ollama_enabled"], kw["ollama_model"], kw["ollama_base_url"]) == (
-        True, "qwen2.5-coder:3b", "http://localhost:11434")
-
-
-@pytest.mark.parametrize("url", ["http://evil.example:11434", "http://127.0.0.1.evil.com", "file:///etc/passwd", "ftp://127.0.0.1"])
-def test_config_rejects_non_loopback_ollama_url(client, url):
-    resp = client.post("/config", base_url=BASE, headers=auth(), json={"model": "m", "ollama_base_url": url})
-    assert resp.status_code == 400
-    assert "loopback" in resp.get_json()["error"]
-    client.saved.assert_not_called()
-
-
-def test_config_rejects_non_bool_ollama_enabled(client):
-    resp = client.post("/config", base_url=BASE, headers=auth(), json={"model": "m", "ollama_enabled": "yes"})
-    assert resp.status_code == 400
-    client.saved.assert_not_called()
-
-
-def test_ollama_settings_round_trip(tmp_path, monkeypatch):
-    env = tmp_path / ".env"
-    monkeypatch.setattr(settings_mod, "resolve_env_path", lambda *a, **k: env)
-    for k in ("OLLAMA_ENABLED", "OLLAMA_MODEL", "OLLAMA_BASE_URL"):
-        monkeypatch.delenv(k, raising=False)
-    settings_mod.save_ai_config("m", "", ollama_enabled=True, ollama_model="llama3:8b",
-                                ollama_base_url="http://127.0.0.1:11500")
-    cfg = settings_mod.Settings().get_config_dict()
-    assert (cfg["ollama_enabled"], cfg["ollama_model"], cfg["ollama_base_url"]) == (
-        True, "llama3:8b", "http://127.0.0.1:11500")
-    settings_mod.save_ai_config("m", "", ollama_enabled=False)
-    assert settings_mod.Settings().get_config_dict()["ollama_enabled"] is False
-    for k in ("OLLAMA_ENABLED", "OLLAMA_MODEL", "OLLAMA_BASE_URL"):
-        monkeypatch.delenv(k, raising=False)  # save_ai_config wrote os.environ directly
-
-
-def test_router_configure_live():
-    from src.services.model_router import ModelRouter
-    r = ModelRouter(MagicMock(), enabled=False)
-    r.configure(True, "http://127.0.0.1:11434", "x")
-    assert r.enabled
-    r.configure(True, "http://evil.example", "x")
-    assert not r.enabled
+                                         provider=None, base_url=None)
 
 
 def test_config_modal_has_no_arabic():
@@ -188,13 +139,11 @@ def test_config_modal_has_no_arabic():
 
 # --- Claude-only config ----------------------------------------------------
 
-@pytest.mark.parametrize("field", ["base_url", "provider"])
 @pytest.mark.parametrize("path", ["/config", "/test_config"])
-def test_config_rejects_base_url_and_provider(client, path, field):
-    resp = client.post(path, base_url=BASE, headers=auth(),
-                       json={"model": "claude-sonnet-5-5", field: "https://evil.example"})
-    assert resp.status_code == 400
-    assert field in resp.get_json()["error"]
+def test_config_rejects_unknown_provider_and_fields(client, path):
+    for body in ({"provider": "evil"}, {"endpoint": "https://evil.example"}):
+        resp = client.post(path, base_url=BASE, headers=auth(), json={"model": "m", **body})
+        assert resp.status_code == 400
     client.saved.assert_not_called()
 
 
@@ -205,15 +154,13 @@ def test_config_rejects_newline_injection(client):
     client.saved.assert_not_called()
 
 
-def test_get_config_has_no_endpoint_fields(monkeypatch):
-    monkeypatch.setenv("AI_BASE_URL", "https://evil.example")
+def test_anthropic_endpoint_ignores_base_url_env(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://evil.example")
-    cfg = settings_mod.Settings().get_config_dict()
-    assert "base_url" not in cfg and "provider" not in cfg
+    assert AIClient().base_url == ANTHROPIC_MESSAGES_URL
 
 
 def test_settings_endpoint_is_fixed(monkeypatch):
-    monkeypatch.setenv("AI_BASE_URL", "https://evil.example")
+    monkeypatch.setenv("CUSTOM_BASE_URL", "https://evil.example")
     s = settings_mod.Settings()
     s.anthropic_base_url = "https://evil.example"  # legacy writers are ignored
     assert s.ai_base_url == s.anthropic_base_url == "https://api.anthropic.com"
@@ -226,7 +173,7 @@ def test_settings_default_models():
 
 
 def test_save_ai_config_writes_no_endpoint(tmp_path, monkeypatch):
-    monkeypatch.delenv("AI_BASE_URL", raising=False)
+    monkeypatch.delenv("CUSTOM_BASE_URL", raising=False)
     env = tmp_path / ".env"
     settings_mod.save_ai_config("claude-sonnet-5-5", "sk-ant-x", "English", env_path=env)
     text = env.read_text(encoding="utf-8")
@@ -279,7 +226,7 @@ def test_invalid_key_400_and_not_echoed(client, key):
 
 def test_hot_reload_uses_real_key_not_payload(monkeypatch):
     import main
-    monkeypatch.setattr(main, "Settings", lambda: MagicMock(ai_api_key="sk-real-key-123"))
+    monkeypatch.setattr(main, "Settings", lambda: MagicMock(ai_api_key="sk-real-key-123", ai_model="claude-sonnet-5-5"))
     ai = MagicMock()
     main.apply_ai_config(ai, {"model": "claude-sonnet-5-5", "api_key": "sk-a\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"})
     ai.update_config.assert_called_once_with(model="claude-sonnet-5-5", api_key="sk-real-key-123")

@@ -64,10 +64,9 @@ def _log_step(step) -> None:
 def apply_ai_config(ai_client, cfg: dict) -> None:
     """Hot-reload model/key. The HUD payload only carries a masked key, so the
     real key is always loaded from Settings/.env, never taken from cfg."""
-    model = cfg.get("model", "")
-    real_key = Settings().ai_api_key or None
-    logger.info("Hot-reloading AI model: %s", model)
-    ai_client.update_config(model=model, api_key=real_key)
+    s = Settings()  # always the Anthropic entries: cfg["model"] belongs to the active provider
+    logger.info("Hot-reloading Anthropic model: %s", s.ai_model)
+    ai_client.update_config(model=s.ai_model, api_key=s.ai_api_key or None)
 
 
 def is_duplicate_approval_reply(res, bridge) -> bool:
@@ -283,9 +282,9 @@ def main() -> None:
     # 1. HUD Server Subsystem Thread
     # -------------------------------------------------------------
     def _on_ai_config_updated(cfg: dict):
-        """Hot-reload AI model and API key at runtime."""
+        """Hot-reload the AI provider, model and API key at runtime."""
         apply_ai_config(ai_client, cfg)
-        router.configure(cfg.get("ollama_enabled"), cfg.get("ollama_base_url"), cfg.get("ollama_model"))
+        router.configure(cfg.get("provider"))
 
     def _on_hud_command(cmd_text: str):
         clean_cmd = cmd_text.strip()

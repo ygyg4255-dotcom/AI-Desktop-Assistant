@@ -215,38 +215,68 @@ def update_env_file(updates: Dict[str, Optional[str]], env_path: Optional[Path] 
 
 
 
+# Per-provider .env names, so switching providers never overwrites another provider's saved values.
+# First name wins when reading; all names are written together.
+PROVIDER_ENV: Dict[str, Dict[str, Any]] = {
+    "anthropic": {"key": ("AI_API_KEY", "ANTHROPIC_API_KEY"), "model": ("AI_MODEL", "ANTHROPIC_MODEL"), "url": None},
+    "openai": {"key": ("OPENAI_API_KEY",), "model": ("OPENAI_MODEL",), "url": None},
+    "gemini": {"key": ("GEMINI_API_KEY",), "model": ("GEMINI_MODEL",), "url": None},
+    "ollama": {"key": (), "model": ("OLLAMA_MODEL",), "url": "OLLAMA_BASE_URL"},
+    "custom": {"key": ("CUSTOM_API_KEY",), "model": ("CUSTOM_MODEL",), "url": "CUSTOM_BASE_URL"},
+}
+PROVIDER_DEFAULT_MODEL = {"anthropic": DEFAULT_MODEL, "openai": "gpt-4o-mini", "gemini": "gemini-2.5-flash",
+                          "ollama": "qwen2.5-coder:3b", "custom": ""}
+PROVIDER_DEFAULT_URL = {"ollama": "http://127.0.0.1:11434"}
+
+
+def get_active_provider(env_path: Optional[Path] = None) -> str:
+    p = get_config_value("AI_PROVIDER", default="anthropic", env_path=env_path).strip().lower()
+    return p if p in PROVIDER_ENV else "anthropic"
+
+
+def get_provider_config(provider: str, env_path: Optional[Path] = None) -> Dict[str, str]:
+    """Model / API key / base URL saved for one provider (defaults filled in)."""
+    e = PROVIDER_ENV[provider]
+    return {
+        "model": get_config_value(*e["model"], default=PROVIDER_DEFAULT_MODEL[provider], env_path=env_path),
+        "api_key": get_config_value(*e["key"], env_path=env_path) if e["key"] else "",
+        "base_url": get_config_value(e["url"], default=PROVIDER_DEFAULT_URL.get(provider, ""), env_path=env_path) if e["url"] else "",
+    }
+
+
 def save_ai_config(
     model: str,
     api_key: str,
     language: str = "English",
     env_path: Optional[Path] = None,
-    ollama_enabled: Optional[bool] = None,
-    ollama_model: Optional[str] = None,
-    ollama_base_url: Optional[str] = None,
+    provider: Optional[str] = None,
+    base_url: Optional[str] = None,
 ) -> Dict[str, str]:
-    """Persist Claude model / API key / language (and optional Ollama settings) to .env and the process environment."""
-    for value in (model, api_key, language, ollama_model or "", ollama_base_url or ""):
+    """Persist one provider's model / API key / base URL plus language to .env and the process environment.
+
+    ``provider`` None keeps the active provider untouched and edits the Anthropic entries
+    (legacy callers); otherwise AI_PROVIDER is switched. Other providers' values are never touched.
+    """
+    for value in (model, api_key, language, provider or "", base_url or ""):
         if "\r" in str(value) or "\n" in str(value):
             raise ValueError("config values must not contain line breaks")
+    if provider is not None and provider not in PROVIDER_ENV:
+        raise ValueError(f"unknown provider: {provider}")
 
     if env_path is None:
         env_path = resolve_env_path()
 
-    model = model.strip() or DEFAULT_MODEL
-    updates = {
-        "AI_MODEL": model,
-        "ALTRON_LANGUAGE": language.strip(),
-        "ANTHROPIC_MODEL": model,
-    }
+    prov = provider or "anthropic"
+    e = PROVIDER_ENV[prov]
+    model = model.strip() or PROVIDER_DEFAULT_MODEL[prov] or None  # blank removes the key -> provider default
+    updates: Dict[str, Optional[str]] = {n: model for n in e["model"]}
+    updates["ALTRON_LANGUAGE"] = language.strip()
+    if provider is not None:
+        updates["AI_PROVIDER"] = provider
     if not is_masked_key(api_key):
-        updates["AI_API_KEY"] = api_key.strip()
-        updates["ANTHROPIC_API_KEY"] = api_key.strip()
-    if ollama_enabled is not None:
-        updates["OLLAMA_ENABLED"] = "true" if ollama_enabled else "false"
-    if ollama_model is not None:  # blank removes the key -> router default
-        updates["OLLAMA_MODEL"] = ollama_model.strip() or None
-    if ollama_base_url is not None:
-        updates["OLLAMA_BASE_URL"] = ollama_base_url.strip() or None
+        updates.update({n: api_key.strip() for n in e["key"]})
+    if e["url"] and base_url is not None:
+        updates[e["url"]] = base_url.strip() or None
 
     update_env_file(updates, env_path)
     return updates
@@ -368,22 +398,23 @@ class Settings:
         pass
 
     def get_config_dict(self) -> Dict[str, Any]:
-        """Return masked dictionary of the active Claude configuration."""
-        has_key = bool(self.ai_api_key)
+        """Masked dictionary of the active provider's config, plus a summary of every provider."""
+        provs = {}
+        for p in PROVIDER_ENV:
+            c = get_provider_config(p, self.env_path)
+            provs[p] = {"model": c["model"], "has_api_key": bool(c["api_key"]), "base_url": c["base_url"]}
+        active = get_active_provider(self.env_path)
+        key = get_provider_config(active, self.env_path)["api_key"]
         masked_key = ""
-        if has_key:
-            if len(self.ai_api_key) > 8:
-                masked_key = f"{self.ai_api_key[:4]}••••••••{self.ai_api_key[-4:]}"
-            else:
-                masked_key = "••••••••"
-
+        if key:
+            masked_key = f"{key[:4]}••••••••{key[-4:]}" if len(key) > 8 else "••••••••"
         return {
-            "model": self.ai_model,
+            "provider": active,
+            "model": provs[active]["model"],
             "api_key": masked_key,
-            "has_api_key": has_key,
+            "has_api_key": bool(key),
+            "base_url": provs[active]["base_url"],
+            "providers": provs,
             "language": self.altron_language,
             "pin_enabled": bool(self.approval_pin_hash),  # never the hash itself
-            "ollama_enabled": get_config_value("OLLAMA_ENABLED", default="false").lower() in ("1", "true", "yes", "on"),
-            "ollama_model": get_config_value("OLLAMA_MODEL", default="qwen2.5-coder:3b"),
-            "ollama_base_url": get_config_value("OLLAMA_BASE_URL", default="http://127.0.0.1:11434"),
         }

@@ -364,9 +364,46 @@
   const cfgModelEl = document.getElementById('cfg-model');
   const cfgApiKeyEl = document.getElementById('cfg-api-key');
   const cfgLanguageEl = document.getElementById('cfg-language');
-  const cfgOllamaEnabledEl = document.getElementById('cfg-ollama-enabled');
-  const cfgOllamaModelEl = document.getElementById('cfg-ollama-model');
-  const cfgOllamaUrlEl = document.getElementById('cfg-ollama-url');
+  const cfgProviderEl = document.getElementById('cfg-provider');
+  const cfgBaseUrlEl = document.getElementById('cfg-base-url');
+  const cfgKeyGroupEl = document.getElementById('cfg-key-group');
+  const cfgUrlGroupEl = document.getElementById('cfg-url-group');
+  const cfgKeyLabelEl = document.getElementById('cfg-key-label');
+
+  // Per-provider form hints. Saved values per provider come from /config -> cfg.providers.
+  const PROVIDERS = {
+    anthropic: { label: 'Anthropic', model: 'claude-sonnet-4-5', key: 'sk-ant-...', url: null },
+    openai: { label: 'OpenAI', model: 'gpt-4o-mini', key: 'sk-...', url: null },
+    gemini: { label: 'Gemini', model: 'gemini-2.5-flash', key: 'AIza...', url: null },
+    ollama: { label: 'Ollama', model: 'qwen2.5-coder:3b', key: null, url: 'http://127.0.0.1:11434' },
+    custom: { label: 'Custom', model: 'model-name', key: 'API key', url: 'https://api.groq.com/openai/v1 or https://openrouter.ai/api/v1' },
+  };
+  let cfgProviders = {};  // last /config summary: switching the dropdown shows each provider's saved values
+
+  function renderProviderFields() {
+    const meta = PROVIDERS[cfgProviderEl.value];
+    const saved = cfgProviders[cfgProviderEl.value] || {};
+    cfgModelEl.value = saved.model || '';
+    cfgModelEl.placeholder = 'e.g. ' + meta.model;
+    cfgKeyGroupEl.hidden = !meta.key;
+    cfgKeyLabelEl.textContent = meta.label + ' API Key';
+    cfgApiKeyEl.value = '';
+    cfgApiKeyEl.placeholder = saved.has_api_key ? 'Key configured (leave blank to keep)' : (meta.key || '');
+    cfgUrlGroupEl.hidden = !meta.url;
+    cfgBaseUrlEl.value = saved.base_url || '';
+    cfgBaseUrlEl.placeholder = meta.url || '';
+  }
+  if (cfgProviderEl) cfgProviderEl.addEventListener('change', renderProviderFields);
+
+  function providerPayload() {
+    const p = cfgProviderEl.value;
+    return {
+      provider: p,
+      model: cfgModelEl.value.trim(),
+      api_key: cfgApiKeyEl.value.trim(),
+      base_url: PROVIDERS[p].url ? cfgBaseUrlEl.value.trim() : '',
+    };
+  }
   const btnSaveSettingsEl = document.getElementById('btn-save-settings');
   const btnTestSettingsEl = document.getElementById('btn-test-settings');
   const testStatusEl = document.getElementById('test-connection-status');
@@ -376,7 +413,8 @@
   function updateAiConfigDisplay(cfg) {
     if (!cfg) return;
     if (displayAiEngineEl) {
-      displayAiEngineEl.textContent = `CLAUDE (${cfg.model || 'claude-sonnet-5-5'})`;
+      const label = (PROVIDERS[cfg.provider] || PROVIDERS.anthropic).label.toUpperCase();
+      displayAiEngineEl.textContent = `${label} (${cfg.model || '-'})`;
     }
     if (displayAiLangEl && cfg.language) {
       displayAiLangEl.textContent = cfg.language;
@@ -395,22 +433,12 @@
       const resp = await fetch('/config?t=' + Date.now(), { headers: { 'X-HUD-Token': HUD_TOKEN } });
       if (resp.ok) {
         const cfg = await resp.json();
-        if (cfgModelEl) cfgModelEl.value = cfg.model || '';
+        cfgProviders = cfg.providers || {};
+        cfgProviderEl.value = PROVIDERS[cfg.provider] ? cfg.provider : 'anthropic';
+        renderProviderFields();
         if (cfgLanguageEl) cfgLanguageEl.value = cfg.language || 'English';
-        if (cfgOllamaEnabledEl) cfgOllamaEnabledEl.checked = !!cfg.ollama_enabled;
-        if (cfgOllamaModelEl) cfgOllamaModelEl.value = cfg.ollama_model || '';
-        if (cfgOllamaUrlEl) cfgOllamaUrlEl.value = cfg.ollama_base_url || '';
         renderPinState(!!cfg.pin_enabled);
         pinFeedback('', true);
-
-        if (cfgApiKeyEl) {
-          cfgApiKeyEl.value = '';
-          if (cfg.has_api_key) {
-            cfgApiKeyEl.placeholder = 'Key configured (leave blank to keep)';
-          } else {
-            cfgApiKeyEl.placeholder = 'sk-ant-...';
-          }
-        }
       }
     } catch (err) {
       console.error('Failed to load settings:', err);
@@ -502,14 +530,7 @@
     settingsFormEl.addEventListener('submit', async function (e) {
       e.preventDefault();
 
-      const payload = {
-        model: cfgModelEl ? cfgModelEl.value.trim() : '',
-        api_key: cfgApiKeyEl ? cfgApiKeyEl.value.trim() : '',
-        language: cfgLanguageEl ? cfgLanguageEl.value : 'English',
-        ollama_enabled: cfgOllamaEnabledEl ? cfgOllamaEnabledEl.checked : false,
-        ollama_model: cfgOllamaModelEl ? cfgOllamaModelEl.value.trim() : '',
-        ollama_base_url: cfgOllamaUrlEl ? cfgOllamaUrlEl.value.trim() : '',
-      };
+      const payload = { ...providerPayload(), language: cfgLanguageEl ? cfgLanguageEl.value : 'English' };
 
       const origBtnText = btnSaveSettingsEl ? btnSaveSettingsEl.textContent : 'SAVE & APPLY';
       if (btnSaveSettingsEl) {
@@ -554,10 +575,7 @@
   // Handle Test Connection Button
   if (btnTestSettingsEl) {
     btnTestSettingsEl.addEventListener('click', async function () {
-      const payload = {
-        model: cfgModelEl ? cfgModelEl.value.trim() : '',
-        api_key: cfgApiKeyEl ? cfgApiKeyEl.value.trim() : '',
-      };
+      const payload = providerPayload();
 
       if (testStatusEl) {
         testStatusEl.className = 'test-status loading';

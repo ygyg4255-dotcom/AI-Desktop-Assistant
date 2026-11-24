@@ -75,8 +75,10 @@ the OneDrive-synced project folder. It holds `memory.json`, `status.json`,
 - **S1 HUD auth:** a per-launch random token is injected into `index.html` and must be sent
   as `X-HUD-Token` (constant-time compare). The Host header must be
   `127.0.0.1:<port>`/`localhost:<port>`, and any Origin must match. No CORS headers.
-- **S2 Claude-only, JSON-only:** the API endpoint is hard-coded to `api.anthropic.com`, and
-  `base_url`/`provider` are rejected. State-changing endpoints require
+- **S2 JSON-only, allow-listed providers:** `AIClient` stays hard-coded to `api.anthropic.com`
+  (prompt caching). `ModelRouter` can switch live to openai/gemini/ollama/custom through
+  `src/services/openai_compat.py`: fixed endpoints for openai/gemini, Ollama loopback only,
+  custom `https://` or loopback `http://`; keys stay per provider (`PROVIDER_ENV`). State-changing endpoints require
   `Content-Type: application/json`. Config values cannot contain line breaks. The only
   other host is `api.groq.com`, hard-coded in `groq_stt.py` and used solely for audio
   transcription (never chat, never configurable).

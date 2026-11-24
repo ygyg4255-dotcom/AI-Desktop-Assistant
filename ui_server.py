@@ -24,12 +24,12 @@ from typing import Optional, Callable, Any, Dict
 
 from flask import Flask, send_from_directory, Response, request, jsonify
 
-from src.config.log import get_logger, setup_logging
+from src.config.log import get_logger, redact_secrets, setup_logging
 from src.config.settings import (
-    get_active_config_dict, get_config_value, is_masked_key, save_ai_config, update_env_file,
+    PROVIDER_ENV, get_active_config_dict, get_config_value, get_provider_config, is_masked_key, save_ai_config, update_env_file,
 )
 from src.security import pin as pin_mod
-from src.services.model_router import is_loopback_url
+from src.services.openai_compat import OpenAICompatClient, validate_base_url
 from src.services.hud_status import get_hud_status, clear_hud_logs, update_hud_status
 
 logger = get_logger("hud")
@@ -46,8 +46,7 @@ _HUD_PORT: int = 5000
 _API_PATHS = {"/status", "/status.json", "/config", "/test_config", "/command", "/clear_logs",
               "/approvals", "/approve", "/config/pin", "/memories"}
 _JSON_ONLY_PATHS = {"/command", "/config", "/test_config", "/approve", "/config/pin", "/memories"}
-_CONFIG_FIELDS = {"api_key", "model", "language", "ollama_model", "ollama_base_url"}
-_OLLAMA_FLAG = "ollama_enabled"  # the only boolean field
+_CONFIG_FIELDS = {"api_key", "model", "language", "provider", "base_url"}
 
 # Registered callbacks
 _COMMAND_HANDLER: Optional[Callable[[str], None]] = None
@@ -204,11 +203,9 @@ def _json_object() -> Optional[Dict[str, Any]]:
 
 def _validate_config_payload(data: Dict[str, Any]) -> Optional[str]:
     """Return an error message, or None if the payload is acceptable."""
-    unknown = set(data) - _CONFIG_FIELDS - {_OLLAMA_FLAG}
+    unknown = set(data) - _CONFIG_FIELDS
     if unknown:
         return f"unsupported field(s): {', '.join(sorted(unknown))}"
-    if _OLLAMA_FLAG in data and not isinstance(data[_OLLAMA_FLAG], bool):
-        return f"{_OLLAMA_FLAG} must be a boolean"
     for key in _CONFIG_FIELDS:
         value = data.get(key, "")
         if not isinstance(value, str):
@@ -220,9 +217,15 @@ def _validate_config_payload(data: Dict[str, Any]) -> Optional[str]:
     if not is_masked_key(api_key):
         if not api_key.isascii() or any(c.isspace() for c in api_key.strip()):
             return "api_key must contain only ASCII characters and no whitespace"
-    url = data.get("ollama_base_url", "").strip()
-    if url and not is_loopback_url(url):  # S2: Ollama is loopback only
-        return "ollama_base_url must be an http(s) loopback URL (127.0.0.1, localhost or ::1)"
+    provider = data.get("provider")
+    if provider is not None and provider not in PROVIDER_ENV:
+        return f"unknown provider: {provider}"
+    if provider == "custom" and not data.get("model", "").strip():
+        return "model is required for the custom provider"
+    url = data.get("base_url", "").strip()
+    # S2: Ollama loopback only; custom https (or loopback http). Other providers have fixed endpoints.
+    if provider in ("ollama", "custom") and (url or provider == "custom"):
+        return validate_base_url(provider, url)
     return None
 
 
@@ -263,9 +266,8 @@ def config_route():
             model=data.get("model", ""),
             api_key=data.get("api_key", "").strip(),
             language=data.get("language", "English"),
-            ollama_enabled=data.get(_OLLAMA_FLAG),
-            ollama_model=data.get("ollama_model"),
-            ollama_base_url=data.get("ollama_base_url"),
+            provider=data.get("provider"),
+            base_url=data.get("base_url"),
         )
     except OSError:
         return _error(500, "could not write settings to .env")
@@ -288,20 +290,26 @@ def test_config_route():
     if problem:
         return _error(400, problem)
 
-    model = data.get("model", "")
+    provider = data.get("provider") or "anthropic"
+    stored = get_provider_config(provider)
+    model = data.get("model", "").strip() or stored["model"]
     api_key = data.get("api_key", "").strip()
-    # Masked or empty key: test the stored one (canonical precedence, settings.py).
+    # Masked or empty key: test the stored one for THIS provider (canonical precedence, settings.py).
     if is_masked_key(api_key):
-        api_key = get_config_value("AI_API_KEY", "ANTHROPIC_API_KEY")
+        api_key = stored["api_key"]
 
     try:
-        from src.services.ai_client import AIClient
-        test_client = AIClient(api_key=api_key, model=model, timeout=6.0)
+        if provider == "anthropic":
+            from src.services.ai_client import AIClient
+            test_client = AIClient(api_key=api_key, model=model, timeout=6.0)
+        else:
+            base_url = data.get("base_url", "").strip() or stored["base_url"]
+            test_client = OpenAICompatClient(provider, base_url, api_key, model, timeout=6.0)
         ok, msg = test_client.test_connection()
         return jsonify({"ok": ok, "message": msg})
     except Exception as e:
-        logger.warning("Connection test failed: %s", e)
-        return jsonify({"ok": False, "message": str(e)})
+        logger.warning("Connection test failed: %s", type(e).__name__)
+        return jsonify({"ok": False, "message": redact_secrets(e, api_key)})
 
 
 @flask_app.route("/command", methods=["POST"])

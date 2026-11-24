@@ -188,13 +188,29 @@
       </div>
       <form id="settings-form" class="modal-body">
         <div class="form-group">
-          <label for="cfg-model">Model Name</label>
-          <input type="text" id="cfg-model" class="form-control" placeholder="e.g. claude-sonnet-5-5" />
+          <label for="cfg-provider">AI Provider</label>
+          <select id="cfg-provider" class="form-control">
+            <option value="anthropic">Anthropic</option>
+            <option value="openai">OpenAI (ChatGPT)</option>
+            <option value="gemini">Google Gemini</option>
+            <option value="ollama">Ollama (Local)</option>
+            <option value="custom">Custom (OpenAI-Compatible)</option>
+          </select>
         </div>
 
         <div class="form-group">
-          <label for="cfg-api-key">Anthropic API Key</label>
+          <label for="cfg-model">Model Name</label>
+          <input type="text" id="cfg-model" class="form-control" placeholder="e.g. claude-sonnet-4-5" />
+        </div>
+
+        <div class="form-group" id="cfg-key-group">
+          <label for="cfg-api-key" id="cfg-key-label">Anthropic API Key</label>
           <input type="password" id="cfg-api-key" class="form-control" placeholder="sk-ant-..." autocomplete="off" />
+        </div>
+
+        <div class="form-group" id="cfg-url-group" hidden>
+          <label for="cfg-base-url">Base URL</label>
+          <input type="text" id="cfg-base-url" class="form-control" autocomplete="off" />
         </div>
 
         <div class="form-group">
@@ -204,22 +220,6 @@
             <option value="Arabic">Arabic</option>
             <option value="Auto">Auto</option>
           </select>
-        </div>
-
-        <div class="form-group">
-          <label for="cfg-ollama-enabled">
-            <input type="checkbox" id="cfg-ollama-enabled" /> Enable Ollama (Local Chat)
-          </label>
-        </div>
-
-        <div class="form-group">
-          <label for="cfg-ollama-model">Ollama Model</label>
-          <input type="text" id="cfg-ollama-model" class="form-control" placeholder="e.g. qwen2.5-coder:3b" />
-        </div>
-
-        <div class="form-group">
-          <label for="cfg-ollama-url">Ollama Base URL (loopback only)</label>
-          <input type="text" id="cfg-ollama-url" class="form-control" placeholder="http://127.0.0.1:11434" autocomplete="off" />
         </div>
 
         <div id="test-connection-status" class="test-status" style="display: none;"></div>
