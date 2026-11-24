@@ -35,7 +35,10 @@ _BARE_BOT_TOKEN_RE = re.compile(r"\b\d{6,}:[A-Za-z0-9_-]{30,}")
 _ANTHROPIC_KEY_RE = re.compile(r"sk-ant-[A-Za-z0-9_-]{8,}")
 _GROQ_KEY_RE = re.compile(r"gsk_[A-Za-z0-9_-]{8,}")
 
-_SETUP_LOCK = threading.Lock()
+# Google OAuth: access token (ya29.), refresh token (1//), client secret (GOCSPX-)
+_GOOGLE_OAUTH_RE = re.compile(r"ya29\.[A-Za-z0-9_.-]{20,}|\b1//[A-Za-z0-9_-]{20,}|GOCSPX-[A-Za-z0-9_-]{10,}")
+
+_SETUP_LOCK =threading.Lock()
 _INSTALLED: list = []  # (logger, handler) pairs added by setup_logging
 
 
@@ -48,7 +51,8 @@ def redact_secrets(text: object, *tokens: Optional[str]) -> str:
     out = _BOT_TOKEN_RE.sub("bot<redacted>", out)
     out = _BARE_BOT_TOKEN_RE.sub("<redacted>", out)
     out = _ANTHROPIC_KEY_RE.sub("sk-ant-<redacted>", out)
-    return _GROQ_KEY_RE.sub("gsk_<redacted>", out)
+    out = _GROQ_KEY_RE.sub("gsk_<redacted>", out)
+    return _GOOGLE_OAUTH_RE.sub("<redacted-google-oauth>", out)
 
 
 class RedactingFormatter(logging.Formatter):

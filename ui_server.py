@@ -160,7 +160,7 @@ def _error(code: int, message: str) -> Response:
 
 
 def _is_api_path() -> bool:
-    return request.path in _API_PATHS or request.path.startswith("/memories/")
+    return request.path in _API_PATHS or request.path.startswith(("/memories/", "/scheduled", "/gmail/"))
 
 
 @flask_app.before_request
@@ -397,6 +397,26 @@ def memory_delete_route(mem_id: int):
     from src.agent import memory_store
     if not memory_store.get_store().delete(mem_id):
         return _error(404, "unknown memory")
+    return jsonify({"status": "ok"})
+
+
+@flask_app.route("/gmail/status", methods=["GET"])
+def gmail_status_route():
+    from src.services import gmail_service
+    return jsonify(gmail_service.status())
+
+
+@flask_app.route("/scheduled", methods=["GET"])
+def scheduled_route():
+    from src.services.scheduler import get_scheduler
+    return jsonify({"tasks": get_scheduler().list_pending()})
+
+
+@flask_app.route("/scheduled/<int:task_id>", methods=["DELETE"])
+def scheduled_delete_route(task_id: int):
+    from src.services.scheduler import get_scheduler
+    if not get_scheduler().cancel(task_id):
+        return _error(404, "unknown or already finished task")
     return jsonify({"status": "ok"})
 
 

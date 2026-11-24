@@ -23,3 +23,8 @@ webrtcvad-wheels>=2.0.14; sys_platform == 'win32'
 webrtcvad>=2.0.10; sys_platform != 'win32'
 # Local Piper TTS (optional at runtime: Altron falls back to edge-tts without it)
 piper-tts>=1.3.0
+
+# Gmail API
+google-api-python-client>=2.100.0
+google-auth-httplib2>=0.2.0
+google-auth-oauthlib>=1.2.0

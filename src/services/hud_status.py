@@ -134,6 +134,14 @@ def update_hud_status(state: Optional[str] = None, log_entry: Optional[str] = No
         _flush_locked()
 
 
+def push_hud_toast(text: str) -> None:
+    """Silent HUD toast: the page shows each new ``toast.id`` once. Also logged to the chat feed."""
+    with _LOCK:
+        prev = _STATE.get("toast") or {}
+        _STATE["toast"] = {"id": int(prev.get("id", 0)) + 1, "text": text.strip()[:300]}
+    update_hud_status(log_entry=f"Altron: {text}")
+
+
 def clear_hud_logs() -> None:
     """Clear conversation history logs."""
     with _LOCK:

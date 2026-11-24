@@ -86,6 +86,20 @@
     });
   }
 
+  // Silent toast for scheduler events; each toast id is shown once (first poll only records it).
+  let lastToastId = null;
+  function showToast(toast) {
+    if (!toast) return;
+    if (lastToastId === null) { lastToastId = toast.id; return; }
+    if (toast.id === lastToastId) return;
+    lastToastId = toast.id;
+    const el = document.createElement('div');
+    el.className = 'altron-toast';
+    el.textContent = toast.text;
+    document.body.appendChild(el);
+    setTimeout(() => el.remove(), 8000);
+  }
+
   // 2. Fetch Status and Live Hardware Metrics
   async function fetchStatus() {
     try {
@@ -105,6 +119,7 @@
       renderState(data.state || 'Idle');
       renderMetrics(data.metrics || data);
       renderLogs(data.logs || []);
+      showToast(data.toast);
 
       if (data.ai_config) {
         updateAiConfigDisplay(data.ai_config);

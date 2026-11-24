@@ -47,6 +47,8 @@ class PermissionGate:
         # Reminders only schedule text to be spoken / logged / sent to the owner's own chat.
         "set_reminder",
         "list_reminders",
+        "list_scheduled_tasks",
+        "cancel_scheduled_task",
         "cancel_reminder",
         # Daily-driver tools: the owner asked for no approval on these (approval stays on
         # file delete/move). Handlers validate inputs and run fixed argv commands only.
@@ -88,6 +90,9 @@ class PermissionGate:
         "claude_code_run",
         # Puts a Recycle Bin item back where it was; never deletes or overwrites.
         "file_restore",
+        # Read-only Gmail; message bodies are wrapped as untrusted content by gmail_service.
+        "gmail_list_messages",
+        "gmail_read_message",
     }
 
     # Tools that auto-run only for low-risk inputs; the handler decides per call
@@ -100,6 +105,7 @@ class PermissionGate:
         "app_open",
         "send_to_telegram",
         "remember",  # secret-looking text asks (memory_store.looks_secret)
+        "schedule_task",  # kind=action that needs approval (shutdown, DANGEROUS tools) asks at scheduling time
         "power_control",  # shutdown/restart ask (needs_approval_power_control); lock/sleep/cancel run
     }
 
@@ -115,12 +121,14 @@ class PermissionGate:
         # GUI automation that types: every call is approved individually (see GUI_TOOLS)
         "gui_type",
         "gui_hotkey",
+        # Gmail send: every call is approved individually (+PIN).
+        "gmail_send_email",
     }
 
     # Keyboard automation. Always DANGEROUS, and a blanket "allow" (session or
     # remembered) is refused so each keystroke batch needs its own approval.
     # (gui_click / gui_scroll are SAFE: see SAFE_TOOLS.)
-    GUI_TOOLS = {"gui_type", "gui_hotkey"}
+    GUI_TOOLS = {"gui_type", "gui_hotkey", "gmail_send_email"}
 
     def __init__(self):
         self._session_rules: dict[str, PermissionLevel] = {}

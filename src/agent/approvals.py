@@ -110,6 +110,17 @@ def describe_action(tool_name: str, args: Dict[str, Any], fallback: str = "") ->
         return {"shutdown": "Shut down the PC", "restart": "Restart the PC", "sleep": "Put the PC to sleep",
                 "lock": "Lock the PC", "cancel_shutdown": "Cancel the scheduled shutdown"
                 }.get(str(a.get("action")), "Change the PC power state")
+    if tool_name == "gmail_send_email":
+        body = str(a.get("body") or "")
+        return (f"Send email\nTo: {a.get('to', '?')}\nSubject: {a.get('subject', '')}\n"
+                f"Body: {body[:500]}{'…' if len(body) > 500 else ''}")
+    if tool_name == "gmail_read_message":
+        return f"Read Gmail message {str(a.get('message_id', '?'))[:40]}"
+    if tool_name == "gmail_list_messages":
+        return f"List Gmail messages (query: {str(a.get('query') or 'inbox')[:80]})"
+    if tool_name == "schedule_task":
+        inner = describe_action(str(a.get("action_name") or ""), a.get("action_args") or {}, "Run a tool")
+        return f"Schedule for {a.get('run_at_or_delay', 'later')}: {inner}"
     if tool_name in ("terminal_execute", "claude_code_run"):
         said = " ".join(str(a.get("summary") or "").split())
         if said:

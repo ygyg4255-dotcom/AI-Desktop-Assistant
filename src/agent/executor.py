@@ -27,6 +27,7 @@ from src.agent.history import HISTORY_FILENAME, PersistentHistory
 from src.agent.vision import CAMERA_PLACEHOLDER, SCREENSHOT_PLACEHOLDER, strip_image_data
 from src.agent.memory import ConversationMemory
 from src.agent import memory_store
+from src.services import scheduler
 from src.agent.verifiers import verify_result
 from src.agent.tool_prompts import strip_action_tag, tag_reply, tool_result_prompt
 from src.services.ai_client import AIClient, Message
@@ -1252,6 +1253,10 @@ Available tools are provided in the tool definitions. Use them responsibly."""
                 mem_block = memory_store.format_block(memory_store.get_store().search(user_message))
             except Exception:
                 logger.debug("memory retrieval failed", exc_info=True)
+            try:
+                mem_block += scheduler.format_block(scheduler.get_scheduler().list_pending(limit=5))
+            except Exception:
+                logger.debug("scheduler context failed", exc_info=True)
 
         # Fast Local Intent Router (Bypass LLM for instant system controls and YouTube playback)
         # Compound requests go to the LLM: a local intent would run only one of the steps.

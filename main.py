@@ -5,6 +5,7 @@ Launches and coordinates all Altron subsystems concurrently with full fault isol
 - Continuous Voice Listener Loop (FastVAD + faster-whisper + TTS playback)
 - Telegram Remote Control Bot Listener
 """
+import json
 import os
 import sys
 import time
@@ -31,7 +32,7 @@ from src.agent.approvals import (
     CHANNEL_TELEGRAM,
     CHANNEL_VOICE,
 )
-from src.services.hud_status import init_hud_status, update_hud_status
+from src.services.hud_status import init_hud_status, push_hud_toast, update_hud_status
 from src.services.voice_service import (
     TTSManager,
     SpeechRecognitionListener,
@@ -46,7 +47,9 @@ from src.services.telegram_service import (
     send_telegram_message_async,
 )
 from src.services.camera_service import get_camera_service
+from src.agent.tools import run_scheduled_action
 from src.services.reminder_service import format_reminder_speech, get_reminder_service
+from src.services.scheduler import get_scheduler
 from src.services.alarm_chime import play_alarm_chime
 from src.services.desktop_notify import show_desktop_notification
 from ui_server import start_hud_server, stop_hud_server
@@ -96,6 +99,9 @@ def make_approval_listener(bridge_ref: list, notify_telegram=send_telegram_messa
                 out = getattr(res, "output", None)
                 detail = (out.get("message") if isinstance(out, dict) else None) or "done"
                 text = f"✅ {req.tool_name}: {detail}"
+                if not (isinstance(out, dict) and out.get("message")) and out:
+                    # Telegram caps messages at 4096 chars; the output is already redacted-at-source.
+                    text = f"✅ {req.tool_name}:\n{out if isinstance(out, str) else json.dumps(out, ensure_ascii=False, default=str)}"[:4000]
             else:
                 err = getattr(res, "error", None) or req.meta.get("run_error") or "failed"
                 text = f"❌ {req.tool_name} failed: {err}"
@@ -211,6 +217,12 @@ def main() -> None:
     reminders = get_reminder_service()
     reminders.set_callback(make_reminder_handler(tts_manager))
     reminders.start()  # overdue reminders (missed while off) fire right away
+
+    scheduler = get_scheduler()
+    scheduler.set_callbacks(
+        on_notify=lambda title, text: (push_hud_toast(text), send_telegram_message_async(f"⏰ {text}")),
+        run_action=lambda name, args, approved: run_scheduled_action(executor.registry, name, args, approved))
+    scheduler.start()  # silent: HUD toast + optional Telegram only, never TTS
 
     camera_service = get_camera_service()
     shutdown_event = threading.Event()
@@ -523,6 +535,10 @@ def main() -> None:
         approvals.stop()
     except Exception as err:
         logger.warning("Executor/approvals did not stop cleanly: %s", err)
+    try:
+        scheduler.stop()
+    except Exception as err:
+        logger.warning("Scheduler did not stop cleanly: %s", err)
     try:
         reminders.stop()
     except Exception as err:
