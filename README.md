@@ -20,7 +20,10 @@
 - **Desktop Icon Control**: Direct Win32 manipulation (`SysListView32`) to inspect, organize, and visually move desktop icons (center, corners, patterns, or precise coordinates).
 - **PDF Generation & Reporting**: Creates beautifully formatted, styled PDF reports supporting RTL Arabic and LTR English layouts.
 - **Remote Telegram Control**: Send commands and receive responses or generated documents directly on your phone via Telegram long-polling.
-- **Anthropic Claude Backend**: Uses the Claude Messages API directly (default model `claude-sonnet-5-5`, fast model `claude-haiku-5-5`). The endpoint is fixed to `api.anthropic.com` by design.
+- **Multi-provider `ModelRouter`**: Pick the AI provider live from the English-only HUD settings: `Anthropic` (default, `claude-sonnet-5-5` / `claude-haiku-5-5`, prompt caching), `OpenAI`, `Google Gemini`, `Ollama` (local) or `Custom` (any OpenAI-compatible endpoint). Keys, models and URLs are stored per provider in `.env`, so switching never leaks one provider's key to another. See *AI Providers*.
+- **Local zero-token router**: Common commands (English and Arabic) are matched locally and run with no model call. Post-tool verifiers check that an action really worked.
+- **Fast, Qt-free startup**: `main.py` runs on plain threads and never imports PySide6.
+- **Persistent memory (SQLite + FTS5)**: Long-term facts and outcomes live in `memory.db`. Relevant memories are retrieved per user turn in a cache-friendly way, and you can view and delete them in the HUD *Memories* panel.
 - **Out-of-band Approvals**: Dangerous actions (file writes and deletes, terminal commands, closing apps, ...) never run unprompted. You approve or deny each request in the HUD or with Telegram inline buttons.
 - **Autonomous Multi-Step Execution**: Give one request and Altron chains tool calls until the task is done (up to 20 tool iterations per turn) instead of stopping after the first step or asking "shall I continue?". It only pauses for an approval or when something genuinely blocks it (for example a login or credential prompt).
 - **Compound Tasks**: One command with several actions ("list my Desktop, delete the old PDF, then send me the report") runs every step in order. If a step needs approval, the remaining steps resume automatically once you approve, so the chain is never dropped halfway.
@@ -72,6 +75,22 @@ The vault file is local only and is never logged or committed.
 
 Approvals are given in the HUD or with Telegram inline buttons, or with the PIN when one is set. Voice can never approve. New tools default to Dangerous.
 
+### AI Providers
+Configure the provider in the HUD (**AI & SYSTEM CONFIGURATION**) or in `.env`. The switch is live, with no restart.
+
+| Provider | Key | Model | Endpoint |
+|---|---|---|---|
+| Anthropic | `ANTHROPIC_API_KEY` | `ANTHROPIC_MODEL` | Fixed `api.anthropic.com` |
+| OpenAI | `OPENAI_API_KEY` | `OPENAI_MODEL` | Fixed |
+| Google Gemini | `GEMINI_API_KEY` | `GEMINI_MODEL` | Fixed |
+| Ollama | none | `OLLAMA_MODEL` | `OLLAMA_BASE_URL`, loopback only |
+| Custom | `CUSTOM_API_KEY` | `CUSTOM_MODEL` (required) | `CUSTOM_BASE_URL`, `https://` or loopback `http://` |
+
+Set `AI_PROVIDER` to choose the active one. HTTP redirects are blocked so a key can never follow a redirect.
+
+#### Local models (Ollama) hardware requirement
+Running local models through Ollama smoothly with Altron's tool suite requires a dedicated **8 GB VRAM GPU**. Without one, responses and tool calls will be slow or unreliable, so use a cloud provider instead.
+
 ### Local voice (Piper)
 Piper runs offline and is the preferred voice. Altron uses `en_US-joe-medium` for English and `ar_JO-kareem-medium` for Arabic, and applies the `ALTRON_VOICE_FX=ultron` chain to both Piper and edge-tts. Install the package and download the two voices once (Windows, from the project folder):
 
@@ -87,8 +106,8 @@ Altron looks for the models in that folder automatically. To use other files, se
 |---|---|
 | `main.py` | **Official entry point.** Starts and supervises the HUD server, the voice listener and the Telegram listener on plain Python threads. |
 | `ui_server.py` + `ui/` | Flask HUD server on `127.0.0.1:5000` (5001 if busy) and its web front end. |
-| `src/agent/` | Agent executor (autonomous tool loop), tool registry, permission tiers, approval manager (`approvals.py`, plain-language previews and PIN checks), conversation memory, vision and screen-coordinate helpers. |
-| `src/services/` | Claude client, voice (VAD + faster-whisper or Groq STT, TTS), Telegram, HUD status, desktop icons, reminders, camera, media, network and Wi-Fi vault, notes, web search, `artcraft_service.py`, `steam_service.py`. |
+| `src/agent/` | Agent executor (autonomous tool loop), tool registry, permission tiers, approval manager (`approvals.py`, plain-language previews and PIN checks), conversation memory, local router, verifiers, SQLite + FTS5 long-term memory (`memory_store.py`), vision and screen-coordinate helpers. |
+| `src/services/` | Claude client, `ModelRouter` and OpenAI-compatible adapter, voice (VAD + faster-whisper or Groq STT, TTS), Telegram, HUD status, desktop icons, reminders, camera, media, network and Wi-Fi vault, notes, web search, `artcraft_service.py`, `steam_service.py`. |
 | `src/security/` | Approval PIN hashing and verification (`pin.py`; `python -m src.security.pin` generates a hash). |
 | `tests/` | pytest suite (see *Run the Tests*). |
 | `src/config/` | Settings (single config precedence), runtime paths, central logging. |
@@ -106,6 +125,7 @@ Altron keeps all mutable state out of the project folder, which matters because 
 | `telegram_offset.json` | Last processed Telegram update (prevents replaying commands after a restart) |
 | `conversation_history.json` | Redacted, capped, reference-only cross-session history |
 | `wifi_vault.json` | Saved Wi-Fi passwords (local only) |
+| `memory.db` | Long-term memory (SQLite + FTS5) |
 | `assistant.db` | Settings and history database |
 | `altron.log` | Rotating log, 1 MB × 3 backups, with secrets redacted. Set `ALTRON_LOG_LEVEL=DEBUG` for more detail |
 
@@ -115,7 +135,7 @@ Altron runs tools on your desktop, so its HUD, configuration and tools are harde
 | ID | Protection |
 |---|---|
 | S1 | HUD API requires a random per-launch token (`X-HUD-Token`), a `127.0.0.1`/`localhost` Host header and a same-origin Origin. No CORS. |
-| S2 | API key is only ever sent to `api.anthropic.com`; `base_url`/`provider` cannot be configured. State-changing endpoints accept JSON only. |
+| S2 | Only allow-listed providers: fixed endpoints for Anthropic, OpenAI and Gemini, Ollama on loopback only, Custom over `https://` or loopback `http://`. Keys are isolated per provider and redirects are blocked. State-changing endpoints accept JSON only. |
 | S3 | The model cannot forge approval: `_`-prefixed tool input keys are stripped before dispatch. |
 | S4 | Tools are tiered as safe, conditional (checked per call, e.g. sensitive paths) or dangerous (always ask). |
 | S5 | Approvals are non-blocking, bound to a hash of the arguments, single-use and expiring. They are accepted from the HUD or from the owner's Telegram account, optionally behind a PIN. Voice can never approve. |
@@ -180,7 +200,8 @@ Edit `.env` (see `.env.example`) to set:
 
 | Variable | Purpose |
 |---|---|
-| `ANTHROPIC_API_KEY` | Claude API key (required) |
+| `ANTHROPIC_API_KEY` | Claude API key (required for the default provider) |
+| `AI_PROVIDER`, `OPENAI_*`, `GEMINI_*`, `OLLAMA_*`, `CUSTOM_BASE_URL`, `CUSTOM_API_KEY`, `CUSTOM_MODEL` | Optional multi-provider settings (see *AI Providers*) |
 | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | Telegram remote control, approvals and file sending |
 | `GROQ_API_KEY` | Optional. Sends recorded speech (STT only) to Groq Whisper; local faster-whisper is the fallback |
 | `ALTRON_MIC_DEVICE`, `ALTRON_REQUIRE_WAKE_WORD` | Optional microphone and wake-word behaviour |
@@ -189,7 +210,7 @@ Edit `.env` (see `.env.example`) to set:
 | `APPROVAL_PIN_HASH` | Optional approval PIN hash. Set it from the HUD settings (recommended) or with `python -m src.security.pin`. Never store the plain PIN |
 | `ALTRON_DATA_DIR`, `ALTRON_LOG_LEVEL` | Optional runtime directory and log level |
 
-You can also change the model, key and language later from the HUD settings panel. Steam tools need the Steam client installed; Artcraft tools need the Artcraft apps.
+You can also change the provider, model, key and language later from the HUD settings panel. Steam tools need the Steam client installed; Artcraft tools need the Artcraft apps.
 
 #### 6. ⚠️ Important Windows Desktop Setting
 To allow Altron to move and position desktop icons:
@@ -226,7 +247,8 @@ pytest -p no:cacheprovider
 - **تحريك أيقونات سطح المكتب**: تواصل مباشر مع نافذة `SysListView32` في نظام ويندوز للبحث عن الأيقونات ونقلها لأي مكان (الوسط، الأركان، أو إحداثيات محددة).
 - **إنشاء مستندات PDF احترافية**: توليد تقارير منسقة تدعم اللغة العربية (من اليمين لليسار RTL) والإنجليزية.
 - **تحكم عن بُعد عبر تيليجرام**: إرسال الأوامر واستقبال الردود والمستندات المنشأة مباشرة على هاتفك أينما كنت.
-- **نماذج Claude من Anthropic**: يتصل مباشرة بواجهة Anthropic Claude API فقط (النموذج الافتراضي `claude-sonnet-5-5`).
+- **مزودو ذكاء اصطناعي متعددون**: Anthropic (الافتراضي، `claude-sonnet-5-5`) وOpenAI وGoogle Gemini وOllama المحلي ونقطة نهاية مخصصة متوافقة مع OpenAI، ويمكن تبديلها مباشرة من لوحة HUD. مفاتيح كل مزود معزولة في `.env`. تشغيل النماذج المحلية عبر Ollama يتطلب كرت شاشة مخصصاً بذاكرة **8 جيجابايت VRAM**.
+- **موجّه محلي وذاكرة دائمة**: أوامر شائعة (عربي وإنجليزي) تُنفذ محلياً دون استدعاء نموذج، وذاكرة طويلة المدى SQLite + FTS5 (`memory.db`) يمكن إدارتها من لوحة HUD.
 - **حزمة Artcraft**: إنشاء وقراءة وتعديل ملفات DeckCraft وWordCraft وGridCraft ودمج وتقسيم PdfCraft مباشرة عبر بايثون دون نقرات واجهة.
 - **تكامل Steam**: فحص المكتبة المثبتة وتشغيل الألعاب والبحث في المتجر وفتح صفحات المتجر، والأداة `steam_add_to_cart` تضيف اللعبة إلى السلة فقط ولا تُكمل الدفع أبداً.
 - **مشاركة الملفات عبر تيليجرام**: الأداة `telegram_send_file` ترسل أي ملف محلي إلى محادثتك (حد أقصى 50 ميغابايت).
