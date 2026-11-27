@@ -16,6 +16,7 @@ def env(tmp_path, monkeypatch):
     home = tmp_path / "home"
     (home / "Desktop").mkdir(parents=True)
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    monkeypatch.setattr(svc, "get_desktop_dir", lambda: home / "Desktop")
     monkeypatch.setattr(svc.shutil, "which",
                         lambda n: {"claude": "C:/bin/claude.cmd", "code": "C:/bin/code.cmd"}.get(n))
     run = MagicMock(return_value=SimpleNamespace(returncode=0, stdout="done", stderr=""))

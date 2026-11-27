@@ -449,3 +449,30 @@ def test_strip_image_data_accepts_camera_placeholder():
     blocks = [vision.image_block(b"abc")]
     assert vision.strip_image_data(blocks, vision.CAMERA_PLACEHOLDER) == [
         {"type": "text", "text": "[Camera photo captured]"}]
+
+
+@pytest.mark.parametrize("keys", ["ctrl+`", "ctrl+grave", "ctrl+backtick", "Ctrl+OEM_3", ["ctrl", "`"]])
+def test_hotkey_backtick_aliases(pg, keys):
+    reg = create_default_registry()
+    assert reg.get("gui_hotkey").run({"keys": keys}, approved=True).success
+    pg.hotkey.assert_called_once_with("ctrl", "`")
+
+
+@pytest.mark.parametrize("key", list("-=[];',./\\"))
+def test_hotkey_punctuation_keys(pg, key):
+    reg = create_default_registry()
+    assert reg.get("gui_hotkey").run({"keys": ["ctrl", key]}, approved=True).success
+    pg.hotkey.assert_called_once_with("ctrl", key)
+
+
+def test_hotkey_backtick_requests_approval_not_error(pg):
+    # Regression: Telegram "open terminal in VS Code" looped because ctrl+` was rejected as
+    # "Unsupported key(s)" before the approval gate, so no approval card was ever sent.
+    r = create_default_registry().get("gui_hotkey").run({"keys": "ctrl+`"})
+    assert r.requires_permission and r.permission_message == "Press hotkey: ctrl+`"
+    pg.hotkey.assert_not_called()
+
+
+def test_prompt_tells_model_to_call_gated_gui_tools_directly():
+    text = (Path(__file__).parent.parent / "prompts" / "system_prompt.txt").read_text(encoding="utf-8")
+    assert "call the tool directly, never ask permission in text" in text and len(text) < 6900

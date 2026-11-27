@@ -203,20 +203,7 @@ class ToolRegistry:
 
 # === Built-in Tool Handlers ===
 
-def _desktop_dir() -> Path:
-    """Real Desktop folder (shell-folder registry value, so OneDrive-redirected Desktops work)."""
-    if platform.system() == "Windows":
-        try:
-            import winreg
-            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders") as k:
-                d = Path(os.path.expandvars(winreg.QueryValueEx(k, "Desktop")[0]))
-            if d.is_dir():
-                return d
-        except OSError as e:
-            logger.debug("Desktop registry lookup failed: %s", e)
-    home = Path.home()
-    cands = [home / "OneDrive" / "Desktop", home / "Desktop"]
-    return next((c for c in cands if c.is_dir()), cands[-1])
+from src.config.paths import get_desktop_dir
 
 
 def resolve_user_path(value: str) -> Path:
@@ -225,7 +212,7 @@ def resolve_user_path(value: str) -> Path:
     if parts and parts[0] == "~":
         parts = parts[1:]
     if parts and parts[0].lower() == "desktop":
-        return _desktop_dir().joinpath(*[x for x in parts[1:] if x])
+        return get_desktop_dir().joinpath(*[x for x in parts[1:] if x])
     return Path(value).expanduser()
 
 
@@ -747,6 +734,21 @@ def handle_app_open(params: Dict[str, Any], approved: bool = False) -> ToolResul
         )
 
 
+# App alias -> real Windows process image name (default: "<name>.exe").
+_PROCESS_NAMES = {
+    "vscode": "code.exe", "vs code": "code.exe", "code": "code.exe", "visual studio code": "code.exe",
+    "chrome": "chrome.exe", "edge": "msedge.exe", "msedge": "msedge.exe", "word": "winword.exe",
+    "excel": "excel.exe", "powerpoint": "powerpnt.exe", "outlook": "outlook.exe", "terminal": "windowsterminal.exe",
+    "paint": "mspaint.exe", "teams": "ms-teams.exe",
+}
+
+
+def _process_name(app_name: str) -> str:
+    n = app_name.strip().lower()
+    n = _PROCESS_NAMES.get(n) or _PROCESS_NAMES.get(APP_NAME_ALIASES.get(n, n)) or n
+    return n if n.endswith(".exe") else n + ".exe"
+
+
 def handle_app_close(params: Dict[str, Any], approved: bool = False) -> ToolResult:
     """Handle application close tool - requires permission."""
     import psutil
@@ -767,18 +769,22 @@ def handle_app_close(params: Dict[str, Any], approved: bool = False) -> ToolResu
     closed_count = 0
     try:
         if process_id:
-            p = psutil.Process(int(process_id))
-            p.terminate()
+            psutil.Process(int(process_id)).terminate()
             closed_count += 1
         elif app_name:
+            exe = _process_name(app_name)
             for p in psutil.process_iter(["pid", "name"]):
                 try:
-                    if app_name.lower() in p.info["name"].lower():
-                        p.terminate()
+                    # Exact match: substring "code" would also hit unrelated processes.
+                    if (p.info["name"] or "").lower() == exe:
+                        p.terminate()  # every Code.exe (Electron main + children) matches by name
                         closed_count += 1
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                    pass
+                except (psutil.NoSuchProcess, psutil.AccessDenied) as e:
+                    logger.debug("app_close skipped pid %s: %s", p.info.get("pid"), e)
 
+        if closed_count == 0:
+            return ToolResult(success=False, output=None,
+                              error=f"No running process found for {target}; nothing was closed")
         return ToolResult(
             success=True,
             output={"closed": target, "count": closed_count, "message": f"Terminated {closed_count} process(es)"}
@@ -1971,7 +1977,7 @@ def handle_create_and_send_pdf(params: Dict[str, Any]) -> ToolResult:
         from PySide6.QtGui import QPdfWriter, QTextDocument, QPageSize
         from PySide6.QtCore import QMarginsF
 
-        desktop_dir = Path.home() / "Desktop"
+        desktop_dir = get_desktop_dir()
         desktop_dir.mkdir(parents=True, exist_ok=True)
         out_path = desktop_dir / filename
 
@@ -2878,6 +2884,12 @@ _GUI_KEY_NAMES = {
     "delete", "insert", "home", "end", "pageup", "pagedown", "up", "down", "left", "right",
     *(f"f{i}" for i in range(1, 13)),
 }
+# Punctuation keys (VS Code shortcuts) and their aliases -> the name pyautogui expects.
+# shortcut: pyautogui resolves these via VkKeyScan, so the physical key follows the active layout.
+_GUI_PUNCT = set("`-=[];',./\\")
+_GUI_KEY_ALIASES = {"backtick": "`", "grave": "`", "oem_3": "`", "vk_oem_3": "`", "minus": "-", "equals": "=",
+                    "semicolon": ";", "comma": ",", "period": ".", "slash": "/", "backslash": "\\",
+                    "quote": "'", "lbracket": "[", "rbracket": "]"}
 # Best-effort refusal when the focused window looks like a credential prompt.
 _CREDENTIAL_WINDOW = re.compile(
     r"password|passcode|passkey|credential|sign[\s-]?in|log[\s-]?in|windows security|"
@@ -2988,13 +3000,13 @@ def handle_gui_type(params: Dict[str, Any], approved: bool = False) -> ToolResul
 def handle_gui_hotkey(params: Dict[str, Any], approved: bool = False) -> ToolResult:
     keys = params.get("keys")
     if isinstance(keys, str):
-        keys = [k for k in re.split(r"[+\s,]+", keys) if k]
+        keys = [k for k in re.split(r"\+|\s+", keys) if k]
     if not isinstance(keys, (list, tuple)) or not keys or not all(isinstance(k, str) for k in keys):
         return ToolResult(success=False, output=None, error='gui_hotkey needs a list of keys, e.g. ["ctrl", "c"].')
-    keys = [k.strip().lower() for k in keys]
+    keys = [_GUI_KEY_ALIASES.get(k.strip().lower(), k.strip().lower()) for k in keys]
     if len(keys) > GUI_MAX_HOTKEY_KEYS:
         return ToolResult(success=False, output=None, error=f"At most {GUI_MAX_HOTKEY_KEYS} keys per hotkey.")
-    bad = [k for k in keys if not (k in _GUI_KEY_NAMES or (len(k) == 1 and k.isascii() and k.isalnum()))]
+    bad = [k for k in keys if not (k in _GUI_KEY_NAMES or (len(k) == 1 and k.isascii() and (k.isalnum() or k in _GUI_PUNCT)))]
     if bad:
         return ToolResult(success=False, output=None, error=f"Unsupported key(s): {', '.join(bad)}.")
 

@@ -196,7 +196,7 @@ def test_wrong_extension_is_refused(tmp_path):
 
 
 def test_relative_paths_resolve_to_desktop(tmp_path, monkeypatch):
-    monkeypatch.setattr(ac.Path, "home", classmethod(lambda cls: tmp_path))
+    monkeypatch.setattr(ac, "get_desktop_dir", lambda: tmp_path / "Desktop")
     assert ac._user_path("notes.docx") == tmp_path / "Desktop" / "notes.docx"
 
 

@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Sequence, Tuple
 
 from src.config.log import get_logger, redact_secrets
+from src.config.paths import get_desktop_dir
 
 logger = get_logger(__name__)
 
@@ -70,7 +71,7 @@ def _user_path(raw: object) -> Path:
         raise ArtcraftError("A file path is required.")
     path = Path(os.path.expandvars(os.path.expanduser(text)))
     if not path.is_absolute():
-        path = Path.home() / "Desktop" / path
+        path = get_desktop_dir() / path
     return path
 
 

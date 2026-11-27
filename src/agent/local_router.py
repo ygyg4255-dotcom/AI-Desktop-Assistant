@@ -1,6 +1,7 @@
 """Local (zero-API) intent router: the legacy rule chain first, then the ROUTES table."""
 import difflib
 import re
+import shutil
 import time
 from typing import Any, Dict, Optional
 
@@ -383,6 +384,10 @@ def _match_legacy_intent(prompt: str) -> Optional[Dict[str, Any]]:
         or ((has_wa_keyword or has_meta_ai) and any(w in clean_p for w in ("اقرأ", "اقرا", "رسائل", "read", "messages", "fetch", "check")))
     )
 
+    # Email requests always go to the LLM (Gmail tools), never the WhatsApp reader.
+    if any(w in clean_p for w in ("mail", "inbox", "gmail", "بريد", "إيميل", "ايميل", "جيميل")) and not has_wa_keyword:
+        is_reply_forward_or_read = False
+
     if is_reply_forward_or_read:
         chat_target = ""
 
@@ -622,10 +627,24 @@ def _app_name(raw: str) -> Optional[str]:
     return raw
 
 
+# App Paths apps that startfile resolves but shutil.which cannot see.
+_KNOWN_APPS = {"chrome", "firefox", "brave", "msedge", "edge", "word", "excel", "powerpoint", "outlook",
+               "teams", "discord", "steam", "explorer", "notepad", "paint", "terminal"}
+
+
+def _is_known_app(name: str) -> bool:
+    """True only for names the app_open tool can resolve; anything else (him, Clipboard, 'x in vscode') goes to the LLM."""
+    from src.agent.tools import APP_NAME_ALIASES, APP_URI_MAP  # lazy: tools imports heavy modules
+    n = name.strip().lower()
+    return n in _KNOWN_APPS or n in APP_NAME_ALIASES or n in APP_URI_MAP or bool(shutil.which(n))
+
+
 def _r_app(tool: str, ok_en: str, ok_ar: str):
     def build(m, ar):
         app = _app_name(_g(m, "app") or "")
         if not app:
+            return None
+        if tool in ("app_open", "app_close") and not _is_known_app(app):
             return None
         # "close new desktop / window x / tab" are not app names; let the LLM handle them.
         if tool == "app_close" and re.match(r"^(?:(?:new|virtual|this|current|my|the|ال)\s+)*(?:desktops?|windows?|tabs?|سطح المكتب|نافذه|نافذة|تبويب)\b", app, re.I):

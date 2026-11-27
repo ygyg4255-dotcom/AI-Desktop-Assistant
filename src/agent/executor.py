@@ -34,6 +34,7 @@ from src.services.ai_client import AIClient, Message
 from src.services.hud_status import update_hud_status
 from src.services.sentence_chunker import SentenceChunker
 from src.config.log import get_logger, redact_secrets
+from src.config.paths import get_desktop_dir
 from src.config.settings import get_config_value
 
 APPROVED_OUTCOME_MAX_CHARS = 300
@@ -620,7 +621,7 @@ WEBCAM VISION:
 - You CAN see through the user's webcam: `capture_camera` takes one photo and attaches it as an image (instant when the background camera is on). When the user asks you to look through the camera, see them, or identify/describe something they are holding or showing, ALWAYS call it, then answer ONLY the question asked (e.g. "what am I holding?" -> just name the item; no background, room or location unless asked). For "what did I move?" / "what changed?" call it with `compare_seconds_ago` (e.g. 5) to get an earlier frame and the current one, and compare them. `camera_start` / `camera_stop` turn the background camera on/off when asked. Never claim you have no camera access, and only look when the user asks: camera frames are never sent to you otherwise.
 
 GUI AUTOMATION:
-- You CAN operate the mouse and keyboard. `gui_click` and `gui_scroll` run immediately when the user asks. `gui_type` and `gui_hotkey` are shown to the user for approval first; if declined or pending, say so and do NOT claim it happened.
+- You CAN operate the mouse and keyboard. `gui_click` and `gui_scroll` run immediately when the user asks. `gui_type` and `gui_hotkey` are shown to the user for approval first: call them directly (never ask permission in text; the gate sends the approval card). To open/toggle the VS Code terminal send `ctrl+j`, never ctrl+backtick (fails on non-US layouts). If declined or pending, say so and do NOT claim it happened.
 - Look first: capture the screen, then pass `gui_click` the x/y pixel position on the screenshot you were shown. Do NOT scale coordinates yourself: the tool maps them to the real screen using the capture's `screenshot_size` and `screen_size`. Act, then capture again to verify the result.
 - When the user explicitly asks to click a visible UI element (e.g. "click System"), capture the screen if you do not have a current view, then call `gui_click` in the same turn. Do NOT ask "Should I click it?" for click or scroll requests.
 - NEVER type into password, PIN, passcode or other credential fields, never type secrets, API keys or tokens, and never handle credentials: if a sign-in or password prompt appears, stop and ask the user to enter it themselves.
@@ -740,6 +741,9 @@ Available tools are provided in the tool definitions. Use them responsibly."""
         persona = self._persona_cache = persona or ""
         nl = chr(10) * 2
         prompt = f"{persona}{nl}{self.SYSTEM_PROMPT}" if persona else self.SYSTEM_PROMPT
+        # Injected here (not in the persona file) to stay under the 6900-char persona cap.
+        prompt += (f"{nl}Primary Desktop path: {get_desktop_dir()}. 'desktop' / 'سطح المكتب' always means this "
+                   "folder (also in terminal_execute), never C:\\Users\\<user>\\Desktop.")
         if self._previous_context:
             prompt = f"{prompt}{nl}{self._previous_context}"
         return prompt

@@ -9,8 +9,25 @@ def od_desktop(tmp_path, monkeypatch):
     d = tmp_path / "OneDrive" / "Desktop"
     d.mkdir(parents=True)
     (d / "report.txt").write_text("x")
-    monkeypatch.setattr(tools, "_desktop_dir", lambda: d)
+    monkeypatch.setattr(tools, "get_desktop_dir", lambda: d)
     return d
+
+
+def test_get_desktop_dir_prefers_redirected_path(tmp_path, monkeypatch):
+    from src.config import paths
+    monkeypatch.setattr(paths.os, "name", "posix")  # skip the Shell API, exercise the fallback
+    monkeypatch.setattr(paths.Path, "home", lambda: tmp_path)
+    assert paths.get_desktop_dir() == tmp_path / "Desktop"  # neither exists -> plain default
+    (tmp_path / "OneDrive" / "Desktop").mkdir(parents=True)
+    assert paths.get_desktop_dir() == tmp_path / "OneDrive" / "Desktop"
+
+
+def test_system_prompt_includes_resolved_desktop(od_desktop, monkeypatch):
+    from src.agent import executor
+    monkeypatch.setattr(executor, "get_desktop_dir", lambda: od_desktop)
+    ex = executor.AgentExecutor.__new__(executor.AgentExecutor)
+    ex._persona_cache, ex._previous_context = "", ""
+    assert f"Primary Desktop path: {od_desktop}" in ex._get_system_prompt()
 
 
 @pytest.mark.parametrize("value", ["desktop", "Desktop/report.txt", "~/Desktop/report.txt", r"~\Desktop\report.txt"])

@@ -12,6 +12,22 @@ def get_runtime_dir() -> Path:
     return Path(override) if override else Path.home() / ".ai-desktop-assistant"
 
 
+def get_desktop_dir() -> Path:
+    """Real Desktop folder: Windows Shell API, then OneDrive/Desktop, then ~/Desktop."""
+    if os.name == "nt":
+        try:
+            import ctypes
+            buf = ctypes.create_unicode_buffer(260)
+            # 0x0010 = CSIDL_DESKTOPDIRECTORY; returns S_OK (0) on success
+            if ctypes.windll.shell32.SHGetFolderPathW(None, 0x0010, None, 0, buf) == 0 and Path(buf.value).is_dir():
+                return Path(buf.value)
+        except (OSError, AttributeError):
+            pass  # fall through to the home-based guesses
+    home = Path.home()
+    cands = [home / "OneDrive" / "Desktop", home / "Desktop"]
+    return next((c for c in cands if c.is_dir()), cands[-1])
+
+
 def runtime_file(name: str) -> Path:
     """Path of a runtime file in the data dir, migrating a legacy project-root copy once."""
     target = get_runtime_dir() / name

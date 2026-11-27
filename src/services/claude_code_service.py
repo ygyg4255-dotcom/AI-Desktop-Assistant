@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from src.config.log import get_logger, redact_secrets
+from src.config.paths import get_desktop_dir
 
 logger = get_logger(__name__)
 
@@ -66,7 +67,7 @@ def resolve_project_path(project_path: Optional[str]) -> Path:
         return expanded
     if any(sep in raw for sep in ("/", "\\")):
         return (Path.cwd() / expanded).resolve()
-    return Path.home() / "Desktop" / raw
+    return get_desktop_dir() / raw
 
 
 def _truncate(text: str, limit: int = MAX_OUTPUT_CHARS) -> str:
