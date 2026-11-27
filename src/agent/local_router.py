@@ -298,10 +298,19 @@ def _match_legacy_intent(prompt: str) -> Optional[Dict[str, Any]]:
 
     # 6. Volume Mute
     vol_mute_en = {"mute", "unmute", "mute volume", "mute sound", "mute audio", "silence"}
-    is_vol_mute = (
+    # Anything aimed at a non-system-audio target (messages, notifications, a sender...) goes to the LLM.
+    mute_other_target = (
+        bool(set(tokens) & {"message", "messages", "notification", "notifications", "chat", "chats", "email", "emails",
+                            "mail", "from", "whatsapp", "telegram", "sender", "group", "channel", "thread"}) or
+        any(w in norm_ar for w in {"رسائل", "رساله", "رسالة", "اشعار", "محادث", "دردش", "ايميل", "بريد", "من ", "جروب", "قروب"})
+    )
+    mute_ar_phrases = {"كتم الصوت", "اكتم الصوت", "قم بكتم الصوت", "شغل الصوت", "الغاء كتم الصوت", "فك كتم الصوت",
+                       "كتم", "اكتم", "صامت", "اخرس", "الغاء الكتم", "فك الكتم"}
+    is_vol_mute = not mute_other_target and (
         clean_p_norm in vol_mute_en or
         any(t in ("mute", "unmute") for t in tokens) or  # exact: fuzzy 0.75 matched "minute"
-        any(w in norm_ar for w in {"كتم", "صامت", "اخرس", "الغاء الكتم", "فك الكتم"})
+        norm_ar.strip() in mute_ar_phrases or
+        any(p in norm_ar for p in ("كتم الصوت", "كتم صوت", "شغل الصوت", "فك الكتم", "الغاء الكتم"))
     )
     if is_vol_mute:
         msg = "✅ تم كتم/إلغاء كتم الصوت." if is_arabic else "✅ Volume muted/unmuted."
