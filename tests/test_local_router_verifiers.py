@@ -47,7 +47,7 @@ def test_time_and_date_need_no_tool(text):
     assert intent["tool_name"] is None and intent["confirmation"]
 
 
-@pytest.mark.parametrize("text", ["shutdown", "restart", "open the door", "search for cats", "play", "open youtube"])
+@pytest.mark.parametrize("text", ["shutdown", "restart", "open the door", "search for cats", "open youtube"])
 def test_unrouted_goes_to_llm(text):
     assert match_local_intent(text) is None
 
@@ -174,3 +174,19 @@ def test_telegram_polling_backoff_and_deduped_logs(monkeypatch, caplog):
     assert sleeps == [2.0, 5.0, 15.0, 30.0, 30.0]
     assert sum("connection lost" in r.getMessage() for r in caplog.records if r.levelno == logging.WARNING) == 1
     assert sum("restored" in r.getMessage() for r in caplog.records if r.levelno == logging.INFO) == 1
+
+
+@pytest.mark.parametrize("p", ["لا ترسل لقطة شاشة", "don't send a screenshot", "no screenshot", "do not take a screenshot please"])
+def test_negated_screenshot_does_not_trigger(p):
+    r = match_local_intent(p)
+    assert not r or r.get("tool_name") != "capture_and_inspect_screen"
+
+
+def test_screenshot_still_triggers():
+    assert match_local_intent("take a screenshot")["tool_name"] == "capture_and_inspect_screen"
+
+
+@pytest.mark.parametrize("p", ["play", "pause"])
+def test_standalone_play_pause_local(p):
+    r = match_local_intent(p)
+    assert r["tool_name"] == "media_control" and r["tool_input"]["action"] == "play_pause"

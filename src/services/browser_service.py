@@ -24,6 +24,7 @@ LAUNCH_HINT = ('Launch Brave with: brave.exe --remote-debugging-port=9222 '
                '--user-data-dir="%USERPROFILE%\\.altron-brave-profile"')
 UNTRUSTED_OPEN = "<untrusted_web_content>"
 UNTRUSTED_CLOSE = "</untrusted_web_content>"
+_BLANK = {"", "about:blank", "newtab", "chrome://newtab", "chrome://newtab/", "brave://newtab", "brave://newtab/"}
 _BAD_SCHEMES = re.compile(r"^(javascript|data|file|vbscript|about|chrome|brave|blob):", re.I)
 
 
@@ -43,11 +44,17 @@ class BrowserError(Exception):
     """User-facing failure (message is safe to show)."""
 
 
+def _hits(pages: list, q: str) -> list:
+    """(index, page) pairs whose title or URL contains q (case-insensitive)."""
+    q = q.lower()
+    return [(i, p) for i, p in enumerate(pages) if q in p.title().lower() or q in p.url.lower()]
+
+
 def normalize_url(url: str) -> str:
     """Prefix https:// when no scheme; allow only http(s)."""
     url = (url or "").strip()
-    if not url:
-        raise BrowserError("No URL given")
+    if url.lower() in _BLANK:
+        return "about:blank"
     if "://" in url:
         if not re.match(r"^https?://", url, re.I):
             raise BrowserError("Only http(s) URLs are allowed")
@@ -55,6 +62,58 @@ def normalize_url(url: str) -> str:
     if _BAD_SCHEMES.match(url):
         raise BrowserError("Only http(s) URLs are allowed")
     return "https://" + url
+
+
+_YT_MARKERS = ("youtube.com/watch", "youtube.com/shorts", "youtu.be")
+VIDEO_ACTIONS = ("seek", "forward", "rewind", "play", "pause", "toggle", "mute", "unmute", "speed", "status")
+# Returns null when the tab has no <video>, before touching anything.
+_VIDEO_JS = """async ([action, val]) => {
+  const v = document.querySelector('video'); if (!v) return null;
+  const d = isFinite(v.duration) ? v.duration : Infinity;
+  const clamp = t => Math.max(0, Math.min(t, d));
+  if (action === 'seek') v.currentTime = clamp(val);
+  else if (action === 'forward') v.currentTime = clamp(v.currentTime + val);
+  else if (action === 'rewind') v.currentTime = clamp(v.currentTime - val);
+  else if (action === 'play') await v.play().catch(() => {});
+  else if (action === 'pause') v.pause();
+  else if (action === 'toggle') { if (v.paused) await v.play().catch(() => {}); else v.pause(); }
+  else if (action === 'mute') v.muted = true;
+  else if (action === 'unmute') v.muted = false;
+  else if (action === 'speed') v.playbackRate = val;
+  return {current_time: v.currentTime, duration: isFinite(v.duration) ? v.duration : null,
+          paused: v.paused, muted: v.muted, playback_rate: v.playbackRate};
+}"""
+
+
+def parse_timestamp(value) -> float:
+    """Seconds from 120, "120", "2:00" or "1:15:30". Raises BrowserError on anything else."""
+    bad = BrowserError(f"Invalid time {value!r}: use seconds or MM:SS / HH:MM:SS")
+    if isinstance(value, bool) or value is None:
+        raise bad
+    if isinstance(value, (int, float)):
+        secs = float(value)
+    else:
+        t = str(value).strip()
+        if re.fullmatch(r"\d+(\.\d+)?", t):
+            secs = float(t)
+        elif re.fullmatch(r"\d+:\d{1,2}(:\d{1,2})?", t):
+            parts = [int(x) for x in t.split(":")]
+            if any(p >= 60 for p in parts[1:]):
+                raise bad
+            secs = float(sum(p * 60 ** i for i, p in enumerate(reversed(parts))))
+        else:
+            raise bad
+    if not 0 <= secs < float("inf"):  # also rejects NaN
+        raise bad
+    return secs
+
+
+def format_time(secs) -> Optional[str]:
+    if secs is None:
+        return None
+    s = int(secs)
+    h, m, s = s // 3600, s // 60 % 60, s % 60
+    return f"{h}:{m:02d}:{s:02d}" if h else f"{m:02d}:{s:02d}"
 
 
 class BrowserService:
@@ -71,14 +130,17 @@ class BrowserService:
     def switch_tab(self, query) -> Dict[str, Any]:
         return self._run(self._switch_tab, query)
 
-    def close_tab(self, query) -> Dict[str, Any]:
-        return self._run(self._close_tab, query)
+    def close_tab(self, query, close_all: bool = False) -> Dict[str, Any]:
+        return self._run(self._close_tab, query, close_all)
 
     def open_url(self, url: str, new_tab: bool = True) -> Dict[str, Any]:
         return self._run(self._open_url, url, new_tab)
 
     def read_page(self, query=None, max_chars: int = 4000) -> Dict[str, Any]:
         return self._run(self._read_page, query, max_chars)
+
+    def video_control(self, action: str, value=None, tab_query: Optional[str] = None) -> Dict[str, Any]:
+        return self._run(self._video_control, action, value, tab_query)
 
     def disconnect(self) -> None:
         """Drop the CDP connection only; the browser keeps running."""
@@ -168,7 +230,7 @@ class BrowserService:
             if i < len(pages):
                 return {"page": pages[i], "index": i}
             return {"error": f"No tab with index {i} ({len(pages)} open)"}
-        hits = [(i, p) for i, p in enumerate(pages) if q.lower() in p.title().lower() or q.lower() in p.url.lower()]
+        hits = _hits(pages, q)
         if len(hits) == 1:
             return {"page": hits[0][1], "index": hits[0][0]}
         if not hits:
@@ -189,13 +251,82 @@ class BrowserService:
         r["page"].bring_to_front()
         return {"ok": True, "tab": self._info(r["index"], r["page"])}
 
-    def _close_tab(self, query):
-        r = self._match(self._pages(), query)
-        if "page" not in r:
+    def _close_tab(self, query, close_all=False):
+        pages = self._pages()
+        q = str(query if query is not None else "").strip()
+        r = self._match(pages, q)
+        if close_all and "candidates" in r:  # all matches, held by page reference so closing never shifts indexes
+            targets = [(c["index"], pages[c["index"]]) for c in r["candidates"]]
+        elif "page" in r:
+            targets = [(r["index"], r["page"])]
+        else:
             return {"ok": False, **r}
-        info = self._info(r["index"], r["page"])
-        r["page"].close()
-        return {"ok": True, "closed": info}
+        closed, failed, gone = [], [], []  # closed holds (info, page) until verified
+        for i, p in targets:
+            info = self._info(i, p)
+            try:
+                p.close()
+            except Exception as e:
+                logger.debug("tab close failed: %s", e)
+                try:
+                    is_gone = p.is_closed()
+                except Exception as e2:  # dropped CDP connection: can't confirm, so failed
+                    logger.debug("is_closed failed: %s", e2)
+                    is_gone = False
+                (gone if is_gone else failed).append(info if is_gone else {**info, "error": str(e)})
+                continue
+            closed.append((info, p))
+        live = self._pages()  # verify against the real tab list
+        failed += [{**info, "error": "tab still open after close"} for info, p in closed if p in live]
+        closed = [info for info, p in closed if p not in live]
+        remaining = [] if q.isdigit() else [self._info(i, p) for i, p in _hits(live, q)]
+        logger.info("close_tab q=%r close_all=%s closed=%d failed=%d gone=%d remaining=%d",
+                    q, close_all, len(closed), len(failed), len(gone), len(remaining))
+        out = {"ok": not failed, "closed": closed, "closed_count": len(closed), "failed": failed,
+               "already_gone": gone, "remaining_matches": remaining, "open_tabs": len(live)}
+        if failed:
+            out["error"] = f"{len(failed)} tab(s) failed to close"
+        return out
+
+    def _video_control(self, action, value, tab_query):
+        action = str(action or "").strip().lower()
+        if action not in VIDEO_ACTIONS:
+            return {"ok": False, "error": f"Unknown action '{action}'. Use one of: {', '.join(VIDEO_ACTIONS)}"}
+        try:
+            if action in ("forward", "rewind"):
+                arg = parse_timestamp(10 if value in (None, "") else value)
+            elif action == "seek":
+                arg = parse_timestamp(value)
+            elif action == "speed":
+                try:
+                    arg = min(4.0, max(0.25, float(value)))
+                except (TypeError, ValueError):
+                    raise BrowserError(f"Invalid speed {value!r}: use a number like 1.5")
+                if arg != arg:  # NaN
+                    raise BrowserError(f"Invalid speed {value!r}")
+            else:
+                arg = 0
+        except BrowserError as e:
+            return {"ok": False, "error": str(e)}
+        pages = self._pages()
+        if tab_query and str(tab_query).strip():
+            cands = [self._resolve(tab_query)["page"]]
+        else:  # YouTube watch tabs first, then any other tab that turns out to have a <video>
+            yt = [p for p in pages if any(m in p.url.lower() for m in _YT_MARKERS)]
+            cands = yt + [p for p in pages if p not in yt]
+        for p in cands:
+            try:
+                st = p.evaluate(_VIDEO_JS, [action, arg])
+            except Exception as e:  # e.g. chrome:// pages refuse evaluation
+                logger.debug("video evaluate failed: %s", e)
+                continue
+            if st:
+                return {"ok": True, "action": action, "tab_title": p.title(), "url": p.url,
+                        "current_time": st["current_time"], "current_time_formatted": format_time(st["current_time"]),
+                        "duration": st["duration"], "duration_formatted": format_time(st["duration"]),
+                        "paused": st["paused"], "muted": st["muted"], "playback_rate": st["playback_rate"]}
+        return {"ok": False, "error": "No <video> element found in " +
+                ("that tab" if tab_query and str(tab_query).strip() else "any open tab")}
 
     def _open_url(self, url, new_tab):
         url = normalize_url(url)
@@ -209,7 +340,8 @@ class BrowserService:
             if not pages:
                 raise BrowserError("No open tab to navigate")
             page = self._active(pages)
-        page.goto(url)
+        if url != "about:blank":
+            page.goto(url)
         page.bring_to_front()
         return {"ok": True, "url": page.url, "title": page.title()}
 

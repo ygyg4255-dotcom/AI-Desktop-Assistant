@@ -101,6 +101,11 @@ class PermissionGate:
         # Read-only Brave (CDP); page text is wrapped as untrusted content.
         "browser_list_tabs",
         "browser_read_page",
+        # Brave tab control: the owner asked for no approval on any browser tool.
+        "browser_open_url",
+        "browser_switch_tab",
+        "browser_close_tab",
+        "browser_video_control",
     }
 
     # Tools that auto-run only for low-risk inputs; the handler decides per call
@@ -130,10 +135,6 @@ class PermissionGate:
         "gui_hotkey",
         # Gmail send: every call is approved individually (+PIN).
         "gmail_send_email",
-        # Brave tab control: navigation / focus / closing user tabs.
-        "browser_open_url",
-        "browser_switch_tab",
-        "browser_close_tab",
     }
 
     # Keyboard automation. Always DANGEROUS, and a blanket "allow" (session or

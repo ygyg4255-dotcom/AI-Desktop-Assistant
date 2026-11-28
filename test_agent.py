@@ -90,7 +90,7 @@ def test_tool_registry():
 
     print("\n[2.2] Checking tool schemas...")
     schemas = registry.get_tools_schema()
-    assert len(schemas) == len(tools), "Schema count mismatch"
+    assert len(schemas) == len([t for t in tools if not t.hidden]), "Schema count mismatch"
     print(f"    [OK] Generated {len(schemas)} tool schemas")
 
     print("\n[2.3] Testing tool categories...")

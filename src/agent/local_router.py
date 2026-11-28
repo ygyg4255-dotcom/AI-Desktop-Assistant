@@ -358,7 +358,8 @@ def _match_legacy_intent(prompt: str) -> Optional[Dict[str, Any]]:
         "screenshot", "take a screenshot", "take screenshot", "capture screen",
         "capture the screen", "screen capture", "send screenshot"
     }
-    is_screen_cap = (
+    negated = bool(re.search(r"\b(?:no|not|dont|don't|without|never)\b|(?:^|\s)(?:لا|ما|بدون|مو|مش)\s", clean_p_norm.lower()))
+    is_screen_cap = not negated and (
         clean_p_norm in screen_cap_en or
         ("screenshot" in clean_p_norm) or
         ("screen" in tokens and any(t in tokens for t in ("capture", "take", "grab"))) or
@@ -771,7 +772,7 @@ ROUTES = [
     (r"^(?:lock(?: my| the)?(?: pc| computer| screen| laptop| workstation)?|(?:اقفل|قفل|اغلق) (?:ال)?(?:شاشه|جهاز|كمبيوتر|حاسوب|لابتوب)(?:ي|ك)?)$", _r_power("lock", "Locking the PC.", "تم قفل الجهاز.")),
     (r"^(?:go to sleep|sleep|sleep mode|put (?:the |my )?(?:pc|computer|laptop) (?:to )?sleep|sleep (?:pc|computer|laptop)|نيم (?:ال)?(?:جهاز|كمبيوتر|حاسوب)|وضع النوم|نوم)$", _r_power("sleep", "Putting the PC to sleep.", "جاري وضع الجهاز في وضع النوم.")),
     (r"^(?:what(?:'s| is) (?:playing|this song)(?: now)?|now playing|ايش (?:الاغنيه )?(?:الشغاله|اللي شغاله)|ما الاغنيه الحاليه)$", _r_now_playing),
-    (r"^(?:pause|stop)(?: the)?(?: music| song| media| video| playback)?$|^(?:play|resume)(?: the)?(?: music| song| media| video| playback)$|^(?:resume|continue)$|^(?:وقف|اوقف|ايقاف|بوز|كمل|استئناف|شغل)(?: ال)?(?:موسيقي|اغنيه|ميديا|فيديو)$", _r_play_pause),
+    (r"^(?:pause|stop)(?: the)?(?: music| song| media| video| playback)?$|^(?:play|resume)(?: the)?(?: music| song| media| video| playback)$|^(?:play|resume|continue)$|^(?:وقف|اوقف|ايقاف|بوز|كمل|استئناف|شغل)(?: ال)?(?:موسيقي|اغنيه|ميديا|فيديو)$", _r_play_pause),
     (r"^(?:next|skip)(?: the)?(?: song| track| music)?$|^(?:التالي|التاليه|الاغنيه التاليه|الاغنيه الجايه|تخطي)$", _r_media("next", "✅ Next track.", "✅ الأغنية التالية.")),
     (r"^(?:previous|prev|last)(?: the)?(?: song| track)?$|^(?:السابق|السابقه|الاغنيه السابقه)$", _r_media("previous", "✅ Previous track.", "✅ الأغنية السابقة.")),
     (r"^(?:(?:system|pc|computer) (?:info|information|specs|status|stats)|(?:show |get |give me )?(?:my )?(?:system|pc|computer) (?:info|information|specs|status|stats)|how(?:'s| is) my (?:pc|computer|system)(?: doing)?|(?:cpu|ram|memory|disk)(?: usage| status)?|(?:معلومات|حاله|مواصفات) (?:ال)?(?:نظام|جهاز|كمبيوتر|حاسوب)|استهلاك (?:ال)?(?:رام|معالج|ذاكره))$", _r_sysinfo),

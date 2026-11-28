@@ -20,7 +20,7 @@ from src.services.notes_service import NotesService
 DAILY_TOOLS = {
     "media_control", "play_music", "network_control", "power_control",
     "todo_add", "todo_list", "todo_complete", "todo_delete",
-    "note_save", "note_list", "note_read", "open_url", "web_search",
+    "note_save", "note_list", "note_read", "web_search",
 }
 
 
@@ -445,16 +445,21 @@ def test_open_url_rejects_unsafe_or_malformed(url, monkeypatch):
     assert opened == []
 
 
-def test_open_url_opens_https_in_default_browser(monkeypatch):
-    opened = []
-    monkeypatch.setattr(tools_mod.webbrowser, "open", lambda url, new=0: opened.append((url, new)) or True)
-    result = tools_mod.handle_open_url({"url": "https://example.com/docs?q=1"})
-    assert result.success
-    assert opened == [("https://example.com/docs?q=1", 2)]
+def test_open_url_routes_to_brave_cdp(monkeypatch):
+    from unittest.mock import MagicMock
+    svc = MagicMock()
+    svc.open_url.return_value = {"url": "https://example.com/docs?q=1"}
+    monkeypatch.setattr("src.services.browser_service.get_browser_service", lambda: svc)
+    assert tools_mod.handle_open_url({"url": "https://example.com/docs?q=1"}).success
+    svc.open_url.assert_called_once_with("https://example.com/docs?q=1", True)
 
 
 def test_open_url_reports_browser_failure(monkeypatch):
-    monkeypatch.setattr(tools_mod.webbrowser, "open", lambda *a, **k: False)
+    from src.services.browser_service import BrowserError
+    from unittest.mock import MagicMock
+    svc = MagicMock()
+    svc.open_url.side_effect = BrowserError("no brave")
+    monkeypatch.setattr("src.services.browser_service.get_browser_service", lambda: svc)
     assert tools_mod.handle_open_url({"url": "https://example.com"}).success is False
 
 

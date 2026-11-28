@@ -51,7 +51,7 @@ def test_core_present_and_packs_excluded_initially(dynamic):
 def test_flag_off_sends_full_list(dynamic):
     dynamic("false")
     reg = create_default_registry()
-    assert _names(tool_router.ToolRouter(reg).schema()) == [t.name for t in reg.list_tools()]
+    assert _names(tool_router.ToolRouter(reg).schema()) == [t.name for t in reg.list_tools() if not t.hidden]
 
 
 @pytest.mark.parametrize("msg,pack", [

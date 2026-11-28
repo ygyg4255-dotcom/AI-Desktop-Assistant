@@ -8,8 +8,33 @@ from src.agent.local_router import match_local_intent
 from src.agent.tools import handle_app_close
 
 
-def _proc(name, log):
-    return SimpleNamespace(info={"pid": 1, "name": name}, terminate=lambda: log.append(name))
+@pytest.fixture(autouse=True)
+def _no_grace(monkeypatch):
+    monkeypatch.setattr("src.agent.tools._CLOSE_GRACE", 0)
+    monkeypatch.setattr("src.agent.tools._post_wm_close", lambda pids: None)
+
+
+def _proc(name, log, alive=True):
+    return SimpleNamespace(pid=1, info={"pid": 1, "name": name}, terminate=lambda: log.append(name),
+                           is_running=lambda: alive)
+
+
+def test_graceful_wm_close_before_force_kill(monkeypatch):
+    order, state = [], {"alive": True}
+    p = SimpleNamespace(pid=7, info={"pid": 7, "name": "brave.exe"}, is_running=lambda: state["alive"],
+                        terminate=lambda: order.append("terminate"))
+    monkeypatch.setattr(psutil, "process_iter", lambda attrs=None: [p])
+    monkeypatch.setattr("src.agent.tools._post_wm_close", lambda pids: order.append(("wm_close", set(pids))))
+    monkeypatch.setattr("src.agent.tools._CLOSE_GRACE", 0.2)
+    handle_app_close({"app_name": "brave"})
+    assert order == [("wm_close", {7}), "terminate"]  # stubborn process is killed only after WM_CLOSE
+
+
+def test_no_force_kill_when_process_exits_gracefully(monkeypatch):
+    log = []
+    monkeypatch.setattr(psutil, "process_iter", lambda attrs=None: [_proc("brave.exe", log, alive=False)])
+    r = handle_app_close({"app_name": "brave"})
+    assert r.success and r.output["count"] == 1 and log == []
 
 
 def test_vscode_terminates_code_exe(monkeypatch):
@@ -30,7 +55,7 @@ def test_no_matching_process_is_failure(monkeypatch):
 def test_access_denied_is_failure(monkeypatch):
     def deny():
         raise psutil.AccessDenied()
-    p = SimpleNamespace(info={"pid": 1, "name": "Code.exe"}, terminate=deny)
+    p = SimpleNamespace(pid=1, info={"pid": 1, "name": "Code.exe"}, terminate=deny, is_running=lambda: True)
     monkeypatch.setattr(psutil, "process_iter", lambda attrs=None: [p])
     assert not handle_app_close({"app_name": "vscode"}, approved=True).success
 

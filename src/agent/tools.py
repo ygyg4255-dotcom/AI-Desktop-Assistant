@@ -101,6 +101,7 @@ class Tool:
     handler: Callable[[Dict[str, Any]], ToolResult]
     requires_permission: bool = True
     is_dangerous: bool = False
+    hidden: bool = False  # callable internally, never shown to the model
 
     def run(self, params: Dict[str, Any], approved: bool = False) -> ToolResult:
         """Dispatch to the handler with model input sanitized.
@@ -178,7 +179,7 @@ class ToolRegistry:
 
     def get_tools_schema(self) -> List[Dict[str, Any]]:
         """Get Anthropic-compatible tool schemas for all registered tools."""
-        return [tool.to_api_schema() for tool in self._tools.values()]
+        return [tool.to_api_schema() for tool in self._tools.values() if not tool.hidden]
 
     def get_tools_by_category(self, category: ToolCategory) -> List[Tool]:
         """Get tools by category."""
@@ -750,6 +751,38 @@ def _process_name(app_name: str) -> str:
     return n if n.endswith(".exe") else n + ".exe"
 
 
+_CLOSE_GRACE = 1.5  # seconds to let WM_CLOSE finish before force-terminating
+
+
+def _alive(p) -> bool:
+    try:
+        return p.is_running()
+    except Exception:
+        return False
+
+
+def _post_wm_close(pids) -> None:
+    """Post WM_CLOSE to every visible top-level window owned by ``pids`` (Windows only)."""
+    if not pids or platform.system() != "Windows":
+        return
+    try:
+        import ctypes
+        from ctypes import wintypes
+        user32 = ctypes.windll.user32
+        enum_proc = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+
+        def cb(hwnd, _):
+            pid = wintypes.DWORD()
+            user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+            if pid.value in pids and user32.IsWindowVisible(hwnd):
+                user32.PostMessageW(hwnd, 0x0010, 0, 0)  # WM_CLOSE
+            return True
+
+        user32.EnumWindows(enum_proc(cb), 0)
+    except Exception as e:
+        logger.debug("WM_CLOSE failed: %s", e)
+
+
 def handle_app_close(params: Dict[str, Any], approved: bool = False) -> ToolResult:
     """Handle application close tool (no approval: the user's request is the authorization)."""
     import psutil
@@ -760,19 +793,28 @@ def handle_app_close(params: Dict[str, Any], approved: bool = False) -> ToolResu
 
     closed_count = 0
     try:
+        procs = []
         if process_id:
-            psutil.Process(int(process_id)).terminate()
-            closed_count += 1
+            procs.append(psutil.Process(int(process_id)))
         elif app_name:
             exe = _process_name(app_name)
-            for p in psutil.process_iter(["pid", "name"]):
-                try:
-                    # Exact match: substring "code" would also hit unrelated processes.
-                    if (p.info["name"] or "").lower() == exe:
-                        p.terminate()  # every Code.exe (Electron main + children) matches by name
-                        closed_count += 1
-                except (psutil.NoSuchProcess, psutil.AccessDenied) as e:
-                    logger.debug("app_close skipped pid %s: %s", p.info.get("pid"), e)
+            # Exact match: substring "code" would also hit unrelated processes.
+            procs = [p for p in psutil.process_iter(["pid", "name"]) if (p.info["name"] or "").lower() == exe]
+
+        # Ask windows to close first so apps (Brave "Restore pages?") shut down cleanly.
+        _post_wm_close({p.pid if hasattr(p, "pid") else p.info["pid"] for p in procs})
+        deadline = time.monotonic() + _CLOSE_GRACE
+        while time.monotonic() < deadline and any(_alive(p) for p in procs):
+            time.sleep(0.1)
+        for p in procs:
+            closed_count += 1
+            if not _alive(p):
+                continue
+            try:
+                p.terminate()  # every Code.exe (Electron main + children) matches by name
+            except (psutil.NoSuchProcess, psutil.AccessDenied) as e:
+                logger.debug("app_close skipped pid %s: %s", getattr(p, "pid", "?"), e)
+                closed_count -= 1
 
         if closed_count == 0:
             return ToolResult(success=False, output=None,
@@ -798,40 +840,7 @@ def handle_browser_open(params: Dict[str, Any]) -> ToolResult:
     if not url.startswith("http://") and not url.startswith("https://"):
         url = "https://" + url
 
-    try:
-        if platform.system() == "Windows":
-            try:
-                os.startfile(url)
-            except Exception:
-                import webbrowser
-                webbrowser.open(url)
-        elif platform.system() == "Darwin":
-            subprocess.Popen(
-                ["open", url],
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                close_fds=True
-            )
-        else:
-            subprocess.Popen(
-                ["xdg-open", url],
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                close_fds=True
-            )
-
-        return ToolResult(
-            success=True,
-            output={"message": f"Opened browser: {url}"}
-        )
-    except Exception as e:
-        return ToolResult(
-            success=False,
-            output=None,
-            error=str(e)
-        )
+    return handle_browser_open_url({"url": url})
 
 
 def handle_usage_summary(params: Dict[str, Any]) -> ToolResult:
@@ -2620,11 +2629,8 @@ def handle_gmail_send_email(params: Dict[str, Any], approved: bool = False) -> T
                        lambda s: s.send_email(to, subject, body, params.get("reply_to_message_id") or None))
 
 
-def _browser_call(fn, approval_msg: Optional[str] = None, approved: bool = True) -> ToolResult:
-    """Run a BrowserService call; ``approval_msg`` set means the call is gated."""
-    if approval_msg and not approved:
-        return ToolResult(success=False, output=None, requires_permission=True, is_dangerous=True,
-                          permission_message=approval_msg)
+def _browser_call(fn) -> ToolResult:
+    """Run a BrowserService (Brave CDP) call."""
     from src.services.browser_service import BrowserError, get_browser_service
     try:
         out = fn(get_browser_service())
@@ -2646,19 +2652,25 @@ def handle_browser_read_page(params: Dict[str, Any]) -> ToolResult:
     return _browser_call(lambda s: s.read_page(params.get("query") or None, int(params.get("max_chars") or 4000)))
 
 
-def handle_browser_open_url(params: Dict[str, Any], approved: bool = False) -> ToolResult:
+def handle_browser_open_url(params: Dict[str, Any]) -> ToolResult:
     url, new_tab = str(params.get("url") or ""), params.get("new_tab", True) is not False
-    return _browser_call(lambda s: s.open_url(url, new_tab), f"Open in browser: {url[:200]}", approved)
+    return _browser_call(lambda s: s.open_url(url, new_tab))
 
 
-def handle_browser_switch_tab(params: Dict[str, Any], approved: bool = False) -> ToolResult:
+def handle_browser_switch_tab(params: Dict[str, Any]) -> ToolResult:
     q = str(params.get("query") or "")
-    return _browser_call(lambda s: s.switch_tab(q), f"Switch browser tab: {q[:100]}", approved)
+    return _browser_call(lambda s: s.switch_tab(q))
 
 
-def handle_browser_close_tab(params: Dict[str, Any], approved: bool = False) -> ToolResult:
+def handle_browser_video_control(params: Dict[str, Any]) -> ToolResult:
+    action, value, tab = str(params.get("action") or ""), params.get("value"), params.get("tab_query") or None
+    return _browser_call(lambda s: s.video_control(action, value, tab))
+
+
+def handle_browser_close_tab(params: Dict[str, Any]) -> ToolResult:
     q = str(params.get("query") or "")
-    return _browser_call(lambda s: s.close_tab(q), f"Close browser tab: {q[:100]}", approved)
+    close_all = params.get("close_all") is True
+    return _browser_call(lambda s: s.close_tab(q, close_all))
 
 
 def handle_list_scheduled_tasks(params: Dict[str, Any]) -> ToolResult:
@@ -2961,9 +2973,7 @@ def handle_open_url(params: Dict[str, Any]) -> ToolResult:
     problem = _validate_web_url(url)
     if problem:
         return _tool_error(problem)
-    if not webbrowser.open(url, new=2):
-        return _tool_error("Could not open the default browser.")
-    return ToolResult(success=True, output={"url": url, "message": f"Opened {url} in the default browser."})
+    return handle_browser_open_url({"url": url})
 
 
 def _public_get_text(url: str) -> str:
@@ -4671,7 +4681,8 @@ def create_default_registry() -> ToolRegistry:
             ToolParameter("url", "string", "URL to open")
         ],
         handler=handle_browser_open,
-        requires_permission=False
+        requires_permission=False,
+        hidden=True,  # legacy alias: the model only sees browser_open_url
     ))
 
     registry.register(Tool(
@@ -4925,16 +4936,31 @@ def create_default_registry() -> ToolRegistry:
         requires_permission=False,
     ))
     for name, desc, handler, params in (
-        ("browser_open_url", "Open a URL in Brave (new tab by default; https:// added if missing). Asks approval.",
-         handle_browser_open_url, [ToolParameter("url", "string", "URL to open"),
+        ("browser_open_url", "Open a URL in Brave (new tab by default; https:// added if missing). Empty url or \"newtab\" opens a blank tab.",
+         handle_browser_open_url, [ToolParameter("url", "string", "URL to open; empty for a blank new tab", required=False, default=""),
                                    ToolParameter("new_tab", "boolean", "Open in a new tab (default true)", required=False, default=True)]),
-        ("browser_switch_tab", "Bring a Brave tab to the front. Ambiguous matches return candidates. Asks approval.",
+        ("browser_switch_tab", "Bring a Brave tab to the front. Ambiguous matches return candidates.",
          handle_browser_switch_tab, [ToolParameter("query", "string", q_desc)]),
-        ("browser_close_tab", "Close ONE Brave tab. Ambiguous matches return candidates, nothing is closed. Asks approval.",
-         handle_browser_close_tab, [ToolParameter("query", "string", q_desc)]),
+        ("browser_close_tab", "Close Brave tab(s). One match closes. Several matches with close_all=false return candidates, nothing closed. "
+         "A numeric query (e.g. \"2\") always closes only that single tab, even with close_all=true. "
+         "If the user asked to close ALL matching tabs, or confirms (yes/نعم) a listed set, call once with close_all=true; no more confirmation.",
+         handle_browser_close_tab, [ToolParameter("query", "string", q_desc),
+                                    ToolParameter("close_all", "boolean", "Close every matching tab in one call (default false)", required=False, default=False)]),
     ):
         registry.register(Tool(name=name, description=desc, category=ToolCategory.UTILITY, parameters=params,
-                               handler=handler, requires_permission=True, is_dangerous=True))
+                               handler=handler, requires_permission=False))
+    registry.register(Tool(
+        name="browser_video_control",
+        description="Control YouTube / HTML5 video in Brave. Actions: seek (value = seconds or MM:SS / HH:MM:SS), "
+                    "forward / rewind (value = seconds, default 10), play, pause, toggle, mute, unmute, "
+                    "speed (value 0.25-4), status (read only). Uses the YouTube tab if open.",
+        category=ToolCategory.UTILITY,
+        parameters=[ToolParameter("action", "string", "seek|forward|rewind|play|pause|toggle|mute|unmute|speed|status"),
+                    ToolParameter("value", "string", "Time or amount for seek/forward/rewind/speed", required=False),
+                    ToolParameter("tab_query", "string", "Tab index, title or URL fragment (default: YouTube tab)", required=False)],
+        handler=handle_browser_video_control,
+        requires_permission=False,
+    ))
     registry.register(Tool(
         name="list_scheduled_tasks",
         description="List pending scheduled tasks with ids and remaining time.",
@@ -5080,6 +5106,7 @@ def create_default_registry() -> ToolRegistry:
         parameters=[ToolParameter("url", "string", "Full web address, starting with http:// or https://")],
         handler=handle_open_url,
         requires_permission=False,
+        hidden=True,  # legacy alias: the model only sees browser_open_url
     ))
     registry.register(Tool(
         name="web_search",

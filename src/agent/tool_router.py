@@ -14,7 +14,7 @@ from src.config.settings import get_config_value
 # Fixed order: pack order and tool order inside a pack are part of the cached prefix.
 PACKS: Dict[str, tuple] = {
     "browser": ("browser_list_tabs", "browser_read_page", "browser_open_url",
-                "browser_switch_tab", "browser_close_tab", "browser_open", "open_url"),
+                "browser_switch_tab", "browser_close_tab", "browser_video_control"),
     "email_messaging": ("gmail_list_messages", "gmail_read_message", "gmail_send_email",
                         "whatsapp_send", "whatsapp_read", "send_to_telegram", "telegram_send_file"),
     "office_docs": ("deckcraft_create", "deckcraft_read", "deckcraft_edit",
@@ -28,7 +28,7 @@ PACKS: Dict[str, tuple] = {
 }
 
 _KEYWORDS = {
-    "browser": r"\b(brave|browser|tabs?|url|website|https?|www)\b|متصفح|تبويب|تبويبة|علامة تبويب",
+    "browser": r"\b(brave|browser|tabs?|url|website|https?|www|youtube|videos?)\b|متصفح|تبويب|تبويبة|علامة تبويب|يوتيوب|فيديو|دقيقة|ثانية",
     "email_messaging": r"\b(gmail|e-?mail|inbox|whatsapp|telegram)\b|بريد|إيميل|ايميل|واتس|تيليجرام|تلغرام",
     "office_docs": r"\b(word|excel|powerpoint|pdf|docx|xlsx|pptx|spreadsheet|slides?)\b|ورد|اكسل|إكسل|بوربوينت",
     "gaming_media": r"\b(steam|spotify|youtube|game|games)\b|لعبة|ألعاب|سبوتيفاي|يوتيوب",
@@ -82,7 +82,7 @@ class ToolRouter:
     def schema(self) -> List[Dict[str, Any]]:
         if not dynamic_tools_enabled():
             return self._registry.get_tools_schema()
-        out = [t.to_api_schema() for t in self._registry.list_tools() if t.name not in _PACKED]
+        out = [t.to_api_schema() for t in self._registry.list_tools() if t.name not in _PACKED and not t.hidden]
         for pack in self.active_packs:
             out += [t.to_api_schema() for n in PACKS[pack] if (t := self._registry.get(n))]
         return out
