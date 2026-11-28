@@ -76,12 +76,6 @@ def test_local_time_makes_no_api_call(tmp_path, monkeypatch):
     assert resp.tools_used == []
 
 
-def test_local_gated_tool_still_asks(tmp_path, monkeypatch):
-    ex = _executor(tmp_path, monkeypatch)
-    ex._approval_response = MagicMock(return_value="asked")
-    assert ex._process_sync("close notepad") == "asked"  # app_close handler refuses without approval
-
-
 def test_local_file_list_renders_output(tmp_path, monkeypatch):
     ex = _executor(tmp_path, monkeypatch)
     ex.registry.register(Tool(name="file_list", description="t", category=ToolCategory.FILE_SYSTEM, parameters=[],

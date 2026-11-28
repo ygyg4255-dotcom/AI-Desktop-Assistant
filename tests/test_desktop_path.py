@@ -1,6 +1,8 @@
 """All file tools resolve 'desktop' to the real (OneDrive) Desktop."""
 import pytest
 
+from src.agent.working_state import WorkingState
+
 from src.agent import tools
 
 
@@ -27,6 +29,7 @@ def test_system_prompt_includes_resolved_desktop(od_desktop, monkeypatch):
     monkeypatch.setattr(executor, "get_desktop_dir", lambda: od_desktop)
     ex = executor.AgentExecutor.__new__(executor.AgentExecutor)
     ex._persona_cache, ex._previous_context = "", ""
+    ex._working_state = WorkingState()
     assert f"Primary Desktop path: {od_desktop}" in ex._get_system_prompt()
 
 

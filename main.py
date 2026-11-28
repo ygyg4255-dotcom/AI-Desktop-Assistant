@@ -44,6 +44,7 @@ from src.services.telegram_service import (
     TelegramApprovalBridge,
     TelegramBotApi,
     TelegramRemoteListener,
+    TypingIndicator,
     send_telegram_message_async,
 )
 from src.services.camera_service import get_camera_service
@@ -109,6 +110,11 @@ def make_approval_listener(bridge_ref: list, notify_telegram=send_telegram_messa
             if req.channel == CHANNEL_TELEGRAM and bridge is not None:
                 notify_telegram(text)
     return _listener
+
+
+def telegram_tts_enabled() -> bool:
+    """Speak Telegram-origin replies locally only when ALTRON_TELEGRAM_TTS is truthy (default off)."""
+    return get_config_value("ALTRON_TELEGRAM_TTS", default="false").lower() in ("1", "true", "yes", "on")
 
 
 def _run_guarded(label: str, fn, *args) -> None:
@@ -256,6 +262,7 @@ def main() -> None:
         resume_listening=_resume_mic,
         start_camera=camera_service.start,
         stop_camera=camera_service.stop,
+        revoke_trust=lambda: executor.approvals and executor.approvals.revoke_trust(),
     )
 
     if settings.camera_autostart:
@@ -473,23 +480,29 @@ def main() -> None:
                     logger.info("Telegram command received: %r", clean_cmd)
                     control_reply = control.handle(clean_cmd)
                     if control_reply:
-                        _reply_control(control_reply)
+                        _reply_control(control_reply, speak=telegram_tts_enabled())
                         return
                     update_hud_status(state="Thinking", log_entry=f"Telegram: {clean_cmd}")
+                    typing = TypingIndicator(TelegramBotApi(str(bot_token).strip()), str(chat_id)).start()
 
                     def _on_complete(res):
+                        typing.stop()
                         if res and res.content:
                             logger.info("Altron (Telegram reply): %s", res.content)
                             update_hud_status(state="Idle", log_entry=f"Altron: {res.content}")
                             if not is_duplicate_approval_reply(res, tg_bridge[0]):
                                 send_telegram_message_async(res.content)
-                            if tts_manager.is_enabled and not tts_manager.is_muted:
+                            if telegram_tts_enabled() and tts_manager.is_enabled and not tts_manager.is_muted:
                                 tts_manager.speak(res.content)
+
+                    def _on_error(err):
+                        typing.stop()
+                        logger.error("Telegram command failed: %s", err)
 
                     executor.process(
                         user_message=clean_cmd,
                         on_complete=_on_complete,
-                        on_error=lambda err: logger.error("Telegram command failed: %s", err),
+                        on_error=_on_error,
                         origin=CHANNEL_TELEGRAM,
                     )
 

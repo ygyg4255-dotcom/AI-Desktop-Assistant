@@ -19,6 +19,7 @@ ANTHROPIC_VERSION = "2023-06-01"
 # Single source of truth for the default model IDs.
 from src.config.settings import DEFAULT_MODEL, DEFAULT_FAST_MODEL  # noqa: E402
 from src.config.log import get_logger  # noqa: E402
+from src.services import usage_tracker  # noqa: E402
 
 logger = get_logger(__name__)
 
@@ -78,7 +79,7 @@ def _mark_last_message(messages: List[Any]) -> List[Any]:
     return [*messages[:-1], {**last, "content": new_content}]
 
 
-def log_usage(usage: Any) -> None:
+def log_usage(usage: Any, model: str = "") -> None:
     """Log Anthropic token usage (incl. prompt-cache fields) on one INFO line."""
     u = usage if isinstance(usage, dict) else {}
 
@@ -93,6 +94,8 @@ def log_usage(usage: Any) -> None:
         _n("input_tokens"), _n("cache_creation_input_tokens"),
         _n("cache_read_input_tokens"), _n("output_tokens"),
     )
+    if u:
+        usage_tracker.record(model, u)
 
 
 class ConnectionStatus(Enum):
@@ -351,7 +354,7 @@ class AIClient:
                     parsed = parse_sse_stream(resp, _counted, lambda: self._cancel_flag)
                 self._status = ConnectionStatus.CONNECTED
                 self._last_error = None
-                log_usage(parsed.get("usage"))
+                log_usage(parsed.get("usage"), self._model)
                 return parsed
             except urllib.error.HTTPError as e:
                 self._status = ConnectionStatus.ERROR
@@ -404,7 +407,7 @@ class AIClient:
                     parsed = json.loads(resp.read().decode("utf-8"))
                     self._status = ConnectionStatus.CONNECTED
                     self._last_error = None
-                    log_usage(parsed.get("usage") if isinstance(parsed, dict) else None)
+                    log_usage(parsed.get("usage") if isinstance(parsed, dict) else None, self._model)
                     return parsed
 
             except urllib.error.HTTPError as e:

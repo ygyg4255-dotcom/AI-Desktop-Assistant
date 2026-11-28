@@ -271,6 +271,28 @@ class TelegramBotApi:
             return {"ok": False}
 
 
+class TypingIndicator:
+    """Keeps Telegram's "typing…" status alive (it expires after ~5s) until stop(); capped so it can't leak."""
+
+    def __init__(self, api, chat_id: str, interval: float = 4.0, max_seconds: float = 180.0):
+        self._api, self._chat_id = api, chat_id
+        self._interval, self._max = interval, max_seconds
+        self._stop = threading.Event()
+
+    def start(self) -> "TypingIndicator":
+        threading.Thread(target=self._loop, name="AltronTelegramTyping", daemon=True).start()
+        return self
+
+    def stop(self) -> None:
+        self._stop.set()
+
+    def _loop(self) -> None:
+        deadline = time.monotonic() + self._max
+        while not self._stop.is_set() and time.monotonic() < deadline:
+            self._api.call("sendChatAction", {"chat_id": self._chat_id, "action": "typing"})
+            self._stop.wait(self._interval)
+
+
 CANCEL_WORDS = ("cancel", "إلغاء", "الغاء")
 
 _STATUS_LABELS = {

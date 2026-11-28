@@ -66,6 +66,22 @@ LOCKED = "locked"  # too many wrong PINs: request denied
 MAX_PIN_ATTEMPTS = 3
 
 
+# Session trust: after a PIN-verified approval of one of these, the same kind of interactive,
+# medium-risk calls skip the card for ALTRON_SESSION_TRUST_SECONDS. Allow-list only: everything
+# else (file_delete/move/write, code_edit, terminal_execute, gmail_send_email, power_control,
+# app_close, window_close, browser_close_tab, ...) always asks.
+TRUSTED_TOOLS = frozenset({"gui_hotkey", "gui_type", "app_open", "browser_open_url", "browser_switch_tab"})
+DEFAULT_TRUST_SECONDS = 180
+
+
+def _trust_seconds() -> float:
+    from src.config.settings import get_config_value
+    try:
+        return max(0.0, float(get_config_value("ALTRON_SESSION_TRUST_SECONDS", default=str(DEFAULT_TRUST_SECONDS))))
+    except ValueError:
+        return float(DEFAULT_TRUST_SECONDS)
+
+
 def args_hash(tool_name: str, args: Dict[str, Any]) -> str:
     """Canonical SHA-256 of tool name + args (key order does not matter)."""
     canonical = json.dumps(
@@ -196,6 +212,7 @@ class ApprovalManager:
         # Read live on every call so setting/disabling the PIN needs no restart.
         self._pin_hash = pin_hash or (lambda: pin_mod.configured_hash())
         self._lock = threading.RLock()
+        self._trust_until = 0.0
         self._requests: Dict[str, ApprovalRequest] = {}
         self._listeners: List[Listener] = []
         self._sweeper: Optional[threading.Thread] = None
@@ -210,7 +227,20 @@ class ApprovalManager:
         denied or expired) or "executed" (approved tool finished; see request.result)."""
         self._listeners.append(listener)
 
+    def grant_trust(self) -> None:
+        secs = _trust_seconds()
+        self._trust_until = self._clock() + secs if secs > 0 else 0.0
+
+    def revoke_trust(self) -> None:
+        self._trust_until = 0.0
+
+    def trust_active(self, tool_name: str) -> bool:
+        """True while a PIN-granted trust window is open AND the tool is in the medium-risk allow-list."""
+        return tool_name in TRUSTED_TOOLS and self.pin_required and self._clock() < self._trust_until
+
     def _notify(self, event: str, req: ApprovalRequest) -> None:
+        if event == "resolved" and req.status in (DENIED, EXPIRED):
+            self.revoke_trust()  # any deny / cancel / expiry / lockout closes the window
         for listener in list(self._listeners):
             try:
                 listener(event, req)
@@ -337,9 +367,12 @@ class ApprovalManager:
                 used = req.meta["pin_attempts"] = req.meta.get("pin_attempts", 0) + 1
                 left = MAX_PIN_ATTEMPTS - used
                 if left > 0:
+                    self.revoke_trust()
                     return ResolveResult(WRONG_PIN, req, left)
                 req.status, req.resolved_via = DENIED, via
                 outcome = LOCKED
+        if outcome == APPROVED and req.tool_name in TRUSTED_TOOLS:
+            self.grant_trust()
         self._notify("resolved", req)
         if outcome == APPROVED:
             self._dispatch(lambda: self._run(req))

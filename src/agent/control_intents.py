@@ -18,6 +18,7 @@ UNMUTE = "unmute"
 CLEAR_MEMORY = "clear_memory"
 CAMERA_START = "camera_start"
 CAMERA_STOP = "camera_stop"
+REVOKE_TRUST = "revoke_trust"
 
 _LEADING_FILLER = {"hey", "ok", "okay", "please", "يا", "من", "فضلك"}
 _TRAILING_FILLER = {"please", "now", "فضلك"}
@@ -44,6 +45,10 @@ _PHRASES = {
         "forget previous session", "forget the previous session", "forget last session",
         "forget the last session", "forget everything", "forget our previous conversation",
         "امسح الذاكرة", "انس الجلسة السابقة",
+    },
+    REVOKE_TRUST: {
+        "lock", "lock altron", "revoke trust", "revoke approval", "revoke approvals", "end trust",
+        "قفل", "اقفل", "الغ الثقة", "الغاء الثقة", "الغ الموافقات",
     },
     CAMERA_START: {
         "start camera", "start the camera", "start webcam", "start the webcam",
@@ -114,7 +119,9 @@ class ControlHandler:
     def __init__(self, clear_memory: Callable[[], None], request_shutdown: Callable[[], None],
                  pause_listening: Callable[[], None], resume_listening: Callable[[], None],
                  start_camera: Optional[Callable[[], bool]] = None,
-                 stop_camera: Optional[Callable[[], None]] = None):
+                 stop_camera: Optional[Callable[[], None]] = None,
+                 revoke_trust: Optional[Callable[[], None]] = None):
+        self._revoke_trust = revoke_trust
         self._start_camera = start_camera
         self._stop_camera = stop_camera
         self._clear_memory = clear_memory
@@ -142,6 +149,10 @@ class ControlHandler:
             self.muted = False
             self._resume()
             return "عدت للاستماع." if ar else "Listening again."
+        if action == REVOKE_TRUST:
+            if self._revoke_trust is not None:
+                self._revoke_trust()
+            return "تم قفل الموافقات؛ سأطلب الرمز من جديد." if ar else "Locked. Approvals will ask for your PIN again."
         if action == CAMERA_START:
             if self._start_camera is not None and not self._start_camera():
                 return "تعذر تشغيل الكاميرا." if ar else "I couldn't start the camera. Check that it's connected and not in use."

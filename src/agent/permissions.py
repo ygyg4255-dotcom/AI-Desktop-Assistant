@@ -30,8 +30,13 @@ class PermissionGate:
         "file_search",
         "file_list",
         "process_list",
+        "usage_summary",
+        "load_tool_pack",
         "system_info",
         "browser_open",
+        # Closing apps/windows: the owner asked for no approval/PIN (handlers verify the result).
+        "app_close",
+        "window_close",
         "window_control",
         "web_fetch",  # SSRF rules are enforced unconditionally inside the handler
         "system_control",
@@ -93,6 +98,9 @@ class PermissionGate:
         # Read-only Gmail; message bodies are wrapped as untrusted content by gmail_service.
         "gmail_list_messages",
         "gmail_read_message",
+        # Read-only Brave (CDP); page text is wrapped as untrusted content.
+        "browser_list_tabs",
+        "browser_read_page",
     }
 
     # Tools that auto-run only for low-risk inputs; the handler decides per call
@@ -116,13 +124,16 @@ class PermissionGate:
         "file_move",
         "file_copy",
         "terminal_execute",
-        "app_close",
         "code_edit",
         # GUI automation that types: every call is approved individually (see GUI_TOOLS)
         "gui_type",
         "gui_hotkey",
         # Gmail send: every call is approved individually (+PIN).
         "gmail_send_email",
+        # Brave tab control: navigation / focus / closing user tabs.
+        "browser_open_url",
+        "browser_switch_tab",
+        "browser_close_tab",
     }
 
     # Keyboard automation. Always DANGEROUS, and a blanket "allow" (session or
@@ -183,6 +194,10 @@ class PermissionGate:
             "file_move": f"Move/rename: {tool_input.get('source', 'unknown')} -> {tool_input.get('destination', 'unknown')}",
             "terminal_execute": f"Run command: {tool_input.get('command', 'unknown')[:100]}",
             "app_close": f"Close application: {tool_input.get('app_name', 'unknown')}",
+            "window_close": f"Close window: {tool_input.get('title') or tool_input.get('hwnd', 'unknown')}",
+            "browser_open_url": f"Open in browser: {str(tool_input.get('url', 'unknown'))[:200]}",
+            "browser_switch_tab": f"Switch browser tab: {tool_input.get('query', 'unknown')}",
+            "browser_close_tab": f"Close browser tab: {tool_input.get('query', 'unknown')}",
             "code_edit": f"Edit file: {tool_input.get('path', 'unknown')} (targeted replace)",
             "gui_type": f"Type text: {str(tool_input.get('text', ''))[:60]!r}",
             "gui_hotkey": f"Press hotkey: {tool_input.get('keys', 'unknown')}",

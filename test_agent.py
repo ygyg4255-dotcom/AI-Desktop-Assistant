@@ -169,7 +169,7 @@ def test_permission_gate():
     assert gate.is_dangerous("file_write") == True
     assert gate.is_dangerous("file_delete") == True
     assert gate.is_dangerous("terminal_execute") == True
-    assert gate.is_dangerous("app_close") == True
+    assert gate.is_dangerous("app_close") == False
     print("    [OK] Dangerous tools identified correctly")
 
     print("\n[3.3] Testing permission requirements...")

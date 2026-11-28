@@ -14,6 +14,8 @@ from enum import Enum
 from concurrent.futures import Future
 
 from src.agent.tools import ToolRegistry, ToolResult, create_default_registry, strip_internal_keys
+from src.agent.working_state import WorkingState
+from src.agent.tool_router import PARALLEL_SAFE, ToolRouter
 from src.agent.permissions import PermissionGate, PermissionLevel
 from src.agent.approvals import (
     ApprovalManager,
@@ -315,6 +317,8 @@ def clean_tool_confirmation(
     elif last_tool_name == "move_application_window":
         title = out_dict.get("window_title", "")
         pos = out_dict.get("position", "")
+        if pos == "swap":
+            return out_dict.get("message", "✅ Swapped the two windows.")
         pos_ar_map = {
             "right": "يمين الشاشة",
             "left": "يسار الشاشة",
@@ -621,7 +625,7 @@ WEBCAM VISION:
 - You CAN see through the user's webcam: `capture_camera` takes one photo and attaches it as an image (instant when the background camera is on). When the user asks you to look through the camera, see them, or identify/describe something they are holding or showing, ALWAYS call it, then answer ONLY the question asked (e.g. "what am I holding?" -> just name the item; no background, room or location unless asked). For "what did I move?" / "what changed?" call it with `compare_seconds_ago` (e.g. 5) to get an earlier frame and the current one, and compare them. `camera_start` / `camera_stop` turn the background camera on/off when asked. Never claim you have no camera access, and only look when the user asks: camera frames are never sent to you otherwise.
 
 GUI AUTOMATION:
-- You CAN operate the mouse and keyboard. `gui_click` and `gui_scroll` run immediately when the user asks. `gui_type` and `gui_hotkey` are shown to the user for approval first: call them directly (never ask permission in text; the gate sends the approval card). To open/toggle the VS Code terminal send `ctrl+j`, never ctrl+backtick (fails on non-US layouts). If declined or pending, say so and do NOT claim it happened.
+- You CAN operate the mouse and keyboard. `gui_click` and `gui_scroll` run immediately when the user asks. `gui_type` and `gui_hotkey` are shown to the user for approval first: call them directly (never ask permission in text; the gate sends the approval card). To open/toggle the VS Code terminal send `ctrl+j`, never ctrl+backtick (fails on non-US layouts). After focusing a window, call `gui_hotkey` in the same turn; never stop to ask. To swap/reverse a split-screen layout, reposition BOTH windows (left<->right) in the same turn. If declined or pending, say so and do NOT claim it happened.
 - Look first: capture the screen, then pass `gui_click` the x/y pixel position on the screenshot you were shown. Do NOT scale coordinates yourself: the tool maps them to the real screen using the capture's `screenshot_size` and `screen_size`. Act, then capture again to verify the result.
 - When the user explicitly asks to click a visible UI element (e.g. "click System"), capture the screen if you do not have a current view, then call `gui_click` in the same turn. Do NOT ask "Should I click it?" for click or scroll requests.
 - NEVER type into password, PIN, passcode or other credential fields, never type secrets, API keys or tokens, and never handle credentials: if a sign-in or password prompt appears, stop and ask the user to enter it themselves.
@@ -683,10 +687,12 @@ Available tools are provided in the tool definitions. Use them responsibly."""
         # of an in-process blocking prompt (required for HUD / voice / Telegram).
         self._approvals: Optional[ApprovalManager] = None
         self._origin: str = CHANNEL_LOCAL
+        self._working_state = WorkingState()
         if approvals is not None:
             self.attach_approvals(approvals)
         self._database = database
         self._registry = registry or create_default_registry()
+        self._tool_router = ToolRouter(self._registry)
         self._gate = gate or PermissionGate()
         self._memory = memory or ConversationMemory()
         # Soft cross-session memory: snapshot the previous session as reference text,
@@ -744,9 +750,19 @@ Available tools are provided in the tool definitions. Use them responsibly."""
         # Injected here (not in the persona file) to stay under the 6900-char persona cap.
         prompt += (f"{nl}Primary Desktop path: {get_desktop_dir()}. 'desktop' / 'سطح المكتب' always means this "
                    "folder (also in terminal_execute), never C:\\Users\\<user>\\Desktop.")
+        prompt += f"{nl}{self._approval_summary()}"
         if self._previous_context:
             prompt = f"{prompt}{nl}{self._previous_context}"
         return prompt
+
+    def _approval_summary(self) -> str:
+        """Live gated-tool list from permissions.py, so the model never quotes a stale one."""
+        g = PermissionGate
+        ask = ", ".join(sorted(g.DANGEROUS_TOOLS))
+        cond = ", ".join(sorted(g.CONDITIONAL_TOOLS))
+        return (f"Approval-gated tools (every call needs approval, plus the PIN when one is set): {ask}. "
+                f"Sometimes gated (only risky arguments): {cond}. Everything else, e.g. gmail_list_messages/gmail_read_message, "
+                "process_list, gui_click, runs without approval. Use only this list when asked what needs a PIN.")
 
     def _append_tool_feedback(self, tool_name: str, result_repr: str, result: ToolResult) -> None:
         """Hand a tool result back to the model; a screenshot goes in as a multimodal image block.
@@ -807,7 +823,7 @@ Available tools are provided in the tool definitions. Use them responsibly."""
     @property
     def tools_schema(self) -> List[Dict[str, Any]]:
         """Get the tools schema for API calls."""
-        return self._registry.get_tools_schema()
+        return self._tool_router.schema()
 
     @property
     def conversation_id(self) -> Optional[int]:
@@ -913,6 +929,10 @@ Available tools are provided in the tool definitions. Use them responsibly."""
             detail = verify_result(tool_name, tool_input, result)
             if detail:
                 result.success, result.error = False, detail
+        if result.success:
+            self._working_state.update(tool_name, tool_input, result.output)
+            if tool_name == "load_tool_pack":
+                self._tool_router.activate(str(tool_input.get("pack_name") or "").strip())
         if not result.success and not result.requires_permission:
             self._tool_failures[tool_name] = self._tool_failures.get(tool_name, 0) + 1
         return result
@@ -1062,6 +1082,19 @@ Available tools are provided in the tool definitions. Use them responsibly."""
             error="awaiting approval",
         )
 
+    def _run_safe_batch(self, tool_uses: List[Dict[str, Any]]) -> Optional[List[ToolResult]]:
+        """Run a multi-tool turn concurrently when every tool is read-only SAFE; else None (sequential path)."""
+        if len(tool_uses) < 2 or not all(
+            u["name"] in PARALLEL_SAFE and self._registry.get(u["name"]) and self._gate.is_safe(u["name"])
+            and self._gate.get_permission_level(u["name"]) != PermissionLevel.DENY
+            for u in tool_uses
+        ):
+            return None
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            futures = [pool.submit(self._execute_tool_with_permission, u["name"], u["input"]) for u in tool_uses]
+            return [f.result() for f in futures]  # submit order == original order
+
     def _execute_tool_with_permission(
         self,
         tool_name: str,
@@ -1102,6 +1135,9 @@ Available tools are provided in the tool definitions. Use them responsibly."""
         # Tool requires permission
         if tool.requires_permission:
             result = self._run_tool(tool_name, tool, tool_input)
+
+            if result.requires_permission and self._approvals is not None and self._approvals.trust_active(tool_name):
+                return self._run_tool(tool_name, tool, tool_input, True)  # PIN session-trust window
 
             if result.requires_permission:
                 self._state = AgentState.AWAITING_PERMISSION
@@ -1232,6 +1268,7 @@ Available tools are provided in the tool definitions. Use them responsibly."""
         # Automatically store new user message in short-term conversation memory and update HUD
         if resume_prompt is None:
             self._remember("user", user_message)
+            self._tool_router.observe(user_message)
         update_hud_status(state="Thinking")
 
         # Include last 10 messages from memory.json as conversation context
@@ -1252,6 +1289,9 @@ Available tools are provided in the tool definitions. Use them responsibly."""
 
         turn_idx = len(self._messages) - 1
         mem_block = ""
+        # Volatile state rides on this turn's user message (a copy), never in the cached system prompt.
+        ctx_block = self._working_state.render()
+        ctx_block = ctx_block + "\n\n" if ctx_block else ""
         if resume_prompt is None:
             try:
                 mem_block = memory_store.format_block(memory_store.get_store().search(user_message))
@@ -1348,6 +1388,9 @@ Available tools are provided in the tool definitions. Use them responsibly."""
             # Memory goes into this turn's user message only (a copy): the system prompt and cached history stay byte-identical.
             if mem_block and iteration == 1 and 0 <= turn_idx < len(messages) and isinstance(messages[turn_idx].get("content"), str):
                 messages[turn_idx] = {**messages[turn_idx], "content": mem_block + messages[turn_idx]["content"]}
+
+            if ctx_block and 0 <= turn_idx < len(messages) and isinstance(messages[turn_idx].get("content"), str):
+                messages[turn_idx] = {**messages[turn_idx], "content": ctx_block + messages[turn_idx]["content"]}
 
             payload = {
                 "model": self._ai_client._model,
@@ -1513,6 +1556,7 @@ Available tools are provided in the tool definitions. Use them responsibly."""
 
                 break
 
+            parallel = self._run_safe_batch(tool_uses)
             for tool_idx, tool_use in enumerate(tool_uses):
                 tool_name = tool_use["name"]
                 tool_input = tool_use["input"]
@@ -1529,7 +1573,7 @@ Available tools are provided in the tool definitions. Use them responsibly."""
                 if on_step:
                     on_step(tool_step)
 
-                result = self._execute_tool_with_permission(
+                result = parallel[tool_idx] if parallel else self._execute_tool_with_permission(
                     tool_name,
                     tool_input,
                     permission_callback=on_permission
@@ -1751,6 +1795,7 @@ Available tools are provided in the tool definitions. Use them responsibly."""
         self._memory.clear()
         self._history.clear()
         self._previous_context = ""
+        self._tool_router.reset()
         try:
             memory_store.get_store().clear()  # "forget everything" also drops long-term memories
         except Exception:
